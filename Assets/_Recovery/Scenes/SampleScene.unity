@@ -577,11 +577,20 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::MapGenerator
   mapWidth: 100
   mapHeight: 100
-  noiseScale: 0.3
+  noiseScale: 5.33
   octaves: 4
-  persistance: 0.5
+  persistance: 0.86
   lacunarity: 2
+  seed: 0
+  offset: {x: 0, y: 0}
   autoUpdate: 1
+  regions:
+  - name: Water
+    height: 0.4
+    colour: {r: 0.1745283, g: 0.30151528, b: 1, a: 0}
+  - name: Land
+    height: 1
+    colour: {r: 0.083424926, g: 0.7924528, b: 0.056069765, a: 0}
 --- !u!4 &1992321898
 Transform:
   m_ObjectHideFlags: 0
