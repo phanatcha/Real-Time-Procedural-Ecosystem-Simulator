@@ -575,22 +575,41 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 1c97a0e29499443fcab4a45e9ef6f333, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::MapGenerator
+  drawMode: 1
   mapWidth: 100
   mapHeight: 100
-  noiseScale: 5.33
+  noiseScale: 50
   octaves: 4
-  persistance: 0.86
-  lacunarity: 2
-  seed: 0
+  persistance: 0.45
+  lacunarity: 2.2
+  seed: 3
   offset: {x: 0, y: 0}
   autoUpdate: 1
   regions:
-  - name: Water
-    height: 0.4
-    colour: {r: 0.1745283, g: 0.30151528, b: 1, a: 0}
-  - name: Land
+  - name: Water Deep
+    height: 0.35
+    colour: {r: 0.105882354, g: 0.22745098, b: 0.36078432, a: 0}
+  - name: Water Shallow
+    height: 0.42
+    colour: {r: 0.18039216, g: 0.43529412, b: 0.5568628, a: 0}
+  - name: Rocky Shore
+    height: 0.45
+    colour: {r: 0.47843137, g: 0.44705883, b: 0.4, a: 0}
+  - name: Forest Floor
+    height: 0.75
+    colour: {r: 0.18431373, g: 0.2901961, b: 0.18039216, a: 0}
+  - name: Highland Taiga
+    height: 0.85
+    colour: {r: 0.36078432, g: 0.43137255, b: 0.23529412, a: 0}
+  - name: Tundra Rock
+    height: 0.92
+    colour: {r: 0.54509807, g: 0.5137255, b: 0.47058824, a: 0}
+  - name: Mountain
+    height: 0.97
+    colour: {r: 0.3529412, g: 0.39215687, b: 0.44705883, a: 1}
+  - name: Snow
     height: 1
-    colour: {r: 0.083424926, g: 0.7924528, b: 0.056069765, a: 0}
+    colour: {r: 0.9411765, g: 0.95686275, b: 0.9607843, a: 0}
 --- !u!4 &1992321898
 Transform:
   m_ObjectHideFlags: 0

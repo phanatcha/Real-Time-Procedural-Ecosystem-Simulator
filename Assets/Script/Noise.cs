@@ -16,6 +16,8 @@ public static class Noise
             octaveOffsets[i] = new Vector2(offsetX, offsetY);
         }
 
+        long noiseSeed = seed;
+
         if (scale <= 0)
         {
             scale = 0.0001f;
@@ -39,8 +41,8 @@ public static class Noise
                     float sampleX = (x-halfWidth) / scale * frequency + octaveOffsets[i].x;
                     float sampleY = (y-halfHeight) / scale * frequency + octaveOffsets[i].y;
 
-                    float perlinValue = Mathf.PerlinNoise(sampleX, sampleY) * 2 - 1;
-                    noiseHeight += perlinValue * amplitude;
+                    float noiseValue = OpenSimplex2.Noise2(noiseSeed, sampleX, sampleY);
+                    noiseHeight += noiseValue * amplitude;
 
                     amplitude *= persistance;
                     frequency *= lacunarity;
