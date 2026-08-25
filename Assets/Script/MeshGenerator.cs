@@ -68,10 +68,6 @@ public static class MeshGenerator
             }
         }
 
-        // Walk the rendered mesh's outer perimeter (the ring just inside the
-        // invisible normal-only border) in order, so a skirt wall can be
-        // stitched around it to hide gaps against neighbouring chunks at a
-        // different LOD.
         int minCoord = meshSimplificationIncrement;
         int maxCoord = borderedSize - 1 - meshSimplificationIncrement;
         List<int> edgeIndices = new List<int>();
