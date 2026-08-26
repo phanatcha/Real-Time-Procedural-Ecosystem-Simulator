@@ -87,4 +87,34 @@ public static class Noise
         return noiseMap;
     }
 
+    // Convenience overload used by HeightMapGenerator - pulls the noise
+    // parameters from a NoiseSettings asset and treats sampleCentre as the
+    // chunk's absolute position, instead of the caller unpacking every field.
+    public static float[,] GenerateNoiseMap(int mapWidth, int mapHeight, NoiseSettings settings, Vector2 sampleCentre)
+    {
+        return GenerateNoiseMap(mapWidth, mapHeight, settings.seed, settings.scale, settings.octaves, settings.persistance, settings.lacunarity, sampleCentre + settings.offset, settings.normalizeMode);
+    }
+
+}
+
+[System.Serializable]
+public class NoiseSettings {
+	public Noise.NormalizeMode normalizeMode;
+
+	public float scale = 90;
+
+	public int octaves = 4;
+	[Range(0,1)]
+	public float persistance =.45f;
+	public float lacunarity = 2.2f;
+
+	public int seed;
+	public Vector2 offset;
+
+	public void ValidateValues() {
+		scale = Mathf.Max (scale, 0.01f);
+		octaves = Mathf.Max (octaves, 1);
+		lacunarity = Mathf.Max (lacunarity, 1);
+		persistance = Mathf.Clamp01 (persistance);
+	}
 }
