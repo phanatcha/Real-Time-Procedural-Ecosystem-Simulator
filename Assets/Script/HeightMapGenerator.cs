@@ -7,6 +7,11 @@ public static class HeightMapGenerator {
 	public static HeightMap GenerateHeightMap(int width, int height, HeightMapSettings settings, Vector2 sampleCentre) {
 		float[,] values = Noise.GenerateNoiseMap (width, height, settings.noiseSettings, sampleCentre);
 
+		bool useRidges = settings.ridgeSettings != null && settings.ridgeSettings.strength > 0f;
+		float[,] ridgeValues = useRidges
+			? Noise.GenerateRidgedNoiseMap (width, height, settings.noiseSettings, settings.ridgeSettings, sampleCentre)
+			: null;
+
 		AnimationCurve heightCurve_threadsafe = new AnimationCurve (settings.heightCurve.keys);
 
 		float minValue = float.MaxValue;
@@ -16,14 +21,34 @@ public static class HeightMapGenerator {
 
 		for (int i = 0; i < width; i++) {
 			for (int j = 0; j < height; j++) {
-				if (settings.useFalloff) {
-					float worldX = sampleCentre.x + (i - halfSize);
-					float worldY = sampleCentre.y + (j - halfSize);
-					float falloffValue = FalloffGenerator.Evaluate(worldX, worldY, settings.worldRadius);
-					values[i, j] = Mathf.Clamp01(values[i, j] - falloffValue);
+				float worldX = sampleCentre.x + (i - halfSize);
+				float worldY = sampleCentre.y - (j - halfSize);
+
+				float falloffValue = settings.useFalloff
+					? FalloffGenerator.Evaluate(worldX, worldY, settings.worldRadius)
+					: 0f;
+
+				float noiseValue = values[i, j];
+
+				if (useRidges) {
+					float edgeCloseness = settings.useFalloff
+						? falloffValue
+						: FalloffGenerator.Evaluate(worldX, worldY, settings.worldRadius);
+
+					RidgeSettings r = settings.ridgeSettings;
+					float jitter = OpenSimplex2.Noise2(r.seed + 909, worldX / r.bandJitterScale, worldY / r.bandJitterScale) * r.bandJitterStrength;
+					float bandDistance = Mathf.Abs(edgeCloseness - (r.bandCenter + jitter));
+					float band = Mathf.Clamp01(1f - bandDistance / r.bandWidth);
+					band = band * band * (3f - 2f * band);
+
+					noiseValue = Mathf.Clamp01(noiseValue + ridgeValues[i, j] * band * r.strength);
 				}
 
-				values [i, j] = heightCurve_threadsafe.Evaluate (values [i, j]) * settings.heightMultiplier;
+				if (settings.useFalloff) {
+					noiseValue = Mathf.Clamp01(noiseValue - falloffValue);
+				}
+
+				values [i, j] = heightCurve_threadsafe.Evaluate (noiseValue) * settings.heightMultiplier;
 
 				if (values [i, j] > maxValue) {
 					maxValue = values [i, j];

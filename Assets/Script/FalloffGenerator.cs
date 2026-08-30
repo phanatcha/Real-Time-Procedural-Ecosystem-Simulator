@@ -2,8 +2,7 @@ using UnityEngine;
 
 public static class FalloffGenerator
 {
-    // Local-grid version, used only for the editor preview texture (DrawMode.FalloffMap) -
-    // a self-contained square just for visualizing the curve shape.
+
     public static float[,] GenerateFalloffMap(int size)
     {
         float[,] map = new float[size, size];
@@ -23,10 +22,6 @@ public static class FalloffGenerator
         return map;
     }
 
-    // Evaluates the falloff at an absolute world position, not a position
-    // local to one chunk - so every chunk agrees on where the island's
-    // actual center and coastline are, instead of each one treating itself
-    // as the center.
     public static float Evaluate(float worldX, float worldY, float worldRadius)
     {
         float x = worldX / worldRadius;

@@ -22,9 +22,16 @@ public class ThreadedDataRequester : MonoBehaviour {
 	}
 
 	void DataThread(Func<object> generateData, Action<object> callback) {
-		object data = generateData ();
-		lock (dataQueue) {
-			dataQueue.Enqueue (new ThreadInfo (callback, data));
+		try {
+			object data = generateData ();
+			lock (dataQueue) {
+				dataQueue.Enqueue (new ThreadInfo (callback, data));
+			}
+		} catch (Exception e) {
+			// Without this, an exception here silently kills the thread: the chunk's
+			// callback never fires, so it never gets a mesh - a permanent invisible
+			// hole with no error shown anywhere.
+			Debug.LogError ("ThreadedDataRequester: data generation failed, chunk will be missing: " + e);
 		}
 	}
 		

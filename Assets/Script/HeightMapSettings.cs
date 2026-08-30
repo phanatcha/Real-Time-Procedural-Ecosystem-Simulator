@@ -4,6 +4,7 @@ using UnityEngine;
 public class HeightMapSettings : UpdatableData
 {
     public NoiseSettings noiseSettings;
+    public RidgeSettings ridgeSettings = new RidgeSettings();
 
     public bool useFalloff;
     [Tooltip("Distance from world origin (0,0) where the island fully becomes ocean.")]
@@ -34,6 +35,10 @@ public class HeightMapSettings : UpdatableData
         if (noiseSettings != null)
         {
             noiseSettings.ValidateValues();
+        }
+        if (ridgeSettings != null)
+        {
+            ridgeSettings.ValidateValues();
         }
         base.OnValidate();
     }

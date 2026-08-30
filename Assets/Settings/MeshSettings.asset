@@ -14,6 +14,6 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::MeshSettings
   autoUpdate: 1
   meshScale: 2.5
-  useFlatShading: 1
+  useFlatShading: 0
   chunkSizeIndex: 0
   flatshadedChunkSizeIndex: 0
