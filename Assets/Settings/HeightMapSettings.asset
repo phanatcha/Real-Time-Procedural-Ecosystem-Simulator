@@ -34,6 +34,22 @@ MonoBehaviour:
     bandWidth: 0.28
     bandJitterScale: 900
     bandJitterStrength: 0.3
+  riverSettings:
+    enabled: 1
+    seed: 0
+    scale: 250
+    width: 0.025
+    minHeightPercent: 0.15
+    maxHeightPercent: 0.65
+    bedLevel: 0.12
+  lakeSettings:
+    enabled: 1
+    seed: 0
+    scale: 400
+    threshold: 0.62
+    minHeightPercent: 0.1
+    maxHeightPercent: 0.4
+    bedLevel: 0.08
   useFalloff: 1
   worldRadius: 1000
   heightMultiplier: 120
@@ -95,8 +111,17 @@ MonoBehaviour:
       inWeight: 0.33333334
       outWeight: 0.33333334
     - serializedVersion: 3
-      time: 1
-      value: 1
+      time: 0.9282622
+      value: 0.9234839
+      inSlope: 4.027449
+      outSlope: 4.027449
+      tangentMode: 0
+      weightedMode: 0
+      inWeight: 0.33333334
+      outWeight: 0.32252043
+    - serializedVersion: 3
+      time: 1.0088286
+      value: 1.0809524
       inSlope: 3.125
       outSlope: 3.125
       tangentMode: 0

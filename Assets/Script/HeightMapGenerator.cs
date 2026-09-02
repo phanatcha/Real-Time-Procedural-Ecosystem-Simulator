@@ -12,6 +12,9 @@ public static class HeightMapGenerator {
 			? Noise.GenerateRidgedNoiseMap (width, height, settings.noiseSettings, settings.ridgeSettings, sampleCentre)
 			: null;
 
+		bool useRivers = settings.riverSettings != null && settings.riverSettings.enabled;
+		bool useLakes = settings.lakeSettings != null && settings.lakeSettings.enabled;
+
 		AnimationCurve heightCurve_threadsafe = new AnimationCurve (settings.heightCurve.keys);
 
 		float minValue = float.MaxValue;
@@ -42,6 +45,30 @@ public static class HeightMapGenerator {
 					band = band * band * (3f - 2f * band);
 
 					noiseValue = Mathf.Clamp01(noiseValue + ridgeValues[i, j] * band * r.strength);
+				}
+
+				if (useRivers) {
+					RiverSettings rv = settings.riverSettings;
+					float riverNoise = OpenSimplex2.Noise2(rv.seed + 1717, worldX / rv.scale, worldY / rv.scale);
+					float riverMask = 1f - Mathf.Clamp01(Mathf.Abs(riverNoise) / rv.width);
+					riverMask = riverMask * riverMask * (3f - 2f * riverMask);
+
+					float presence = Mathf.InverseLerp(rv.minHeightPercent, rv.minHeightPercent + 0.05f, noiseValue)
+									* (1f - Mathf.InverseLerp(rv.maxHeightPercent - 0.05f, rv.maxHeightPercent, noiseValue));
+
+					noiseValue = Mathf.Lerp(noiseValue, rv.bedLevel, riverMask * presence);
+				}
+
+				if (useLakes) {
+					LakeSettings lk = settings.lakeSettings;
+					float lakeNoise01 = (OpenSimplex2.Noise2(lk.seed + 2929, worldX / lk.scale, worldY / lk.scale) + 1f) * 0.5f;
+					float lakeMask = Mathf.Clamp01(Mathf.InverseLerp(lk.threshold - 0.05f, lk.threshold, lakeNoise01));
+					lakeMask = lakeMask * lakeMask * (3f - 2f * lakeMask);
+
+					float presence = Mathf.InverseLerp(lk.minHeightPercent, lk.minHeightPercent + 0.05f, noiseValue)
+									* (1f - Mathf.InverseLerp(lk.maxHeightPercent - 0.05f, lk.maxHeightPercent, noiseValue));
+
+					noiseValue = Mathf.Lerp(noiseValue, lk.bedLevel, lakeMask * presence);
 				}
 
 				if (settings.useFalloff) {

@@ -1,4 +1,4 @@
-Shader "Custom/Terrain"
+Shader "Custom/Vegetation"
 {
     Properties
     {
@@ -7,6 +7,7 @@ Shader "Custom/Terrain"
     {
         Tags { "RenderType" = "Opaque" "RenderPipeline" = "UniversalPipeline" "Queue" = "Geometry" }
         LOD 200
+        Cull Off
 
         Pass
         {
@@ -27,32 +28,11 @@ Shader "Custom/Terrain"
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Lighting.hlsl"
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Shadows.hlsl"
 
-            #define MAX_LAYERS 16
-            float4 baseColours[MAX_LAYERS];
-            float baseStartHeights[MAX_LAYERS];
-            float baseBlends[MAX_LAYERS];
-            float minHeight;
-            float maxHeight;
-            int layerCount;
-
-            int enableBog;
-            float4 bogTint;
-            float moistureScale;
-            float bogMoistureThreshold;
-            float bogMinHeight;
-            float bogMaxHeight;
-            float bogMaxSlope;
-
-            int enableErosion;
-            float erosionSlopeThreshold;
-            float erosionStrength;
-            float erosionDarkening;
-            float erosionScale;
-
             struct Attributes
             {
                 float4 positionOS : POSITION;
                 float3 normalOS : NORMAL;
+                float4 color : COLOR;
             };
 
             struct Varyings
@@ -62,31 +42,8 @@ Shader "Custom/Terrain"
                 float3 normalWS : TEXCOORD1;
                 float4 shadowCoord : TEXCOORD2;
                 float fogFactor : TEXCOORD3;
+                float4 color : TEXCOORD4;
             };
-
-            float InverseLerp(float a, float b, float v)
-            {
-                return saturate((v - a) / max(b - a, 1e-5));
-            }
-
-            float Hash21(float2 p)
-            {
-                p = frac(p * float2(123.34, 456.21));
-                p += dot(p, p + 45.32);
-                return frac(p.x * p.y);
-            }
-
-            float ValueNoise(float2 p)
-            {
-                float2 i = floor(p);
-                float2 f = frac(p);
-                float a = Hash21(i);
-                float b = Hash21(i + float2(1, 0));
-                float c = Hash21(i + float2(0, 1));
-                float d = Hash21(i + float2(1, 1));
-                float2 u = f * f * (3.0 - 2.0 * f);
-                return lerp(a, b, u.x) + (c - a) * u.y * (1.0 - u.x) + (d - b) * u.x * u.y;
-            }
 
             Varyings vert(Attributes IN)
             {
@@ -96,67 +53,26 @@ Shader "Custom/Terrain"
                 OUT.positionHCS = TransformWorldToHClip(OUT.positionWS);
                 OUT.shadowCoord = TransformWorldToShadowCoord(OUT.positionWS);
                 OUT.fogFactor = ComputeFogFactor(OUT.positionHCS.z);
+                OUT.color = IN.color;
                 return OUT;
             }
 
-            float4 frag(Varyings IN) : SV_Target
+            float4 frag(Varyings IN, bool frontFace : SV_IsFrontFace) : SV_Target
             {
                 float3 normalWS = normalize(IN.normalWS);
-
-                float heightPercent = InverseLerp(minHeight, maxHeight, IN.positionWS.y);
-                float slope = 1.0 - saturate(normalWS.y);
-
-                float slopeBiasedHeight = saturate(heightPercent + slope * 0.18);
-
-                float3 albedo = baseColours[0].rgb;
-                for (int i = 1; i < layerCount; i++)
+                // Cull Off means back faces keep the front-face normal - flip it so
+                // backlit leaves/blades aren't lit as if facing the light from behind.
+                if (!frontFace)
                 {
-                    float sampleHeight = (i == layerCount - 1) ? heightPercent : slopeBiasedHeight;
-                    float drawStrength = InverseLerp(-baseBlends[i] * 0.5 - 1e-4, baseBlends[i] * 0.5, sampleHeight - baseStartHeights[i]);
-
-                    if (i == layerCount - 1)
-                    {
-                        drawStrength *= saturate(1.0 - slope * 1.6);
-                    }
-
-                    albedo = albedo * (1 - drawStrength) + baseColours[i].rgb * drawStrength;
+                    normalWS = -normalWS;
                 }
-
-                if (enableErosion)
-                {
-                    float erosionSlopeFactor = smoothstep(erosionSlopeThreshold, erosionSlopeThreshold + 0.25, slope) * erosionStrength;
-                    if (erosionSlopeFactor > 0.0)
-                    {
-                        float2 streakCoord = float2((IN.positionWS.x + IN.positionWS.z), IN.positionWS.y * 0.3) / erosionScale;
-                        float streak = ValueNoise(streakCoord);
-                        albedo *= 1.0 - erosionDarkening * (1.0 - streak) * erosionSlopeFactor;
-                    }
-                }
-                if (enableBog)
-                {
-                    float moisture = ValueNoise(IN.positionWS.xz / moistureScale);
-
-                    float bogHeightFactor = smoothstep(bogMinHeight, bogMinHeight + 0.05, heightPercent);
-                    bogHeightFactor *= 1.0 - smoothstep(bogMaxHeight, bogMaxHeight + 0.1, heightPercent);
-
-                    float bogSlopeFactor = 1.0 - smoothstep(bogMaxSlope * 0.6, bogMaxSlope, slope);
-
-                    float bogFactor = smoothstep(bogMoistureThreshold - 0.1, bogMoistureThreshold, moisture);
-                    bogFactor *= bogHeightFactor * bogSlopeFactor;
-
-                    albedo = lerp(albedo, bogTint.rgb, bogFactor);
-                }
-
-                float variation = ValueNoise(IN.positionWS.xz * 0.07) * 2.0 - 1.0;
-                albedo *= 1.0 + variation * 0.06;
 
                 Light mainLight = GetMainLight(IN.shadowCoord);
-                float NdotL = saturate(dot(normalWS, mainLight.direction));
+                float NdotL = saturate(dot(normalWS, mainLight.direction)) * 0.5 + 0.5; // soft wrap lighting, foliage rarely reads fully black
                 float3 radiance = mainLight.color * (NdotL * mainLight.shadowAttenuation * mainLight.distanceAttenuation);
-
                 float3 ambient = SampleSH(normalWS);
 
-                float3 colour = albedo * (radiance + ambient);
+                float3 colour = IN.color.rgb * (radiance + ambient);
                 colour = MixFog(colour, IN.fogFactor);
 
                 return float4(colour, 1);
@@ -171,6 +87,7 @@ Shader "Custom/Terrain"
 
             ZWrite On
             ZTest LEqual
+            Cull Off
 
             HLSLPROGRAM
             #pragma vertex ShadowVert

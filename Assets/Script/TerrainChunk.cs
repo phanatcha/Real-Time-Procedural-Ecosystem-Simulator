@@ -28,16 +28,25 @@ public class TerrainChunk {
 	MeshSettings meshSettings;
 	Transform viewer;
 
-	public TerrainChunk(Vector2 coord, HeightMapSettings heightMapSettings, MeshSettings meshSettings, LODInfo[] detailLevels, int colliderLODIndex, Transform parent, Transform viewer, Material material) {
+	VegetationSettings vegetationSettings;
+	Material vegetationMaterial;
+	float moistureScale;
+	Vector2 position;
+	bool vegetationRequested;
+
+	public TerrainChunk(Vector2 coord, HeightMapSettings heightMapSettings, MeshSettings meshSettings, LODInfo[] detailLevels, int colliderLODIndex, Transform parent, Transform viewer, Material material, VegetationSettings vegetationSettings, Material vegetationMaterial, float moistureScale) {
 		this.coord = coord;
 		this.detailLevels = detailLevels;
 		this.colliderLODIndex = colliderLODIndex;
 		this.heightMapSettings = heightMapSettings;
 		this.meshSettings = meshSettings;
 		this.viewer = viewer;
+		this.vegetationSettings = vegetationSettings;
+		this.vegetationMaterial = vegetationMaterial;
+		this.moistureScale = moistureScale;
 
 		sampleCentre = coord * meshSettings.meshWorldSize / meshSettings.meshScale;
-		Vector2 position = coord * meshSettings.meshWorldSize ;
+		position = coord * meshSettings.meshWorldSize ;
 		bounds = new Bounds(position,Vector2.one * meshSettings.meshWorldSize );
 
 
@@ -116,13 +125,55 @@ public class TerrainChunk {
 			}
 
 			if (wasVisible != visible) {
-				
+
 				SetVisible (visible);
 				if (onVisibilityChanged != null) {
 					onVisibilityChanged (this, visible);
 				}
 			}
+
+			// Vegetation follows terrain visibility. New chunks generate their own
+			// deterministic vegetation as the viewer moves, so coverage is endless.
+			if (visible && !vegetationRequested && vegetationSettings != null && vegetationMaterial != null) {
+				vegetationRequested = true;
+				RequestVegetation();
+			}
 		}
+	}
+
+	void RequestVegetation() {
+		Vector2 halfSize = Vector2.one * (meshSettings.meshWorldSize / 2f);
+		Vector2 chunkWorldMin = position - halfSize;
+		Vector2 chunkWorldMax = position + halfSize;
+		float terrainMinHeight = heightMapSettings.minHeight;
+		float terrainMaxHeight = heightMapSettings.maxHeight;
+
+		ThreadedDataRequester.RequestData(() => VegetationGenerator.GeneratePlacements(
+			chunkWorldMin, chunkWorldMax, heightMap, terrainMinHeight, terrainMaxHeight,
+			vegetationSettings, moistureScale, meshSettings.numVertsPerLine, meshSettings.meshScale), OnVegetationDataReceived);
+	}
+
+	void OnVegetationDataReceived(object dataObject) {
+		VegetationPlacementData data = (VegetationPlacementData)dataObject;
+
+		VegetationTemplateCache.EnsureBuilt(vegetationSettings);
+		VegetationGenerator.BuildCombinedMeshes(data, meshObject.transform.position, out Mesh treesMesh, out Mesh grassMesh, out Mesh rocksMesh);
+
+		GameObject vegetationObject = new GameObject("Vegetation");
+		vegetationObject.transform.SetParent(meshObject.transform, false);
+
+		AddVegetationLayer(vegetationObject.transform, treesMesh, "Trees (" + data.trees.Count + ")");
+		AddVegetationLayer(vegetationObject.transform, grassMesh, "Grass (" + data.grass.Count + ")");
+		AddVegetationLayer(vegetationObject.transform, rocksMesh, "Rocks (" + data.rocks.Count + ")");
+	}
+
+	void AddVegetationLayer(Transform parent, Mesh mesh, string layerName) {
+		if (mesh == null) return;
+
+		GameObject layer = new GameObject(layerName);
+		layer.transform.SetParent(parent, false);
+		layer.AddComponent<MeshFilter>().sharedMesh = mesh;
+		layer.AddComponent<MeshRenderer>().sharedMaterial = vegetationMaterial;
 	}
 
 	public void UpdateCollisionMesh() {

@@ -5,6 +5,8 @@ public class HeightMapSettings : UpdatableData
 {
     public NoiseSettings noiseSettings;
     public RidgeSettings ridgeSettings = new RidgeSettings();
+    public RiverSettings riverSettings = new RiverSettings();
+    public LakeSettings lakeSettings = new LakeSettings();
 
     public bool useFalloff;
     [Tooltip("Distance from world origin (0,0) where the island fully becomes ocean.")]
@@ -39,6 +41,14 @@ public class HeightMapSettings : UpdatableData
         if (ridgeSettings != null)
         {
             ridgeSettings.ValidateValues();
+        }
+        if (riverSettings != null)
+        {
+            riverSettings.ValidateValues();
+        }
+        if (lakeSettings != null)
+        {
+            lakeSettings.ValidateValues();
         }
         base.OnValidate();
     }
