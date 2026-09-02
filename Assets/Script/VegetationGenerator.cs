@@ -147,7 +147,6 @@ public static class VegetationGenerator
             worldY = (1f - tx) * h00 + (tx - tz) * h10 + tz * h11;
         }
 
-        // Slope only needs to be roughly right, so the nearest whole cell is fine here.
         int i = Mathf.RoundToInt(fi);
         int j = Mathf.RoundToInt(fj);
         float hL = heightMap.values[i - 1, j];

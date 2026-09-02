@@ -132,8 +132,6 @@ public class TerrainChunk {
 				}
 			}
 
-			// Vegetation follows terrain visibility. New chunks generate their own
-			// deterministic vegetation as the viewer moves, so coverage is endless.
 			if (visible && !vegetationRequested && vegetationSettings != null && vegetationMaterial != null) {
 				vegetationRequested = true;
 				RequestVegetation();
