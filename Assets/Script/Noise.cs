@@ -16,7 +16,7 @@ public static class Noise
         return new Vector2(warpX, warpY);
     }
 
-    public static float[,] GenerateNoiseMap(int mapWidth, int mapHeight, int seed, float scale, int octaves, float persistance, float lacunarity, Vector2 offset, NormalizeMode normalizeMode, float warpStrength = 0f, float warpScale = 400f)
+    public static float[,] GenerateNoiseMap(int mapWidth, int mapHeight, int seed, float scale, int octaves, float persistance, float lacunarity, Vector2 offset, NormalizeMode normalizeMode, float warpStrength = 0f, float warpScale = 400f, float globalHeightBias = 0f, float globalContrast = 1f)
     {
         float[,] noiseMap = new float[mapWidth, mapHeight];
 
@@ -93,7 +93,7 @@ public static class Noise
                 }
                 else
                 {
-                    float normalizedHeight = (noiseMap[x,y] + 1) / (maxPossibleHeight / 0.9f);
+                    float normalizedHeight = 0.5f + globalHeightBias + noiseMap[x,y] / (2f * maxPossibleHeight) * globalContrast;
                     noiseMap[x,y] = Mathf.Clamp01(normalizedHeight);
                 }
             }
@@ -102,7 +102,7 @@ public static class Noise
     }
     public static float[,] GenerateNoiseMap(int mapWidth, int mapHeight, NoiseSettings settings, Vector2 sampleCentre)
     {
-        return GenerateNoiseMap(mapWidth, mapHeight, settings.seed, settings.scale, settings.octaves, settings.persistance, settings.lacunarity, sampleCentre + settings.offset, settings.normalizeMode, settings.domainWarpStrength, settings.domainWarpScale);
+        return GenerateNoiseMap(mapWidth, mapHeight, settings.seed, settings.scale, settings.octaves, settings.persistance, settings.lacunarity, sampleCentre + settings.offset, settings.normalizeMode, settings.domainWarpStrength, settings.domainWarpScale, settings.globalHeightBias, settings.globalContrast);
     }
 
     public static float[,] GenerateRidgedNoiseMap(int mapWidth, int mapHeight, int seed, float scale, int octaves, float persistance, float lacunarity, Vector2 offset, float warpStrength, float warpScale)
@@ -176,6 +176,10 @@ public static class Noise
 [System.Serializable]
 public class NoiseSettings {
 	public Noise.NormalizeMode normalizeMode;
+	[Range(-0.45f, 0.45f)]
+	public float globalHeightBias = 0f;
+	[Min(0.01f)]
+	public float globalContrast = 1f;
 
 	public float scale = 90;
 
@@ -197,6 +201,8 @@ public class NoiseSettings {
 		octaves = Mathf.Max (octaves, 1);
 		lacunarity = Mathf.Max (lacunarity, 1);
 		persistance = Mathf.Clamp01 (persistance);
+		globalHeightBias = Mathf.Clamp (globalHeightBias, -0.45f, 0.45f);
+		globalContrast = Mathf.Max (globalContrast, 0.01f);
 		domainWarpScale = Mathf.Max (domainWarpScale, 0.01f);
 	}
 }

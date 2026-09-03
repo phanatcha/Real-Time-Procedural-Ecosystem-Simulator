@@ -6,6 +6,7 @@ public struct VegetationInstance
     public int variantIndex;
     public Vector3 position;
     public Quaternion rotation;
+    public float yawDegrees;
     public float scale;
 }
 
@@ -106,6 +107,7 @@ public static class VegetationGenerator
                     variantIndex = variant,
                     position = new Vector3(worldPos.x, worldY - settings.groundSink, worldPos.y),
                     rotation = surfaceRotation * spin,
+                    yawDegrees = rotRoll * 360f,
                     scale = Mathf.Lerp(settings.minScale, settings.maxScale, scaleRoll),
                 });
             }
@@ -163,6 +165,142 @@ public static class VegetationGenerator
         normal = new Vector3(-heightDerivativeX, 1f, -heightDerivativeZ).normalized;
 
         return true;
+    }
+
+    public static VegetationPlacementData ProjectPlacementsToLOD(
+        VegetationPlacementData source, HeightMap heightMap,
+        float terrainMinHeight, float terrainMaxHeight,
+        VegetationSettings vegSettings, Vector2 chunkWorldCentre,
+        int numVertsPerLine, float meshScale, int levelOfDetail)
+    {
+        VegetationPlacementData projected = new VegetationPlacementData();
+
+        ProjectTypeToLOD(source.trees, projected.trees, vegSettings.trees, heightMap,
+            terrainMinHeight, terrainMaxHeight, vegSettings.minimumLandHeightPercent,
+            chunkWorldCentre, numVertsPerLine, meshScale, levelOfDetail);
+        ProjectTypeToLOD(source.grass, projected.grass, vegSettings.grass, heightMap,
+            terrainMinHeight, terrainMaxHeight, vegSettings.minimumLandHeightPercent,
+            chunkWorldCentre, numVertsPerLine, meshScale, levelOfDetail);
+        ProjectTypeToLOD(source.rocks, projected.rocks, vegSettings.rocks, heightMap,
+            terrainMinHeight, terrainMaxHeight, vegSettings.minimumLandHeightPercent,
+            chunkWorldCentre, numVertsPerLine, meshScale, levelOfDetail);
+
+        return projected;
+    }
+
+    static void ProjectTypeToLOD(
+        List<VegetationInstance> source, List<VegetationInstance> output,
+        VegetationTypeSettings settings, HeightMap heightMap,
+        float terrainMinHeight, float terrainMaxHeight, float minimumLandHeightPercent,
+        Vector2 chunkWorldCentre, int numVertsPerLine, float meshScale, int levelOfDetail)
+    {
+        float minimumAllowedHeight = Mathf.Max(minimumLandHeightPercent, settings.minHeightPercent);
+
+        for (int i = 0; i < source.Count; i++)
+        {
+            VegetationInstance instance = source[i];
+            Vector2 worldPos = new Vector2(instance.position.x, instance.position.z);
+            if (!SampleTerrainLOD(worldPos, heightMap, chunkWorldCentre, numVertsPerLine,
+                meshScale, levelOfDetail, out float worldY, out Vector3 normal))
+            {
+                continue;
+            }
+
+            float heightPercent = Mathf.InverseLerp(terrainMinHeight, terrainMaxHeight, worldY);
+            if (heightPercent + 0.0001f < minimumAllowedHeight) continue;
+
+            Quaternion spin = Quaternion.Euler(0f, instance.yawDegrees, 0f);
+            Quaternion slopeAlign = Quaternion.FromToRotation(Vector3.up, normal);
+            Quaternion surfaceRotation = Quaternion.Slerp(Quaternion.identity, slopeAlign, settings.surfaceAlignment);
+
+            instance.position.y = worldY - settings.groundSink;
+            instance.rotation = surfaceRotation * spin;
+            output.Add(instance);
+        }
+    }
+
+    static bool SampleTerrainLOD(Vector2 worldPos, HeightMap heightMap, Vector2 chunkWorldCentre,
+        int numVertsPerLine, float meshScale, int levelOfDetail,
+        out float worldY, out Vector3 normal)
+    {
+        float halfWorldSize = (numVertsPerLine - 3) * meshScale * 0.5f;
+        float fi = (worldPos.x - chunkWorldCentre.x + halfWorldSize) / meshScale + 1f;
+        float fj = (chunkWorldCentre.y + halfWorldSize - worldPos.y) / meshScale + 1f;
+        int lastMainIndex = numVertsPerLine - 3;
+
+        if (fi < 1f || fi > numVertsPerLine - 2f || fj < 1f || fj > numVertsPerLine - 2f)
+        {
+            worldY = 0f;
+            normal = Vector3.up;
+            return false;
+        }
+
+        int skipIncrement = levelOfDetail == 0 ? 1 : levelOfDetail * 2;
+        bool edgeCell = fi < 2f || fi >= lastMainIndex || fj < 2f || fj >= lastMainIndex;
+        int x0;
+        int y0;
+        int increment;
+
+        if (edgeCell)
+        {
+            x0 = Mathf.Clamp(Mathf.FloorToInt(fi), 1, lastMainIndex);
+            y0 = Mathf.Clamp(Mathf.FloorToInt(fj), 1, lastMainIndex);
+            increment = 1;
+        }
+        else
+        {
+            x0 = 2 + Mathf.FloorToInt((fi - 2f) / skipIncrement) * skipIncrement;
+            y0 = 2 + Mathf.FloorToInt((fj - 2f) / skipIncrement) * skipIncrement;
+            x0 = Mathf.Min(x0, lastMainIndex - skipIncrement);
+            y0 = Mathf.Min(y0, lastMainIndex - skipIncrement);
+            increment = skipIncrement;
+        }
+
+        int x1 = x0 + increment;
+        int y1 = y0 + increment;
+        float tx = Mathf.Clamp01((fi - x0) / increment);
+        float tz = Mathf.Clamp01((fj - y0) / increment);
+        float h00 = GetLODVertexHeight(heightMap.values, x0, y0, numVertsPerLine, skipIncrement);
+        float h10 = GetLODVertexHeight(heightMap.values, x1, y0, numVertsPerLine, skipIncrement);
+        float h01 = GetLODVertexHeight(heightMap.values, x0, y1, numVertsPerLine, skipIncrement);
+        float h11 = GetLODVertexHeight(heightMap.values, x1, y1, numVertsPerLine, skipIncrement);
+        float span = increment * meshScale;
+        Vector3 a = new Vector3(0f, h00, 0f);
+
+        if (tz >= tx)
+        {
+            worldY = (1f - tz) * h00 + tx * h11 + (tz - tx) * h01;
+            Vector3 d = new Vector3(span, h11, -span);
+            Vector3 c = new Vector3(0f, h01, -span);
+            normal = Vector3.Cross(d - a, c - a).normalized;
+        }
+        else
+        {
+            worldY = (1f - tx) * h00 + (tx - tz) * h10 + tz * h11;
+            Vector3 b = new Vector3(span, h10, 0f);
+            Vector3 d = new Vector3(span, h11, -span);
+            normal = Vector3.Cross(b - a, d - a).normalized;
+        }
+
+        return true;
+    }
+
+    static float GetLODVertexHeight(float[,] heights, int x, int y, int numVertsPerLine, int skipIncrement)
+    {
+        bool isMeshEdgeVertex = y == 1 || y == numVertsPerLine - 2 || x == 1 || x == numVertsPerLine - 2;
+        bool isMainVertex = (x - 2) % skipIncrement == 0 && (y - 2) % skipIncrement == 0 && !isMeshEdgeVertex;
+        bool isEdgeConnectionVertex = (y == 2 || y == numVertsPerLine - 3 || x == 2 || x == numVertsPerLine - 3)
+            && !isMeshEdgeVertex && !isMainVertex;
+
+        if (!isEdgeConnectionVertex) return heights[x, y];
+
+        bool isVertical = x == 2 || x == numVertsPerLine - 3;
+        int distanceFromA = ((isVertical ? y : x) - 2) % skipIncrement;
+        int distanceFromB = skipIncrement - distanceFromA;
+        float percent = distanceFromA / (float)skipIncrement;
+        float heightA = heights[isVertical ? x : x - distanceFromA, isVertical ? y - distanceFromA : y];
+        float heightB = heights[isVertical ? x : x + distanceFromB, isVertical ? y + distanceFromB : y];
+        return Mathf.Lerp(heightA, heightB, percent);
     }
 
     public static void BuildCombinedMeshes(VegetationPlacementData data, Vector3 chunkOrigin,

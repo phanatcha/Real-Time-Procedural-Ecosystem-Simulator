@@ -44,7 +44,8 @@ public static class HeightMapGenerator {
 					float band = Mathf.Clamp01(1f - bandDistance / r.bandWidth);
 					band = band * band * (3f - 2f * band);
 
-					noiseValue = Mathf.Clamp01(noiseValue + ridgeValues[i, j] * band * r.strength);
+					float ridgeAmount = ridgeValues[i, j] * band * r.strength;
+					noiseValue = Mathf.Clamp01(noiseValue + ridgeAmount * (1f - noiseValue));
 				}
 
 				if (useRivers) {

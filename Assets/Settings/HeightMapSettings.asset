@@ -15,115 +15,108 @@ MonoBehaviour:
   autoUpdate: 1
   noiseSettings:
     normalizeMode: 1
-    scale: 220
+    globalHeightBias: 0.02
+    globalContrast: 1.18
+    scale: 300
     octaves: 4
-    persistance: 0.35
-    lacunarity: 2.2
+    persistance: 0.28
+    lacunarity: 2
     seed: 0
     offset: {x: 0, y: 0}
-    domainWarpStrength: 40
-    domainWarpScale: 400
+    domainWarpStrength: 30
+    domainWarpScale: 500
   ridgeSettings:
     seed: 0
-    scale: 220
-    octaves: 4
-    persistance: 0.55
+    scale: 360
+    octaves: 3
+    persistance: 0.42
     lacunarity: 2
-    strength: 0.6
+    strength: 0.55
     bandCenter: 0.55
-    bandWidth: 0.28
-    bandJitterScale: 900
-    bandJitterStrength: 0.3
+    bandWidth: 0.22
+    bandJitterScale: 1100
+    bandJitterStrength: 0.22
   riverSettings:
     enabled: 1
     seed: 0
-    scale: 250
-    width: 0.025
+    scale: 300
+    width: 0.065
     minHeightPercent: 0.15
-    maxHeightPercent: 0.65
-    bedLevel: 0.12
+    maxHeightPercent: 0.55
+    bedLevel: 0.2
   lakeSettings:
     enabled: 1
     seed: 0
-    scale: 400
-    threshold: 0.62
+    scale: 500
+    threshold: 0.66
     minHeightPercent: 0.1
-    maxHeightPercent: 0.4
-    bedLevel: 0.08
+    maxHeightPercent: 0.42
+    bedLevel: 0.16
   useFalloff: 1
   worldRadius: 1000
-  heightMultiplier: 120
+  heightMultiplier: 100
   heightCurve:
     serializedVersion: 2
     m_Curve:
     - serializedVersion: 3
       time: 0
       value: 0
-      inSlope: 0
-      outSlope: 0
+      inSlope: 0.25
+      outSlope: 0.25
       tangentMode: 0
       weightedMode: 0
       inWeight: 0
       outWeight: 0
     - serializedVersion: 3
-      time: 0.15
-      value: 0.05
-      inSlope: 0.514
-      outSlope: 0.514
+      time: 0.2
+      value: 0.07
+      inSlope: 0.42
+      outSlope: 0.42
       tangentMode: 0
       weightedMode: 0
       inWeight: 0.33333334
       outWeight: 0.33333334
     - serializedVersion: 3
-      time: 0.35
+      time: 0.4
       value: 0.18
-      inSlope: 0.511
-      outSlope: 0.511
+      inSlope: 0.58
+      outSlope: 0.58
       tangentMode: 0
       weightedMode: 0
       inWeight: 0.33333334
       outWeight: 0.33333334
     - serializedVersion: 3
       time: 0.6
-      value: 0.28
-      inSlope: 0.6
-      outSlope: 0.6
+      value: 0.32
+      inSlope: 0.82
+      outSlope: 0.82
       tangentMode: 0
       weightedMode: 0
       inWeight: 0.33333334
       outWeight: 0.33333334
     - serializedVersion: 3
       time: 0.8
-      value: 0.45
-      inSlope: 1.469
-      outSlope: 1.469
+      value: 0.52
+      inSlope: 1.22
+      outSlope: 1.22
       tangentMode: 0
       weightedMode: 0
       inWeight: 0.33333334
       outWeight: 0.33333334
     - serializedVersion: 3
       time: 0.92
-      value: 0.75
-      inSlope: 2.75
-      outSlope: 2.75
+      value: 0.72
+      inSlope: 2
+      outSlope: 2
       tangentMode: 0
       weightedMode: 0
       inWeight: 0.33333334
       outWeight: 0.33333334
     - serializedVersion: 3
-      time: 0.9282622
-      value: 0.9234839
-      inSlope: 4.027449
-      outSlope: 4.027449
-      tangentMode: 0
-      weightedMode: 0
-      inWeight: 0.33333334
-      outWeight: 0.32252043
-    - serializedVersion: 3
-      time: 1.0088286
-      value: 1.0809524
-      inSlope: 3.125
-      outSlope: 3.125
+      time: 1
+      value: 0.9
+      inSlope: 2.25
+      outSlope: 2.25
       tangentMode: 0
       weightedMode: 0
       inWeight: 0

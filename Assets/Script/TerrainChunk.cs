@@ -33,6 +33,12 @@ public class TerrainChunk {
 	float moistureScale;
 	Vector2 position;
 	bool vegetationRequested;
+	VegetationPlacementData vegetationData;
+	GameObject vegetationObject;
+	MeshFilter treesMeshFilter;
+	MeshFilter grassMeshFilter;
+	MeshFilter rocksMeshFilter;
+	int vegetationLODIndex = -1;
 
 	public TerrainChunk(Vector2 coord, HeightMapSettings heightMapSettings, MeshSettings meshSettings, LODInfo[] detailLevels, int colliderLODIndex, Transform parent, Transform viewer, Material material, VegetationSettings vegetationSettings, Material vegetationMaterial, float moistureScale) {
 		this.coord = coord;
@@ -116,6 +122,7 @@ public class TerrainChunk {
 					if (lodMesh.hasMesh) {
 						previousLODIndex = lodIndex;
 						meshFilter.mesh = lodMesh.mesh;
+						UpdateVegetationForLOD(lodIndex);
 					} else if (!lodMesh.hasRequestedMesh) {
 						lodMesh.RequestMesh (heightMap, meshSettings);
 					}
@@ -152,26 +159,49 @@ public class TerrainChunk {
 	}
 
 	void OnVegetationDataReceived(object dataObject) {
-		VegetationPlacementData data = (VegetationPlacementData)dataObject;
+		vegetationData = (VegetationPlacementData)dataObject;
 
 		VegetationTemplateCache.EnsureBuilt(vegetationSettings);
-		VegetationGenerator.BuildCombinedMeshes(data, meshObject.transform.position, out Mesh treesMesh, out Mesh grassMesh, out Mesh rocksMesh);
-
-		GameObject vegetationObject = new GameObject("Vegetation");
+		vegetationObject = new GameObject("Vegetation");
 		vegetationObject.transform.SetParent(meshObject.transform, false);
+		treesMeshFilter = AddVegetationLayer(vegetationObject.transform, "Trees");
+		grassMeshFilter = AddVegetationLayer(vegetationObject.transform, "Grass");
+		rocksMeshFilter = AddVegetationLayer(vegetationObject.transform, "Rocks");
 
-		AddVegetationLayer(vegetationObject.transform, treesMesh, "Trees (" + data.trees.Count + ")");
-		AddVegetationLayer(vegetationObject.transform, grassMesh, "Grass (" + data.grass.Count + ")");
-		AddVegetationLayer(vegetationObject.transform, rocksMesh, "Rocks (" + data.rocks.Count + ")");
+		if (previousLODIndex >= 0) UpdateVegetationForLOD(previousLODIndex);
 	}
 
-	void AddVegetationLayer(Transform parent, Mesh mesh, string layerName) {
-		if (mesh == null) return;
-
+	MeshFilter AddVegetationLayer(Transform parent, string layerName) {
 		GameObject layer = new GameObject(layerName);
 		layer.transform.SetParent(parent, false);
-		layer.AddComponent<MeshFilter>().sharedMesh = mesh;
+		MeshFilter filter = layer.AddComponent<MeshFilter>();
 		layer.AddComponent<MeshRenderer>().sharedMaterial = vegetationMaterial;
+		return filter;
+	}
+
+	void UpdateVegetationForLOD(int lodIndex) {
+		if (vegetationData == null || vegetationObject == null || vegetationLODIndex == lodIndex) return;
+
+		VegetationPlacementData projected = VegetationGenerator.ProjectPlacementsToLOD(
+			vegetationData, heightMap, heightMapSettings.minHeight, heightMapSettings.maxHeight,
+			vegetationSettings, position, meshSettings.numVertsPerLine, meshSettings.meshScale,
+			detailLevels[lodIndex].lod);
+
+		VegetationGenerator.BuildCombinedMeshes(projected, meshObject.transform.position,
+			out Mesh treesMesh, out Mesh grassMesh, out Mesh rocksMesh);
+
+		SetVegetationLayer(treesMeshFilter, treesMesh, "Trees (" + projected.trees.Count + ")");
+		SetVegetationLayer(grassMeshFilter, grassMesh, "Grass (" + projected.grass.Count + ")");
+		SetVegetationLayer(rocksMeshFilter, rocksMesh, "Rocks (" + projected.rocks.Count + ")");
+		vegetationLODIndex = lodIndex;
+	}
+
+	void SetVegetationLayer(MeshFilter filter, Mesh mesh, string layerName) {
+		Mesh previousMesh = filter.sharedMesh;
+		filter.sharedMesh = mesh;
+		filter.gameObject.name = layerName;
+		filter.gameObject.SetActive(mesh != null);
+		if (previousMesh != null) Object.Destroy(previousMesh);
 	}
 
 	public void UpdateCollisionMesh() {

@@ -60,15 +60,13 @@ Shader "Custom/Vegetation"
             float4 frag(Varyings IN, bool frontFace : SV_IsFrontFace) : SV_Target
             {
                 float3 normalWS = normalize(IN.normalWS);
-                // Cull Off means back faces keep the front-face normal - flip it so
-                // backlit leaves/blades aren't lit as if facing the light from behind.
                 if (!frontFace)
                 {
                     normalWS = -normalWS;
                 }
 
                 Light mainLight = GetMainLight(IN.shadowCoord);
-                float NdotL = saturate(dot(normalWS, mainLight.direction)) * 0.5 + 0.5; // soft wrap lighting, foliage rarely reads fully black
+                float NdotL = saturate(dot(normalWS, mainLight.direction)) * 0.5 + 0.5; 
                 float3 radiance = mainLight.color * (NdotL * mainLight.shadowAttenuation * mainLight.distanceAttenuation);
                 float3 ambient = SampleSH(normalWS);
 
