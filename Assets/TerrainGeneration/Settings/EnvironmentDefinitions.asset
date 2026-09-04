@@ -1,0 +1,32 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: e33d9277cf5d480f945c5e4a403929cd, type: 3}
+  m_Name: EnvironmentDefinitions
+  m_EditorClassIdentifier: Assembly-CSharp::EnvironmentDefinitions
+  autoUpdate: 1
+  normalizedWaterLevel: 0.31
+  shallowWaterDepth: 0.08
+  shorelineWidth: 0.06
+  highlandTaigaStart: 0.73
+  tundraStart: 0.87
+  mountainStart: 0.94
+  snowStart: 1
+  moistureScale: 300
+  moistureOffset: {x: 0, y: 0}
+  baseTemperature: 0.78
+  elevationCooling: 0.62
+  temperatureVariation: 0.12
+  temperatureScale: 1200
+  temperatureOffset: {x: 417.3, y: -286.9}
+  resourcePatchScale: 180
+  waterAvailabilityFalloff: 0.18
+  moistureWaterContribution: 0.65

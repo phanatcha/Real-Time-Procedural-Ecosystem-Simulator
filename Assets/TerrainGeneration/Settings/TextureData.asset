@@ -13,36 +13,37 @@ MonoBehaviour:
   m_Name: TextureData
   m_EditorClassIdentifier: Assembly-CSharp::TextureData
   autoUpdate: 1
+  environmentDefinitions: {fileID: 11400000, guid: 238378d377a24275b4964dc12cdf16b2, type: 2}
   layers:
   - name: Water Deep
     tint: {r: 0.10980392, g: 0.22745098, b: 0.35686275, a: 0}
-    startHeight: 0
+    biome: 0
     blendStrength: 0.2
   - name: Water Shallow
     tint: {r: 0.18039216, g: 0.43529412, b: 0.5568628, a: 0}
-    startHeight: 0.23
+    biome: 1
     blendStrength: 0.2
   - name: Rocky Shore
     tint: {r: 0.47843137, g: 0.44313726, b: 0.4, a: 0}
-    startHeight: 0.31
+    biome: 2
     blendStrength: 0.2
   - name: Forest Floor
     tint: {r: 0.1882353, g: 0.2901961, b: 0.18039216, a: 0}
-    startHeight: 0.37
+    biome: 3
     blendStrength: 0.2
   - name: Highland Taiga
     tint: {r: 0.36078432, g: 0.42745098, b: 0.23921569, a: 0}
-    startHeight: 0.73
+    biome: 4
     blendStrength: 0.2
   - name: Tundra Rock
     tint: {r: 0.54509807, g: 0.50980395, b: 0.46666667, a: 0}
-    startHeight: 0.87
+    biome: 5
     blendStrength: 0.2
   - name: Mountain
     tint: {r: 0.3529412, g: 0.39215687, b: 0.44705883, a: 0}
-    startHeight: 0.94
+    biome: 6
     blendStrength: 0.2
   - name: Snow
     tint: {r: 0.9411765, g: 0.95686275, b: 0.9607843, a: 0}
-    startHeight: 1
+    biome: 7
     blendStrength: 0.2

@@ -6,14 +6,13 @@ public class TextureData : UpdatableData
     const int textureSize = 512;
     const TextureFormat textureFormat = TextureFormat.RGB565;
 
+    public EnvironmentDefinitions environmentDefinitions;
     public Layer[] layers;
 
     [Header("Moisture / Bog")]
     [Tooltip("Low-frequency noise drives where bog/wetland patches settle - not simulated, just a smooth noise field sampled in the shader.")]
     public bool enableBog = true;
     public Color bogTint = new Color(0.13f, 0.14f, 0.09f);
-    [Tooltip("World units per bog-noise feature - bigger = larger, sparser patches.")]
-    public float moistureScale = 300f;
     [Range(0, 1)]
     [Tooltip("Only the wettest fraction of the moisture range becomes bog.")]
     public float bogMoistureThreshold = 0.6f;
@@ -44,14 +43,19 @@ public class TextureData : UpdatableData
 
     public void ApplyToMaterial(Material material)
     {
+        if (material == null || environmentDefinitions == null) return;
+
         material.SetInt("layerCount", layers.Length);
         material.SetColorArray("baseColours", GetColours());
         material.SetFloatArray("baseStartHeights", GetStartHeights());
         material.SetFloatArray("baseBlends", GetBlends());
+        material.SetFloat("normalizedWaterLevel", environmentDefinitions.ShorelineThreshold);
+        material.SetFloat("landThreshold", environmentDefinitions.LandThreshold);
 
         material.SetInt("enableBog", enableBog ? 1 : 0);
         material.SetColor("bogTint", bogTint);
-        material.SetFloat("moistureScale", Mathf.Max(moistureScale, 0.01f));
+        material.SetFloat("moistureScale", Mathf.Max(environmentDefinitions.moistureScale, 0.01f));
+        material.SetVector("moistureOffset", environmentDefinitions.moistureOffset);
         material.SetFloat("bogMoistureThreshold", bogMoistureThreshold);
         material.SetFloat("bogMinHeight", bogMinHeight);
         material.SetFloat("bogMaxHeight", bogMaxHeight);
@@ -90,7 +94,7 @@ public class TextureData : UpdatableData
         float[] heights = new float[layers.Length];
         for (int i = 0; i < layers.Length; i++)
         {
-            heights[i] = layers[i].startHeight;
+            heights[i] = environmentDefinitions.GetBiomeStartHeight(layers[i].biome);
         }
         return heights;
     }
@@ -110,8 +114,7 @@ public class TextureData : UpdatableData
     {
         public string name;
         public Color tint;
-        [Range(0, 1)]
-        public float startHeight;
+        public BiomeId biome;
         [Range(0, 1)]
         public float blendStrength;
     }

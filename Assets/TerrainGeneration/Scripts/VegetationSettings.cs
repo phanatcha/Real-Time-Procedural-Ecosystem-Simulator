@@ -41,15 +41,6 @@ public class VegetationSettings : ScriptableObject
 {
     public int seed = 0;
 
-    [Range(0, 1)]
-    [Tooltip("Global shoreline cutoff. Nothing is placed below this normalized terrain height, regardless of its individual settings.")]
-    public float minimumLandHeightPercent = 0.37f;
-
-    // Height gates are in the same 0-1 heightPercent space TextureData's layers use:
-    // Water Deep 0, Water Shallow 0.23, Rocky Shore 0.31, Forest Floor 0.37 (each layer
-    // blends in over roughly +-0.1 around its start). Gates need real margin past a
-    // layer's start height, not just past it, or placements land in that layer's blend
-    // zone and visually still read as the layer below it (e.g. "on water").
     public VegetationTypeSettings trees = new VegetationTypeSettings
     {
         cellSize = 6f,

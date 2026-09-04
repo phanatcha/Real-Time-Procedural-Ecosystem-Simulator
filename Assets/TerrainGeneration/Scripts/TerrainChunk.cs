@@ -1,11 +1,11 @@
 using UnityEngine;
 
 public class TerrainChunk {
-	
+
 	const float colliderGenerationDistanceThreshold = 5;
 	public event System.Action<TerrainChunk, bool> onVisibilityChanged;
-	public Vector2 coord;
-	 
+	public Vector2Int coord;
+
 	GameObject meshObject;
 	Vector2 sampleCentre;
 	Bounds bounds;
@@ -30,7 +30,8 @@ public class TerrainChunk {
 
 	VegetationSettings vegetationSettings;
 	Material vegetationMaterial;
-	float moistureScale;
+	EnvironmentDefinitions environmentDefinitions;
+	TerrainEnvironmentSampler environmentSampler;
 	Vector2 position;
 	bool vegetationRequested;
 	VegetationPlacementData vegetationData;
@@ -40,7 +41,7 @@ public class TerrainChunk {
 	MeshFilter rocksMeshFilter;
 	int vegetationLODIndex = -1;
 
-	public TerrainChunk(Vector2 coord, HeightMapSettings heightMapSettings, MeshSettings meshSettings, LODInfo[] detailLevels, int colliderLODIndex, Transform parent, Transform viewer, Material material, VegetationSettings vegetationSettings, Material vegetationMaterial, float moistureScale) {
+	public TerrainChunk(Vector2Int coord, HeightMapSettings heightMapSettings, MeshSettings meshSettings, LODInfo[] detailLevels, int colliderLODIndex, Transform parent, Transform viewer, Material material, VegetationSettings vegetationSettings, Material vegetationMaterial, EnvironmentDefinitions environmentDefinitions, TerrainEnvironmentSampler environmentSampler) {
 		this.coord = coord;
 		this.detailLevels = detailLevels;
 		this.colliderLODIndex = colliderLODIndex;
@@ -49,10 +50,11 @@ public class TerrainChunk {
 		this.viewer = viewer;
 		this.vegetationSettings = vegetationSettings;
 		this.vegetationMaterial = vegetationMaterial;
-		this.moistureScale = moistureScale;
+		this.environmentDefinitions = environmentDefinitions;
+		this.environmentSampler = environmentSampler;
 
-		sampleCentre = coord * meshSettings.meshWorldSize / meshSettings.meshScale;
-		position = coord * meshSettings.meshWorldSize ;
+		sampleCentre = (Vector2)coord * meshSettings.meshWorldSize / meshSettings.meshScale;
+		position = (Vector2)coord * meshSettings.meshWorldSize ;
 		bounds = new Bounds(position,Vector2.one * meshSettings.meshWorldSize );
 
 
@@ -87,6 +89,7 @@ public class TerrainChunk {
 
 	void OnHeightMapReceived(object heightMapObject) {
 		this.heightMap = (HeightMap)heightMapObject;
+		environmentSampler?.CacheHeightMap(coord, heightMap);
 		heightMapReceived = true;
 
 		UpdateTerrainChunk ();
@@ -155,7 +158,7 @@ public class TerrainChunk {
 
 		ThreadedDataRequester.RequestData(() => VegetationGenerator.GeneratePlacements(
 			chunkWorldMin, chunkWorldMax, heightMap, terrainMinHeight, terrainMaxHeight,
-			vegetationSettings, moistureScale, meshSettings.numVertsPerLine, meshSettings.meshScale), OnVegetationDataReceived);
+			vegetationSettings, environmentDefinitions, meshSettings.numVertsPerLine, meshSettings.meshScale), OnVegetationDataReceived);
 	}
 
 	void OnVegetationDataReceived(object dataObject) {
@@ -184,7 +187,7 @@ public class TerrainChunk {
 
 		VegetationPlacementData projected = VegetationGenerator.ProjectPlacementsToLOD(
 			vegetationData, heightMap, heightMapSettings.minHeight, heightMapSettings.maxHeight,
-			vegetationSettings, position, meshSettings.numVertsPerLine, meshSettings.meshScale,
+			vegetationSettings, environmentDefinitions, position, meshSettings.numVertsPerLine, meshSettings.meshScale,
 			detailLevels[lodIndex].lod);
 
 		VegetationGenerator.BuildCombinedMeshes(projected, meshObject.transform.position,
@@ -229,6 +232,18 @@ public class TerrainChunk {
 
 	public bool IsVisible() {
 		return meshObject.activeSelf;
+	}
+
+	public bool TryGetEnvironmentSample(Vector2 worldPosition, out EnvironmentSample sample) {
+		if (!heightMapReceived || environmentDefinitions == null) {
+			sample = default;
+			return false;
+		}
+
+		return EnvironmentSampler.TrySample(
+			worldPosition, heightMap, heightMapSettings.minHeight, heightMapSettings.maxHeight,
+			environmentDefinitions, vegetationSettings, position,
+			meshSettings.numVertsPerLine, meshSettings.meshScale, out sample);
 	}
 
 }

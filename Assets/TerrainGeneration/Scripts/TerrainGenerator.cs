@@ -26,10 +26,25 @@ public class TerrainGenerator : MonoBehaviour {
 	float meshWorldSize;
 	int chunksVisibleInViewDst;
 
-	Dictionary<Vector2, TerrainChunk> terrainChunkDictionary = new Dictionary<Vector2, TerrainChunk>();
+	Dictionary<Vector2Int, TerrainChunk> terrainChunkDictionary = new Dictionary<Vector2Int, TerrainChunk>();
 	List<TerrainChunk> visibleTerrainChunks = new List<TerrainChunk>();
+	TerrainEnvironmentSampler worldEnvironmentSampler;
+
+	public EnvironmentDefinitions EnvironmentDefinitions {
+		get {
+			return textureSettings == null ? null : textureSettings.environmentDefinitions;
+		}
+	}
+
+	public TerrainEnvironmentSampler WorldEnvironmentSampler {
+		get {
+			EnsureEnvironmentSampler();
+			return worldEnvironmentSampler;
+		}
+	}
 
 	void Start() {
+		EnsureEnvironmentSampler();
 
 		textureSettings.ApplyToMaterial (mapMaterial);
 		textureSettings.UpdateMeshHeights (mapMaterial, heightMapSettings.minHeight, heightMapSettings.maxHeight);
@@ -57,23 +72,22 @@ public class TerrainGenerator : MonoBehaviour {
 	}
 
 	void UpdateVisibleChunks() {
-		HashSet<Vector2> alreadyUpdatedChunkCoords = new HashSet<Vector2> ();
+		HashSet<Vector2Int> alreadyUpdatedChunkCoords = new HashSet<Vector2Int> ();
 		for (int i = visibleTerrainChunks.Count-1; i >= 0; i--) {
 			alreadyUpdatedChunkCoords.Add (visibleTerrainChunks [i].coord);
 			visibleTerrainChunks [i].UpdateTerrainChunk ();
 		}
 
-		int currentChunkCoordX = Mathf.RoundToInt (viewerPosition.x / meshWorldSize);
-		int currentChunkCoordY = Mathf.RoundToInt (viewerPosition.y / meshWorldSize);
+		Vector2Int currentChunkCoordinate = TerrainGrid.WorldToChunkCoordinate(viewerPosition, meshWorldSize);
 
 		for (int yOffset = -chunksVisibleInViewDst; yOffset <= chunksVisibleInViewDst; yOffset++) {
 			for (int xOffset = -chunksVisibleInViewDst; xOffset <= chunksVisibleInViewDst; xOffset++) {
-				Vector2 viewedChunkCoord = new Vector2 (currentChunkCoordX + xOffset, currentChunkCoordY + yOffset);
+				Vector2Int viewedChunkCoord = new Vector2Int(currentChunkCoordinate.x + xOffset, currentChunkCoordinate.y + yOffset);
 				if (!alreadyUpdatedChunkCoords.Contains (viewedChunkCoord)) {
 					if (terrainChunkDictionary.ContainsKey (viewedChunkCoord)) {
 						terrainChunkDictionary [viewedChunkCoord].UpdateTerrainChunk ();
 					} else {
-						TerrainChunk newChunk = new TerrainChunk (viewedChunkCoord,heightMapSettings,meshSettings, detailLevels, colliderLODIndex, transform, viewer, mapMaterial, vegetationSettings, vegetationMaterial, textureSettings.moistureScale);
+						TerrainChunk newChunk = new TerrainChunk (viewedChunkCoord,heightMapSettings,meshSettings, detailLevels, colliderLODIndex, transform, viewer, mapMaterial, vegetationSettings, vegetationMaterial, EnvironmentDefinitions, WorldEnvironmentSampler);
 						terrainChunkDictionary.Add (viewedChunkCoord, newChunk);
 						newChunk.onVisibilityChanged += OnTerrainChunkVisibilityChanged;
 						newChunk.Load ();
@@ -90,6 +104,28 @@ public class TerrainGenerator : MonoBehaviour {
 		} else {
 			visibleTerrainChunks.Remove (chunk);
 		}
+	}
+
+	public bool TryGetEnvironmentSample(Vector3 worldPosition, out EnvironmentSample sample) {
+		return WorldEnvironmentSampler.TrySample(worldPosition, out sample);
+	}
+
+	public bool TryGetEnvironmentSample(Vector2 worldPosition, out EnvironmentSample sample) {
+		return WorldEnvironmentSampler.TrySample(worldPosition, out sample);
+	}
+
+	void EnsureEnvironmentSampler() {
+		EnvironmentDefinitions definitions = EnvironmentDefinitions;
+		if (worldEnvironmentSampler != null
+			&& worldEnvironmentSampler.HeightMapSettings == heightMapSettings
+			&& worldEnvironmentSampler.MeshSettings == meshSettings
+			&& worldEnvironmentSampler.EnvironmentDefinitions == definitions
+			&& worldEnvironmentSampler.VegetationSettings == vegetationSettings) {
+			return;
+		}
+
+		worldEnvironmentSampler = new TerrainEnvironmentSampler(
+			heightMapSettings, meshSettings, definitions, vegetationSettings);
 	}
 
 }

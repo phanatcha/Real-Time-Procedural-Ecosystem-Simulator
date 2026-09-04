@@ -31,7 +31,6 @@ public class ThreadedDataRequester : MonoBehaviour {
 			Debug.LogError ("ThreadedDataRequester: data generation failed, chunk will be missing: " + e);
 		}
 	}
-		
 
 	void Update() {
 		if (dataQueue.Count > 0) {

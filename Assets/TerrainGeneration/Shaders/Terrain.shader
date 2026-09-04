@@ -33,11 +33,14 @@ Shader "Custom/Terrain"
             float baseBlends[MAX_LAYERS];
             float minHeight;
             float maxHeight;
+            float normalizedWaterLevel;
+            float landThreshold;
             int layerCount;
 
             int enableBog;
             float4 bogTint;
             float moistureScale;
+            float2 moistureOffset;
             float bogMoistureThreshold;
             float bogMinHeight;
             float bogMaxHeight;
@@ -125,6 +128,7 @@ Shader "Custom/Terrain"
                 if (enableErosion)
                 {
                     float erosionSlopeFactor = smoothstep(erosionSlopeThreshold, erosionSlopeThreshold + 0.25, slope) * erosionStrength;
+                    erosionSlopeFactor *= step(normalizedWaterLevel, heightPercent);
                     if (erosionSlopeFactor > 0.0)
                     {
                         float2 streakCoord = float2((IN.positionWS.x + IN.positionWS.z), IN.positionWS.y * 0.3) / erosionScale;
@@ -134,7 +138,7 @@ Shader "Custom/Terrain"
                 }
                 if (enableBog)
                 {
-                    float moisture = ValueNoise(IN.positionWS.xz / moistureScale);
+                    float moisture = ValueNoise((IN.positionWS.xz + moistureOffset) / moistureScale);
 
                     float bogHeightFactor = smoothstep(bogMinHeight, bogMinHeight + 0.05, heightPercent);
                     bogHeightFactor *= 1.0 - smoothstep(bogMaxHeight, bogMaxHeight + 0.1, heightPercent);
@@ -143,6 +147,7 @@ Shader "Custom/Terrain"
 
                     float bogFactor = smoothstep(bogMoistureThreshold - 0.1, bogMoistureThreshold, moisture);
                     bogFactor *= bogHeightFactor * bogSlopeFactor;
+                    bogFactor *= step(landThreshold, heightPercent);
 
                     albedo = lerp(albedo, bogTint.rgb, bogFactor);
                 }

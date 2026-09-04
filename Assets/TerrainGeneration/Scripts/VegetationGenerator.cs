@@ -26,31 +26,34 @@ public static class VegetationGenerator
     public static VegetationPlacementData GeneratePlacements(
         Vector2 chunkWorldMin, Vector2 chunkWorldMax,
         HeightMap heightMap, float terrainMinHeight, float terrainMaxHeight,
-        VegetationSettings vegSettings, float moistureScale,
+        VegetationSettings vegSettings, EnvironmentDefinitions environmentDefinitions,
         int numVertsPerLine, float meshScale)
     {
         VegetationPlacementData data = new VegetationPlacementData();
+        if (vegSettings == null || environmentDefinitions == null) return data;
+
         Vector2 chunkWorldCentre = (chunkWorldMin + chunkWorldMax) * 0.5f;
 
-        GenerateType(vegSettings.trees, data.trees, TreeVariants, 1, chunkWorldMin, chunkWorldMax,
-            heightMap, terrainMinHeight, terrainMaxHeight, vegSettings.minimumLandHeightPercent,
-            vegSettings.seed, moistureScale, chunkWorldCentre, numVertsPerLine, meshScale);
-        GenerateType(vegSettings.grass, data.grass, GrassVariants, 2, chunkWorldMin, chunkWorldMax,
-            heightMap, terrainMinHeight, terrainMaxHeight, vegSettings.minimumLandHeightPercent,
-            vegSettings.seed, moistureScale, chunkWorldCentre, numVertsPerLine, meshScale);
-        GenerateType(vegSettings.rocks, data.rocks, RockVariants, 3, chunkWorldMin, chunkWorldMax,
-            heightMap, terrainMinHeight, terrainMaxHeight, vegSettings.minimumLandHeightPercent,
-            vegSettings.seed, moistureScale, chunkWorldCentre, numVertsPerLine, meshScale);
+        GenerateType(vegSettings.trees, EnvironmentResourceType.Tree, data.trees, TreeVariants, 1,
+            chunkWorldMin, chunkWorldMax, heightMap, terrainMinHeight, terrainMaxHeight,
+            environmentDefinitions, vegSettings.seed, chunkWorldCentre, numVertsPerLine, meshScale);
+        GenerateType(vegSettings.grass, EnvironmentResourceType.Grass, data.grass, GrassVariants, 2,
+            chunkWorldMin, chunkWorldMax, heightMap, terrainMinHeight, terrainMaxHeight,
+            environmentDefinitions, vegSettings.seed, chunkWorldCentre, numVertsPerLine, meshScale);
+        GenerateType(vegSettings.rocks, EnvironmentResourceType.Rock, data.rocks, RockVariants, 3,
+            chunkWorldMin, chunkWorldMax, heightMap, terrainMinHeight, terrainMaxHeight,
+            environmentDefinitions, vegSettings.seed, chunkWorldCentre, numVertsPerLine, meshScale);
 
         return data;
     }
 
-    static void GenerateType(VegetationTypeSettings settings, List<VegetationInstance> output, int variantCount, int typeSalt,
+    static void GenerateType(VegetationTypeSettings settings, EnvironmentResourceType resourceType,
+        List<VegetationInstance> output, int variantCount, int typeSalt,
         Vector2 chunkWorldMin, Vector2 chunkWorldMax, HeightMap heightMap,
-        float terrainMinHeight, float terrainMaxHeight, float minimumLandHeightPercent,
-        int seed, float moistureScale, Vector2 chunkWorldCentre, int numVertsPerLine, float meshScale)
+        float terrainMinHeight, float terrainMaxHeight, EnvironmentDefinitions environmentDefinitions,
+        int seed, Vector2 chunkWorldCentre, int numVertsPerLine, float meshScale)
     {
-        if (!settings.enabled) return;
+        if (settings == null || !settings.enabled) return;
 
         float cellSize = Mathf.Max(settings.cellSize, 0.5f);
         int gxMin = Mathf.FloorToInt(chunkWorldMin.x / cellSize) - 1;
@@ -76,22 +79,17 @@ public static class VegetationGenerator
                     continue;
                 }
 
-                float densityRoll = ValueNoise.Hash21(cellOrigin + new Vector2(saltBase, 61.7f));
-                if (densityRoll > settings.density) continue;
-
-                if (!SampleTerrain(worldPos, heightMap, chunkWorldCentre, numVertsPerLine, meshScale,
-                    out float worldY, out float slope, out Vector3 normal))
+                if (!EnvironmentSampler.TrySampleBase(worldPos, heightMap, terrainMinHeight, terrainMaxHeight,
+                    environmentDefinitions, chunkWorldCentre, numVertsPerLine, meshScale,
+                    out EnvironmentSample environmentSample))
                 {
                     continue;
                 }
 
-                float heightPercent = Mathf.InverseLerp(terrainMinHeight, terrainMaxHeight, worldY);
-                float minimumAllowedHeight = Mathf.Max(minimumLandHeightPercent, settings.minHeightPercent);
-                if (heightPercent < minimumAllowedHeight || heightPercent > settings.maxHeightPercent) continue;
-                if (slope > settings.maxSlope) continue;
-
-                float moisture = ValueNoise.Sample(worldPos / Mathf.Max(moistureScale, 0.01f));
-                if (moisture < settings.minMoisture || moisture > settings.maxMoisture) continue;
+                float localDensity = EnvironmentSampler.GetResourceDensity(
+                    environmentSample, environmentDefinitions, settings, resourceType);
+                float densityRoll = ValueNoise.Hash21(cellOrigin + new Vector2(saltBase, 61.7f));
+                if (localDensity <= 0f || densityRoll >= localDensity) continue;
 
                 float variantRoll = ValueNoise.Hash21(cellOrigin + new Vector2(saltBase, 88.3f));
                 int variant = Mathf.Clamp(Mathf.FloorToInt(variantRoll * variantCount), 0, variantCount - 1);
@@ -99,13 +97,13 @@ public static class VegetationGenerator
                 float scaleRoll = ValueNoise.Hash21(cellOrigin + new Vector2(saltBase, 44.4f));
 
                 Quaternion spin = Quaternion.Euler(0, rotRoll * 360f, 0);
-                Quaternion slopeAlign = Quaternion.FromToRotation(Vector3.up, normal);
+                Quaternion slopeAlign = Quaternion.FromToRotation(Vector3.up, environmentSample.surfaceNormal);
                 Quaternion surfaceRotation = Quaternion.Slerp(Quaternion.identity, slopeAlign, settings.surfaceAlignment);
 
                 output.Add(new VegetationInstance
                 {
                     variantIndex = variant,
-                    position = new Vector3(worldPos.x, worldY - settings.groundSink, worldPos.y),
+                    position = new Vector3(worldPos.x, environmentSample.height - settings.groundSink, worldPos.y),
                     rotation = surfaceRotation * spin,
                     yawDegrees = rotRoll * 360f,
                     scale = Mathf.Lerp(settings.minScale, settings.maxScale, scaleRoll),
@@ -114,75 +112,24 @@ public static class VegetationGenerator
         }
     }
 
-    static bool SampleTerrain(Vector2 worldPos, HeightMap heightMap, Vector2 chunkWorldCentre,
-        int numVertsPerLine, float meshScale, out float worldY, out float slope, out Vector3 normal)
-    {
-
-        float halfWorldSize = (numVertsPerLine - 3) * meshScale * 0.5f;
-        float fi = (worldPos.x - chunkWorldCentre.x + halfWorldSize) / meshScale + 1f;
-        float fj = (chunkWorldCentre.y + halfWorldSize - worldPos.y) / meshScale + 1f;
-
-        int i0 = Mathf.FloorToInt(fi);
-        int j0 = Mathf.FloorToInt(fj);
-
-        if (i0 < 1 || i0 > numVertsPerLine - 3 || j0 < 1 || j0 > numVertsPerLine - 3)
-        {
-            worldY = 0f;
-            slope = 1f;
-            normal = Vector3.up;
-            return false;
-        }
-
-        float tx = fi - i0;
-        float tz = fj - j0;
-        float h00 = heightMap.values[i0, j0];
-        float h10 = heightMap.values[i0 + 1, j0];
-        float h01 = heightMap.values[i0, j0 + 1];
-        float h11 = heightMap.values[i0 + 1, j0 + 1];
-
-        if (tz >= tx)
-        {
-            worldY = (1f - tz) * h00 + tx * h11 + (tz - tx) * h01;
-        }
-        else
-        {
-            worldY = (1f - tx) * h00 + (tx - tz) * h10 + tz * h11;
-        }
-
-        int i = Mathf.RoundToInt(fi);
-        int j = Mathf.RoundToInt(fj);
-        float hL = heightMap.values[i - 1, j];
-        float hR = heightMap.values[i + 1, j];
-        float hPositiveZ = heightMap.values[i, j - 1];
-        float hNegativeZ = heightMap.values[i, j + 1];
-
-        float heightDerivativeX = (hR - hL) / (2f * meshScale);
-        float heightDerivativeZ = (hPositiveZ - hNegativeZ) / (2f * meshScale);
-        float gradMag = Mathf.Sqrt(heightDerivativeX * heightDerivativeX + heightDerivativeZ * heightDerivativeZ);
-        float normalY = 1f / Mathf.Sqrt(1f + gradMag * gradMag);
-        slope = 1f - normalY;
-
-        normal = new Vector3(-heightDerivativeX, 1f, -heightDerivativeZ).normalized;
-
-        return true;
-    }
-
     public static VegetationPlacementData ProjectPlacementsToLOD(
         VegetationPlacementData source, HeightMap heightMap,
         float terrainMinHeight, float terrainMaxHeight,
-        VegetationSettings vegSettings, Vector2 chunkWorldCentre,
+        VegetationSettings vegSettings, EnvironmentDefinitions environmentDefinitions,
+        Vector2 chunkWorldCentre,
         int numVertsPerLine, float meshScale, int levelOfDetail)
     {
         VegetationPlacementData projected = new VegetationPlacementData();
+        if (vegSettings == null || environmentDefinitions == null) return projected;
 
         ProjectTypeToLOD(source.trees, projected.trees, vegSettings.trees, heightMap,
-            terrainMinHeight, terrainMaxHeight, vegSettings.minimumLandHeightPercent,
+            terrainMinHeight, terrainMaxHeight, environmentDefinitions,
             chunkWorldCentre, numVertsPerLine, meshScale, levelOfDetail);
         ProjectTypeToLOD(source.grass, projected.grass, vegSettings.grass, heightMap,
-            terrainMinHeight, terrainMaxHeight, vegSettings.minimumLandHeightPercent,
+            terrainMinHeight, terrainMaxHeight, environmentDefinitions,
             chunkWorldCentre, numVertsPerLine, meshScale, levelOfDetail);
         ProjectTypeToLOD(source.rocks, projected.rocks, vegSettings.rocks, heightMap,
-            terrainMinHeight, terrainMaxHeight, vegSettings.minimumLandHeightPercent,
+            terrainMinHeight, terrainMaxHeight, environmentDefinitions,
             chunkWorldCentre, numVertsPerLine, meshScale, levelOfDetail);
 
         return projected;
@@ -191,11 +138,9 @@ public static class VegetationGenerator
     static void ProjectTypeToLOD(
         List<VegetationInstance> source, List<VegetationInstance> output,
         VegetationTypeSettings settings, HeightMap heightMap,
-        float terrainMinHeight, float terrainMaxHeight, float minimumLandHeightPercent,
+        float terrainMinHeight, float terrainMaxHeight, EnvironmentDefinitions environmentDefinitions,
         Vector2 chunkWorldCentre, int numVertsPerLine, float meshScale, int levelOfDetail)
     {
-        float minimumAllowedHeight = Mathf.Max(minimumLandHeightPercent, settings.minHeightPercent);
-
         for (int i = 0; i < source.Count; i++)
         {
             VegetationInstance instance = source[i];
@@ -207,7 +152,8 @@ public static class VegetationGenerator
             }
 
             float heightPercent = Mathf.InverseLerp(terrainMinHeight, terrainMaxHeight, worldY);
-            if (heightPercent + 0.0001f < minimumAllowedHeight) continue;
+            if (!environmentDefinitions.SupportsTerrestrialVegetation(heightPercent)) continue;
+            if (heightPercent + 0.0001f < settings.minHeightPercent) continue;
 
             Quaternion spin = Quaternion.Euler(0f, instance.yawDegrees, 0f);
             Quaternion slopeAlign = Quaternion.FromToRotation(Vector3.up, normal);

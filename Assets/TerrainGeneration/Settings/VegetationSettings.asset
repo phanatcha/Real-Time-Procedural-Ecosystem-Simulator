@@ -13,7 +13,6 @@ MonoBehaviour:
   m_Name: VegetationSettings
   m_EditorClassIdentifier: Assembly-CSharp::VegetationSettings
   seed: 0
-  minimumLandHeightPercent: 0.37
   trees:
     enabled: 1
     cellSize: 6
