@@ -28,5 +28,10 @@ MonoBehaviour:
   temperatureScale: 1200
   temperatureOffset: {x: 417.3, y: -286.9}
   resourcePatchScale: 180
+  resourceDetailScale: 62
+  resourceDetailStrength: 0.22
+  treePatchMinimum: 0.52
+  grassPatchMinimum: 0.66
+  rockPatchMinimum: 0.58
   waterAvailabilityFalloff: 0.18
   moistureWaterContribution: 0.65

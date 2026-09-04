@@ -94,6 +94,16 @@ public class EnvironmentDefinitions : UpdatableData
     [Header("Resources")]
     [Min(0.01f)]
     public float resourcePatchScale = 180f;
+    [Min(0.01f)]
+    public float resourceDetailScale = 62f;
+    [Range(0f, 1f)]
+    public float resourceDetailStrength = 0.22f;
+    [Range(0f, 1f)]
+    public float treePatchMinimum = 0.52f;
+    [Range(0f, 1f)]
+    public float grassPatchMinimum = 0.66f;
+    [Range(0f, 1f)]
+    public float rockPatchMinimum = 0.58f;
     [Range(0.01f, 1f)]
     public float waterAvailabilityFalloff = 0.18f;
     [Range(0f, 1f)]
@@ -217,21 +227,32 @@ public class EnvironmentDefinitions : UpdatableData
     public float SampleResourcePatch(Vector2 worldPosition, EnvironmentResourceType resourceType)
     {
         Vector2 salt;
+        Vector2 detailSalt;
+        float patchMinimum;
         switch (resourceType)
         {
             case EnvironmentResourceType.Tree:
                 salt = new Vector2(137.1f, 311.7f);
+                detailSalt = new Vector2(-81.3f, 529.4f);
+                patchMinimum = treePatchMinimum;
                 break;
             case EnvironmentResourceType.Grass:
                 salt = new Vector2(-219.4f, 83.6f);
+                detailSalt = new Vector2(384.7f, -194.2f);
+                patchMinimum = grassPatchMinimum;
                 break;
             default:
                 salt = new Vector2(496.2f, -157.8f);
+                detailSalt = new Vector2(-443.8f, -271.5f);
+                patchMinimum = rockPatchMinimum;
                 break;
         }
 
-        float patch = ValueNoise.Sample((worldPosition + salt) / Mathf.Max(resourcePatchScale, 0.01f));
-        return Mathf.Lerp(0.72f, 1f, patch);
+        float broadPatch = ValueNoise.Sample((worldPosition + salt) / Mathf.Max(resourcePatchScale, 0.01f));
+        float detailPatch = ValueNoise.Sample((worldPosition + detailSalt) / Mathf.Max(resourceDetailScale, 0.01f));
+        float patch = Mathf.Lerp(broadPatch, detailPatch, resourceDetailStrength);
+        patch = patch * patch * (3f - 2f * patch);
+        return Mathf.Lerp(patchMinimum, 1f, patch);
     }
 
 #if UNITY_EDITOR
@@ -247,6 +268,11 @@ public class EnvironmentDefinitions : UpdatableData
         moistureScale = Mathf.Max(moistureScale, 0.01f);
         temperatureScale = Mathf.Max(temperatureScale, 0.01f);
         resourcePatchScale = Mathf.Max(resourcePatchScale, 0.01f);
+        resourceDetailScale = Mathf.Max(resourceDetailScale, 0.01f);
+        resourceDetailStrength = Mathf.Clamp01(resourceDetailStrength);
+        treePatchMinimum = Mathf.Clamp01(treePatchMinimum);
+        grassPatchMinimum = Mathf.Clamp01(grassPatchMinimum);
+        rockPatchMinimum = Mathf.Clamp01(rockPatchMinimum);
         waterAvailabilityFalloff = Mathf.Max(waterAvailabilityFalloff, 0.01f);
         base.OnValidate();
     }

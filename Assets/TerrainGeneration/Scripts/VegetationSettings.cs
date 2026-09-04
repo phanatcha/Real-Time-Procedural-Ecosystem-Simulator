@@ -43,14 +43,14 @@ public class VegetationSettings : ScriptableObject
 
     public VegetationTypeSettings trees = new VegetationTypeSettings
     {
-        cellSize = 6f,
-        density = 0.9f,
+        cellSize = 6.5f,
+        density = 0.82f,
         minHeightPercent = 0.38f,
         maxHeightPercent = 0.76f,
         maxSlope = 0.22f,
         maxMoisture = 1f,
-        minScale = 0.9f,
-        maxScale = 1.45f,
+        minScale = 0.85f,
+        maxScale = 1.5f,
         groundSink = 0.5f,
         surfaceAlignment = 0f,
     };
