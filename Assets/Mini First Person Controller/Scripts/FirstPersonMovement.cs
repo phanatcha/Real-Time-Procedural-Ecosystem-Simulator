@@ -12,7 +12,7 @@ public class FirstPersonMovement : MonoBehaviour
     public float runSpeed = 9;
     public Key runningKey = Key.LeftShift;
 
-    Rigidbody rigidbody;
+    Rigidbody body;
     /// <summary> Functions to override movement speed. Will use the last added override. </summary>
     public List<System.Func<float>> speedOverrides = new List<System.Func<float>>();
 
@@ -21,7 +21,7 @@ public class FirstPersonMovement : MonoBehaviour
     void Awake()
     {
         // Get the rigidbody on this.
-        rigidbody = GetComponent<Rigidbody>();
+        body = GetComponent<Rigidbody>();
     }
 
     void FixedUpdate()
@@ -49,6 +49,6 @@ public class FirstPersonMovement : MonoBehaviour
         Vector2 targetVelocity = new Vector2(horizontalInput * targetMovingSpeed, verticalInput * targetMovingSpeed);
 
         // Apply movement.
-        rigidbody.linearVelocity = transform.rotation * new Vector3(targetVelocity.x, rigidbody.linearVelocity.y, targetVelocity.y);
+        body.linearVelocity = transform.rotation * new Vector3(targetVelocity.x, body.linearVelocity.y, targetVelocity.y);
     }
 }
