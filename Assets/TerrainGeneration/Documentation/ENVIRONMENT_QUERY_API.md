@@ -59,6 +59,17 @@ bool TryReadEnvironment(float worldX, float worldZ, out EnvironmentSample enviro
 
 Call it from Unity's main thread because its configuration is stored in Unity `ScriptableObject` assets.
 
+For high-frequency runtime systems that must never generate terrain synchronously, use the cached-only variant:
+
+```csharp
+if (environmentSampler.TrySampleCached(worldPosition, out EnvironmentSample environment))
+{
+    ReadEnvironment(environment);
+}
+```
+
+`TrySampleCached` returns `false` when the requested chunk is not already cached and leaves the cache unchanged. The procedural temperature bridge uses this behavior by default.
+
 ## `EnvironmentSample` contract
 
 All continuous environmental values are normalized to `0..1` unless stated otherwise.

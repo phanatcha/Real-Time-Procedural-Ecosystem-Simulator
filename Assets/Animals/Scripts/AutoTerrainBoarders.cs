@@ -4,56 +4,90 @@ public class AutoTerrainBorders : MonoBehaviour
 {
     [Header("Terrain Settings")]
     public Terrain activeTerrain;
-    
+    public AnimalTerrainWorld proceduralTerrain;
+
     [Header("Border Dimensions")]
     public float wallHeight = 100f;
     public float wallThickness = 5f;
 
     void Start()
     {
-        if (activeTerrain == null)
+        if (proceduralTerrain == null) proceduralTerrain = AnimalTerrainWorld.Active;
+        if (proceduralTerrain != null && proceduralTerrain.IsConfigured)
         {
-            activeTerrain = Terrain.activeTerrain;
+            GenerateProceduralBorders();
+            return;
         }
 
+        if (activeTerrain == null) activeTerrain = Terrain.activeTerrain;
         if (activeTerrain != null)
         {
-            GenerateBorders();
+            GenerateTerrainBorders();
         }
         else
         {
-            Debug.LogError("No terrain found to build borders around!");
+            Debug.LogWarning("No terrain source was found for animal borders.", this);
         }
     }
 
-    void GenerateBorders()
+    void GenerateProceduralBorders()
     {
-        TerrainData tData = activeTerrain.terrainData;
-        Vector3 tPos = activeTerrain.transform.position;
+        float extent = Mathf.Max(1f, proceduralTerrain.WorldRadius - proceduralTerrain.boundaryInset);
+        float size = extent * 2f;
+        HeightMapSettings settings = proceduralTerrain.terrainGenerator.heightMapSettings;
+        float totalHeight = Mathf.Max(wallHeight, settings.maxHeight - settings.minHeight + wallHeight);
+        float centerY = (settings.minHeight + settings.maxHeight) * 0.5f;
 
-        float width = tData.size.x;
-        float length = tData.size.z;
-        float halfHeight = wallHeight / 2f;
-        
-        float inset = 5f; 
-
-        CreateWall("Border_North", new Vector3(tPos.x + width / 2, tPos.y + halfHeight, tPos.z + length - inset), new Vector3(width, wallHeight, wallThickness));
-        CreateWall("Border_South", new Vector3(tPos.x + width / 2, tPos.y + halfHeight, tPos.z + inset), new Vector3(width, wallHeight, wallThickness));
-        CreateWall("Border_East", new Vector3(tPos.x + width - inset, tPos.y + halfHeight, tPos.z + length / 2), new Vector3(wallThickness, wallHeight, length));
-        CreateWall("Border_West", new Vector3(tPos.x + inset, tPos.y + halfHeight, tPos.z + length / 2), new Vector3(wallThickness, wallHeight, length));
+        CreateOrUpdateWall("Border_North", new Vector3(0f, centerY, extent),
+            new Vector3(size, totalHeight, wallThickness));
+        CreateOrUpdateWall("Border_South", new Vector3(0f, centerY, -extent),
+            new Vector3(size, totalHeight, wallThickness));
+        CreateOrUpdateWall("Border_East", new Vector3(extent, centerY, 0f),
+            new Vector3(wallThickness, totalHeight, size));
+        CreateOrUpdateWall("Border_West", new Vector3(-extent, centerY, 0f),
+            new Vector3(wallThickness, totalHeight, size));
     }
 
-    void CreateWall(string wallName, Vector3 position, Vector3 scale)
+    void GenerateTerrainBorders()
     {
-        GameObject wall = new GameObject(wallName);
+        TerrainData terrainData = activeTerrain.terrainData;
+        Vector3 terrainPosition = activeTerrain.transform.position;
+        float width = terrainData.size.x;
+        float length = terrainData.size.z;
+        float halfHeight = wallHeight * 0.5f;
+        const float inset = 5f;
+
+        CreateOrUpdateWall("Border_North",
+            new Vector3(terrainPosition.x + width * 0.5f, terrainPosition.y + halfHeight,
+                terrainPosition.z + length - inset),
+            new Vector3(width, wallHeight, wallThickness));
+        CreateOrUpdateWall("Border_South",
+            new Vector3(terrainPosition.x + width * 0.5f, terrainPosition.y + halfHeight,
+                terrainPosition.z + inset),
+            new Vector3(width, wallHeight, wallThickness));
+        CreateOrUpdateWall("Border_East",
+            new Vector3(terrainPosition.x + width - inset, terrainPosition.y + halfHeight,
+                terrainPosition.z + length * 0.5f),
+            new Vector3(wallThickness, wallHeight, length));
+        CreateOrUpdateWall("Border_West",
+            new Vector3(terrainPosition.x + inset, terrainPosition.y + halfHeight,
+                terrainPosition.z + length * 0.5f),
+            new Vector3(wallThickness, wallHeight, length));
+    }
+
+    void CreateOrUpdateWall(string wallName, Vector3 position, Vector3 size)
+    {
+        Transform existing = transform.Find(wallName);
+        GameObject wall = existing == null ? new GameObject(wallName) : existing.gameObject;
+        wall.transform.SetParent(transform, true);
         wall.transform.position = position;
-        
-        BoxCollider col = wall.AddComponent<BoxCollider>();
-        col.size = scale;
-        col.isTrigger = true;
+        wall.transform.rotation = Quaternion.identity;
+        wall.transform.localScale = Vector3.one;
 
+        BoxCollider collider = wall.GetComponent<BoxCollider>();
+        if (collider == null) collider = wall.AddComponent<BoxCollider>();
+        collider.size = size;
+        collider.isTrigger = true;
         wall.tag = "Border";
-
-        wall.transform.parent = this.transform;
     }
 }

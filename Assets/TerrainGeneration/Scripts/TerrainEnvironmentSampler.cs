@@ -65,19 +65,32 @@ public sealed class TerrainEnvironmentSampler
 
         Vector2Int chunkCoordinate = TerrainGrid.WorldToChunkCoordinate(worldPosition, meshSettings);
         HeightMap heightMap = GetOrGenerateHeightMap(chunkCoordinate);
-        Vector2 chunkWorldCentre = TerrainGrid.ChunkCoordinateToWorldPosition(chunkCoordinate, meshSettings);
+        return TrySampleHeightMap(worldPosition, chunkCoordinate, heightMap, out sample);
+    }
 
-        return EnvironmentSampler.TrySample(
-            worldPosition,
-            heightMap,
-            heightMapSettings.minHeight,
-            heightMapSettings.maxHeight,
-            environmentDefinitions,
-            vegetationSettings,
-            chunkWorldCentre,
-            meshSettings.numVertsPerLine,
-            meshSettings.meshScale,
-            out sample);
+    public bool TrySampleCached(Vector3 worldPosition, out EnvironmentSample sample)
+    {
+        return TrySampleCached(new Vector2(worldPosition.x, worldPosition.z), out sample);
+    }
+
+    public bool TrySampleCached(float worldX, float worldZ, out EnvironmentSample sample)
+    {
+        return TrySampleCached(new Vector2(worldX, worldZ), out sample);
+    }
+
+    public bool TrySampleCached(Vector2 worldPosition, out EnvironmentSample sample)
+    {
+        sample = default;
+        if (!IsConfigured || !IsFinite(worldPosition.x) || !IsFinite(worldPosition.y)) return false;
+
+        Vector2Int chunkCoordinate = TerrainGrid.WorldToChunkCoordinate(worldPosition, meshSettings);
+        HeightMap heightMap;
+        lock (cacheLock)
+        {
+            if (!heightMapCache.TryGetValue(chunkCoordinate, out heightMap)) return false;
+        }
+
+        return TrySampleHeightMap(worldPosition, chunkCoordinate, heightMap, out sample);
     }
 
     public EnvironmentSample Sample(Vector2 worldPosition)
@@ -137,6 +150,23 @@ public sealed class TerrainEnvironmentSampler
             AddToCache(chunkCoordinate, generatedHeightMap);
             return generatedHeightMap;
         }
+    }
+
+    bool TrySampleHeightMap(Vector2 worldPosition, Vector2Int chunkCoordinate,
+        HeightMap heightMap, out EnvironmentSample sample)
+    {
+        Vector2 chunkWorldCentre = TerrainGrid.ChunkCoordinateToWorldPosition(chunkCoordinate, meshSettings);
+        return EnvironmentSampler.TrySample(
+            worldPosition,
+            heightMap,
+            heightMapSettings.minHeight,
+            heightMapSettings.maxHeight,
+            environmentDefinitions,
+            vegetationSettings,
+            chunkWorldCentre,
+            meshSettings.numVertsPerLine,
+            meshSettings.meshScale,
+            out sample);
     }
 
     void AddToCache(Vector2Int chunkCoordinate, HeightMap heightMap)

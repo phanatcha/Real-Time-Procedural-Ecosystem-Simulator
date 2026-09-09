@@ -5,7 +5,7 @@ using UnityEngine.Serialization;
 
 [DisallowMultipleComponent]
 [RequireComponent(typeof(NavMeshAgent), typeof(MeshRenderer))]
-public class SeekFood : MonoBehaviour
+public class SeekFood : MonoBehaviour, IEcosystemMaterializationLifecycle
 {
     private NavMeshAgent agent;
     private AnimalDecisionPolicy decisionPolicy;
@@ -277,6 +277,13 @@ public class SeekFood : MonoBehaviour
             SpeciesManager.Instance.DeregisterAgent(this, deathCause);
             registeredWithSpeciesManager = false;
         }
+    }
+
+    public void PrepareForAbstraction()
+    {
+        if (!registeredWithSpeciesManager || SpeciesManager.Instance == null) return;
+        SpeciesManager.Instance.UnregisterAgentWithoutDeath(this);
+        registeredWithSpeciesManager = false;
     }
 
     void Update()
@@ -930,6 +937,17 @@ public class SeekFood : MonoBehaviour
 
     void ClampCandidateToTerrain(ref Vector3 candidate)
     {
+        AnimalTerrainWorld terrainWorld = AnimalTerrainWorld.Active;
+        if (terrainWorld != null)
+        {
+            candidate = terrainWorld.ClampToHabitableBounds(candidate);
+            if (terrainWorld.TryFindWalkableGround(candidate, 30f, out Vector3 ground))
+            {
+                candidate = ground;
+            }
+            return;
+        }
+
         Terrain terrain = Terrain.activeTerrain;
         if (terrain == null)
         {
@@ -1064,6 +1082,12 @@ public class SeekFood : MonoBehaviour
 
     bool IsOutsideTerrainBounds()
     {
+        AnimalTerrainWorld terrainWorld = AnimalTerrainWorld.Active;
+        if (terrainWorld != null)
+        {
+            return !terrainWorld.IsInsideHabitableBounds(transform.position);
+        }
+
         Terrain terrain = Terrain.activeTerrain;
         if (terrain == null)
         {
@@ -1082,6 +1106,18 @@ public class SeekFood : MonoBehaviour
         ClearTargets();
         currentState = State.Escaping;
         timer = 0f;
+
+        AnimalTerrainWorld terrainWorld = AnimalTerrainWorld.Active;
+        if (terrainWorld != null)
+        {
+            if (terrainWorld.TryFindWalkableGroundTowardCenter(
+                transform.position, Mathf.Max(50f, wanderRadius), out Vector3 destination) &&
+                NavMesh.SamplePosition(destination, out NavMeshHit terrainHit, 25f, NavMesh.AllAreas))
+            {
+                TrySetDestination(terrainHit.position);
+            }
+            return;
+        }
 
         Terrain terrain = Terrain.activeTerrain;
         if (terrain == null)
@@ -1161,6 +1197,12 @@ public class SeekFood : MonoBehaviour
 
         Vector2 offset = Random.insideUnitCircle * 3f;
         Vector3 spawnPosition = transform.position + new Vector3(offset.x, 0f, offset.y);
+        AnimalTerrainWorld terrainWorld = AnimalTerrainWorld.Active;
+        if (terrainWorld != null &&
+            terrainWorld.TryFindWalkableGround(spawnPosition, 12f, out Vector3 groundPosition))
+        {
+            spawnPosition = groundPosition;
+        }
         if (NavMesh.SamplePosition(spawnPosition, out NavMeshHit hit, 6f, NavMesh.AllAreas))
         {
             spawnPosition = hit.position;

@@ -1,5 +1,10 @@
 using UnityEngine;
 
+public interface IEcosystemMaterializationLifecycle
+{
+    void PrepareForAbstraction();
+}
+
 public class EcosystemAnimalProxy : MonoBehaviour
 {
     [SerializeField]

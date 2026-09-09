@@ -137,6 +137,20 @@ public class TerrainEnvironmentSamplerTests
         Assert.That(sample.waterAvailability, Is.InRange(0f, 1f));
     }
 
+    [Test]
+    public void CachedOnlyQueriesDoNotGenerateTerrainData()
+    {
+        TerrainEnvironmentSampler sampler = CreateSampler();
+        Vector2 position = new Vector2(83.25f, -117.75f);
+
+        Assert.IsFalse(sampler.TrySampleCached(position, out _));
+        Assert.AreEqual(0, sampler.CachedChunkCount);
+        Assert.IsTrue(sampler.TrySample(position, out EnvironmentSample generated));
+        Assert.AreEqual(1, sampler.CachedChunkCount);
+        Assert.IsTrue(sampler.TrySampleCached(position, out EnvironmentSample cached));
+        AssertSamplesEqual(generated, cached);
+    }
+
     TerrainEnvironmentSampler CreateSampler()
     {
         return new TerrainEnvironmentSampler(heightSettings, meshSettings, definitions, vegetationSettings);
