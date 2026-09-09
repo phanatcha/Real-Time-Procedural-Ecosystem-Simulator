@@ -120,6 +120,14 @@ public class EcosystemSimulationController : MonoBehaviour
 
         destination.AddPopulation(proxy.SpeciesId, proxy.RepresentedPopulation);
         materializedAnimals.RemoveAt(index);
+        MonoBehaviour[] behaviours = proxy.GetComponents<MonoBehaviour>();
+        for (int behaviourIndex = 0; behaviourIndex < behaviours.Length; behaviourIndex++)
+        {
+            if (behaviours[behaviourIndex] is IEcosystemMaterializationLifecycle lifecycle)
+            {
+                lifecycle.PrepareForAbstraction();
+            }
+        }
         proxy.Detach(true);
         AnimalAbstracted?.Invoke(proxy);
         DestroyManagedObject(proxy.gameObject);
@@ -268,6 +276,7 @@ public class EcosystemSimulationController : MonoBehaviour
         cell.AddPopulation(species.Id, -representedPopulation);
         proxy.Initialize(this, species.Id, representedPopulation, cell.Coordinate);
         materializedAnimals.Add(proxy);
+        if (!animal.activeSelf) animal.SetActive(true);
         AnimalMaterialized?.Invoke(proxy);
         return true;
     }

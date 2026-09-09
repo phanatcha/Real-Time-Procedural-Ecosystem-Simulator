@@ -421,6 +421,26 @@ public class SpeciesManager : MonoBehaviour
         }
     }
 
+    public void UnregisterAgentWithoutDeath(SeekFood agent)
+    {
+        if (agent == null || !activeAgents.Remove(agent)) return;
+
+        string speciesName = agent.speciesName;
+        if (speciesPopulation.TryGetValue(speciesName, out int population))
+        {
+            population--;
+            TotalPopulation = Mathf.Max(0, TotalPopulation - 1);
+            if (population > 0)
+            {
+                speciesPopulation[speciesName] = population;
+            }
+            else
+            {
+                speciesPopulation.Remove(speciesName);
+            }
+        }
+    }
+
     public void RecordConsumption(SeekFood agent, FoodType foodType, float rawEnergy, float digestibleEnergy)
     {
         if (agent == null)
