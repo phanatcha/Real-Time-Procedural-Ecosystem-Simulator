@@ -30,6 +30,12 @@ public class SeedManager : MonoBehaviour
     [SerializeField]
     private TerrainGenerator terrainGenerator;
 
+    [SerializeField]
+    private AnimalSpawner animalSpawner;
+
+    [SerializeField]
+    private AnimalSpawnHeatmap animalSpawnHeatmap;
+
     //[SerializeField]
     //private BiomeGenerator biomeGenerator;
 
@@ -124,6 +130,28 @@ public class SeedManager : MonoBehaviour
         else
         {
             Debug.LogError("TerrainGenerator is not assigned!");
+        }
+
+        if (animalSpawner != null)
+        {
+            int animalSeed = GetSeed("Animals");
+
+            Debug.Log($"Animal Seed: {animalSeed}");
+
+            animalSpawner.SpawnAnimals(animalSeed);
+        }
+        else
+        {
+            Debug.LogWarning("AnimalSpawner is not assigned!");
+        }
+
+        if (animalSpawnHeatmap != null)
+        {
+            animalSpawnHeatmap.GenerateHeatmap();
+        }
+        else
+        {
+            Debug.LogWarning("animatSpwan heat map is not assigned!");
         }
     }
 
