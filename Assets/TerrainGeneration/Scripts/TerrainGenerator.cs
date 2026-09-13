@@ -26,11 +26,16 @@ public class TerrainGenerator : MonoBehaviour {
 	float meshWorldSize;
 	int chunksVisibleInViewDst;
 
-	Dictionary<Vector2Int, TerrainChunk> terrainChunkDictionary = new Dictionary<Vector2Int, TerrainChunk>();
+    private bool terrainGenerated = false;
+
+    Dictionary<Vector2Int, TerrainChunk> terrainChunkDictionary = new Dictionary<Vector2Int, TerrainChunk>();
 	List<TerrainChunk> visibleTerrainChunks = new List<TerrainChunk>();
 	TerrainEnvironmentSampler worldEnvironmentSampler;
 
-	public EnvironmentDefinitions EnvironmentDefinitions {
+
+    private HeightMapSettings originalHeightMapSettings;
+
+    public EnvironmentDefinitions EnvironmentDefinitions {
 		get {
 			return textureSettings == null ? null : textureSettings.environmentDefinitions;
 		}
@@ -43,35 +48,48 @@ public class TerrainGenerator : MonoBehaviour {
 		}
 	}
 
-	void Start() {
-		EnsureEnvironmentSampler();
 
-		textureSettings.ApplyToMaterial (mapMaterial);
-		textureSettings.UpdateMeshHeights (mapMaterial, heightMapSettings.minHeight, heightMapSettings.maxHeight);
+    private void Awake()
+    {
+        originalHeightMapSettings = heightMapSettings;
+    }
+    void Start() {
+		//EnsureEnvironmentSampler();
 
-		float maxViewDst = detailLevels [detailLevels.Length - 1].visibleDstThreshold;
-		meshWorldSize = meshSettings.meshWorldSize;
-		chunksVisibleInViewDst = Mathf.RoundToInt(maxViewDst / meshWorldSize);
+		//textureSettings.ApplyToMaterial (mapMaterial);
+		//textureSettings.UpdateMeshHeights (mapMaterial, heightMapSettings.minHeight, heightMapSettings.maxHeight);
 
-		UpdateVisibleChunks ();
+		//float maxViewDst = detailLevels [detailLevels.Length - 1].visibleDstThreshold;
+		//meshWorldSize = meshSettings.meshWorldSize;
+		//chunksVisibleInViewDst = Mathf.RoundToInt(maxViewDst / meshWorldSize);
+
+		//UpdateVisibleChunks ();
 	}
 
-	void Update() {
-		viewerPosition = new Vector2 (viewer.position.x, viewer.position.z);
+    void Update()
+    {
+        if (!terrainGenerated)
+            return;
 
-		if (viewerPosition != viewerPositionOld) {
-			foreach (TerrainChunk chunk in visibleTerrainChunks) {
-				chunk.UpdateCollisionMesh ();
-			}
-		}
+        viewerPosition = new Vector2(viewer.position.x, viewer.position.z);
 
-		if ((viewerPositionOld - viewerPosition).sqrMagnitude > sqrViewerMoveThresholdForChunkUpdate) {
-			viewerPositionOld = viewerPosition;
-			UpdateVisibleChunks ();
-		}
-	}
+        if (viewerPosition != viewerPositionOld)
+        {
+            foreach (TerrainChunk chunk in visibleTerrainChunks)
+            {
+                chunk.UpdateCollisionMesh();
+            }
+        }
 
-	void UpdateVisibleChunks() {
+        if ((viewerPositionOld - viewerPosition).sqrMagnitude >
+            sqrViewerMoveThresholdForChunkUpdate)
+        {
+            viewerPositionOld = viewerPosition;
+            UpdateVisibleChunks();
+        }
+    }
+
+    void UpdateVisibleChunks() {
 		HashSet<Vector2Int> alreadyUpdatedChunkCoords = new HashSet<Vector2Int> ();
 		for (int i = visibleTerrainChunks.Count-1; i >= 0; i--) {
 			alreadyUpdatedChunkCoords.Add (visibleTerrainChunks [i].coord);
@@ -127,6 +145,63 @@ public class TerrainGenerator : MonoBehaviour {
 		worldEnvironmentSampler = new TerrainEnvironmentSampler(
 			heightMapSettings, meshSettings, definitions, vegetationSettings);
 	}
+
+    public void GenerateTerrain(int terrainSeed)
+    {
+        Debug.Log($"Generating terrain with seed: {terrainSeed}");
+
+		ClearTerrain();
+
+        // Make runtime copy so we don't modify the original asset
+        heightMapSettings = Instantiate(originalHeightMapSettings);
+
+        // Apply our SeedManager terrain seed
+        heightMapSettings.noiseSettings.seed = terrainSeed;
+
+        EnsureEnvironmentSampler();
+
+        textureSettings.ApplyToMaterial(mapMaterial);
+
+        textureSettings.UpdateMeshHeights(
+            mapMaterial,
+            heightMapSettings.minHeight,
+            heightMapSettings.maxHeight
+        );
+
+        float maxViewDst =
+            detailLevels[detailLevels.Length - 1].visibleDstThreshold;
+
+        meshWorldSize = meshSettings.meshWorldSize;
+
+        chunksVisibleInViewDst =
+            Mathf.RoundToInt(maxViewDst / meshWorldSize);
+
+        viewerPosition =
+            new Vector2(viewer.position.x, viewer.position.z);
+
+        viewerPositionOld = viewerPosition;
+
+        terrainGenerated = true;
+
+        UpdateVisibleChunks();
+    }
+
+
+    private void ClearTerrain()
+    {
+        // Delete generated chunk GameObjects
+        foreach (Transform child in transform)
+        {
+            Destroy(child.gameObject);
+        }
+
+        terrainChunkDictionary.Clear();
+        visibleTerrainChunks.Clear();
+
+        worldEnvironmentSampler = null;
+
+        terrainGenerated = false;
+    }
 
 }
 
