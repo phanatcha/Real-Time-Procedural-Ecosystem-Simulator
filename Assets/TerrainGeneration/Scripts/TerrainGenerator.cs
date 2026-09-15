@@ -1,145 +1,692 @@
 using UnityEngine;
-using System.Collections;
 using System.Collections.Generic;
 
-public class TerrainGenerator : MonoBehaviour {
+public class TerrainGenerator : MonoBehaviour
+{
+    const float viewerMoveThresholdForChunkUpdate = 25f;
+    public event System.Action<MeshCollider> onTerrainColliderReady;
+    public event System.Action<TerrainChunk> onRenderMeshReady;
 
-	const float viewerMoveThresholdForChunkUpdate = 25f;
-	const float sqrViewerMoveThresholdForChunkUpdate = viewerMoveThresholdForChunkUpdate * viewerMoveThresholdForChunkUpdate;
+    public event System.Action<TerrainChunk> onTerrainRenderMeshReady;
+    const float sqrViewerMoveThresholdForChunkUpdate =
+        viewerMoveThresholdForChunkUpdate *
+        viewerMoveThresholdForChunkUpdate;
 
 
-	public int colliderLODIndex;
-	public LODInfo[] detailLevels;
+    [Header("LOD")]
+    public int colliderLODIndex;
+    public LODInfo[] detailLevels;
 
-	public MeshSettings meshSettings;
-	public HeightMapSettings heightMapSettings;
-	public TextureData textureSettings;
-	public VegetationSettings vegetationSettings;
 
-	public Transform viewer;
-	public Material mapMaterial;
-	public Material vegetationMaterial;
+    [Header("Terrain Settings")]
+    public MeshSettings meshSettings;
+    public HeightMapSettings heightMapSettings;
+    public TextureData textureSettings;
+    public VegetationSettings vegetationSettings;
 
-	Vector2 viewerPosition;
-	Vector2 viewerPositionOld;
 
-	float meshWorldSize;
-	int chunksVisibleInViewDst;
+    [Header("References")]
+    public Transform viewer;
 
-	Dictionary<Vector2Int, TerrainChunk> terrainChunkDictionary = new Dictionary<Vector2Int, TerrainChunk>();
-	List<TerrainChunk> visibleTerrainChunks = new List<TerrainChunk>();
-	TerrainEnvironmentSampler worldEnvironmentSampler;
+    public Material mapMaterial;
+    public Material vegetationMaterial;
 
-	public EnvironmentDefinitions EnvironmentDefinitions {
-		get {
-			return textureSettings == null ? null : textureSettings.environmentDefinitions;
-		}
-	}
 
-	public TerrainEnvironmentSampler WorldEnvironmentSampler {
-		get {
-			EnsureEnvironmentSampler();
-			return worldEnvironmentSampler;
-		}
-	}
+    [Header("Chunk Settings")]
 
-	void Start() {
-		EnsureEnvironmentSampler();
+    [Tooltip("Base name used for generated terrain chunks.")]
+    public string chunkName = "Terrain Chunk";
 
-		textureSettings.ApplyToMaterial (mapMaterial);
-		textureSettings.UpdateMeshHeights (mapMaterial, heightMapSettings.minHeight, heightMapSettings.maxHeight);
+    [Tooltip(
+        "Unity layer assigned to generated terrain chunks. " +
+        "Create this layer in Tags and Layers first."
+    )]
+    public string chunkLayerName = "AnimalSpawn";
 
-		float maxViewDst = detailLevels [detailLevels.Length - 1].visibleDstThreshold;
-		meshWorldSize = meshSettings.meshWorldSize;
-		chunksVisibleInViewDst = Mathf.RoundToInt(maxViewDst / meshWorldSize);
 
-		UpdateVisibleChunks ();
-	}
+    Vector2 viewerPosition;
+    Vector2 viewerPositionOld;
 
-	void Update() {
-		viewerPosition = new Vector2 (viewer.position.x, viewer.position.z);
+    float meshWorldSize;
 
-		if (viewerPosition != viewerPositionOld) {
-			foreach (TerrainChunk chunk in visibleTerrainChunks) {
-				chunk.UpdateCollisionMesh ();
-			}
-		}
+    int chunksVisibleInViewDst;
 
-		if ((viewerPositionOld - viewerPosition).sqrMagnitude > sqrViewerMoveThresholdForChunkUpdate) {
-			viewerPositionOld = viewerPosition;
-			UpdateVisibleChunks ();
-		}
-	}
+    int chunkLayer = -1;
 
-	void UpdateVisibleChunks() {
-		HashSet<Vector2Int> alreadyUpdatedChunkCoords = new HashSet<Vector2Int> ();
-		for (int i = visibleTerrainChunks.Count-1; i >= 0; i--) {
-			alreadyUpdatedChunkCoords.Add (visibleTerrainChunks [i].coord);
-			visibleTerrainChunks [i].UpdateTerrainChunk ();
-		}
 
-		Vector2Int currentChunkCoordinate = TerrainGrid.WorldToChunkCoordinate(viewerPosition, meshWorldSize);
+    private bool terrainGenerated = false;
 
-		for (int yOffset = -chunksVisibleInViewDst; yOffset <= chunksVisibleInViewDst; yOffset++) {
-			for (int xOffset = -chunksVisibleInViewDst; xOffset <= chunksVisibleInViewDst; xOffset++) {
-				Vector2Int viewedChunkCoord = new Vector2Int(currentChunkCoordinate.x + xOffset, currentChunkCoordinate.y + yOffset);
-				if (!alreadyUpdatedChunkCoords.Contains (viewedChunkCoord)) {
-					if (terrainChunkDictionary.ContainsKey (viewedChunkCoord)) {
-						terrainChunkDictionary [viewedChunkCoord].UpdateTerrainChunk ();
-					} else {
-						TerrainChunk newChunk = new TerrainChunk (viewedChunkCoord,heightMapSettings,meshSettings, detailLevels, colliderLODIndex, transform, viewer, mapMaterial, vegetationSettings, vegetationMaterial, EnvironmentDefinitions, WorldEnvironmentSampler);
-						terrainChunkDictionary.Add (viewedChunkCoord, newChunk);
-						newChunk.onVisibilityChanged += OnTerrainChunkVisibilityChanged;
-						newChunk.Load ();
-					}
-				}
 
-			}
-		}
-	}
+    Dictionary<Vector2Int, TerrainChunk>
+        terrainChunkDictionary =
+            new Dictionary<Vector2Int, TerrainChunk>();
 
-	void OnTerrainChunkVisibilityChanged(TerrainChunk chunk, bool isVisible) {
-		if (isVisible) {
-			visibleTerrainChunks.Add (chunk);
-		} else {
-			visibleTerrainChunks.Remove (chunk);
-		}
-	}
 
-	public bool TryGetEnvironmentSample(Vector3 worldPosition, out EnvironmentSample sample) {
-		return WorldEnvironmentSampler.TrySample(worldPosition, out sample);
-	}
+    List<TerrainChunk>
+        visibleTerrainChunks =
+            new List<TerrainChunk>();
 
-	public bool TryGetEnvironmentSample(Vector2 worldPosition, out EnvironmentSample sample) {
-		return WorldEnvironmentSampler.TrySample(worldPosition, out sample);
-	}
 
-	void EnsureEnvironmentSampler() {
-		EnvironmentDefinitions definitions = EnvironmentDefinitions;
-		if (worldEnvironmentSampler != null
-			&& worldEnvironmentSampler.HeightMapSettings == heightMapSettings
-			&& worldEnvironmentSampler.MeshSettings == meshSettings
-			&& worldEnvironmentSampler.EnvironmentDefinitions == definitions
-			&& worldEnvironmentSampler.VegetationSettings == vegetationSettings) {
-			return;
-		}
+    TerrainEnvironmentSampler
+        worldEnvironmentSampler;
 
-		worldEnvironmentSampler = new TerrainEnvironmentSampler(
-			heightMapSettings, meshSettings, definitions, vegetationSettings);
-	}
 
+    private HeightMapSettings
+        originalHeightMapSettings;
+
+
+    // ---------------------------------------------------------
+    // PROPERTIES
+    // ---------------------------------------------------------
+
+    public EnvironmentDefinitions EnvironmentDefinitions
+    {
+        get
+        {
+            return textureSettings == null
+                ? null
+                : textureSettings.environmentDefinitions;
+        }
+    }
+
+
+    public TerrainEnvironmentSampler WorldEnvironmentSampler
+    {
+        get
+        {
+            EnsureEnvironmentSampler();
+
+            return worldEnvironmentSampler;
+        }
+    }
+
+
+    // ---------------------------------------------------------
+    // UNITY
+    // ---------------------------------------------------------
+
+    private void Awake()
+    {
+        originalHeightMapSettings =
+            heightMapSettings;
+
+        CacheChunkLayer();
+    }
+
+
+    private void Update()
+    {
+        if (!terrainGenerated)
+            return;
+
+        if (viewer == null)
+            return;
+
+
+        viewerPosition =
+            new Vector2(
+                viewer.position.x,
+                viewer.position.z
+            );
+
+
+        // Update terrain collision meshes when viewer moves.
+        if (viewerPosition != viewerPositionOld)
+        {
+            foreach (
+                TerrainChunk chunk
+                in visibleTerrainChunks)
+            {
+                chunk.UpdateCollisionMesh();
+            }
+        }
+
+
+        // Update visible chunks only after moving far enough.
+        if ((viewerPositionOld - viewerPosition)
+            .sqrMagnitude >
+            sqrViewerMoveThresholdForChunkUpdate)
+        {
+            viewerPositionOld =
+                viewerPosition;
+
+            UpdateVisibleChunks();
+        }
+    }
+
+
+    // ---------------------------------------------------------
+    // CHUNK LAYER
+    // ---------------------------------------------------------
+
+    private void CacheChunkLayer()
+    {
+        chunkLayer =
+            LayerMask.NameToLayer(
+                chunkLayerName
+            );
+
+        if (chunkLayer == -1)
+        {
+            Debug.LogError(
+                $"TerrainGenerator: Layer " +
+                $"'{chunkLayerName}' does not exist.\n" +
+                $"Create it in " +
+                $"Edit > Project Settings > Tags and Layers."
+            );
+        }
+    }
+
+
+    private void ConfigureChunk(
+        TerrainChunk chunk,
+        Vector2Int coord)
+    {
+        if (chunk == null)
+            return;
+
+        GameObject chunkObject =
+            chunk.GameObject;
+
+        if (chunkObject == null)
+        {
+            Debug.LogError(
+                $"TerrainGenerator: " +
+                $"TerrainChunk {coord} has no GameObject."
+            );
+
+            return;
+        }
+
+
+        // Nice readable hierarchy name.
+        chunkObject.name =
+            $"{chunkName} ({coord.x}, {coord.y})";
+
+
+        // Assign layer.
+        if (chunkLayer >= 0)
+        {
+            chunkObject.layer =
+                chunkLayer;
+        }
+    }
+
+
+    // ---------------------------------------------------------
+    // CHUNK GENERATION
+    // ---------------------------------------------------------
+
+    private void UpdateVisibleChunks()
+    {
+        HashSet<Vector2Int>
+            alreadyUpdatedChunkCoords =
+                new HashSet<Vector2Int>();
+
+
+        // Update currently visible chunks.
+        for (
+            int i = visibleTerrainChunks.Count - 1;
+            i >= 0;
+            i--)
+        {
+            TerrainChunk chunk =
+                visibleTerrainChunks[i];
+
+            alreadyUpdatedChunkCoords.Add(
+                chunk.coord
+            );
+
+            chunk.UpdateTerrainChunk();
+        }
+
+
+        Vector2Int currentChunkCoordinate =
+            TerrainGrid.WorldToChunkCoordinate(
+                viewerPosition,
+                meshWorldSize
+            );
+
+
+        for (
+            int yOffset =
+                -chunksVisibleInViewDst;
+            yOffset <=
+                chunksVisibleInViewDst;
+            yOffset++)
+        {
+            for (
+                int xOffset =
+                    -chunksVisibleInViewDst;
+                xOffset <=
+                    chunksVisibleInViewDst;
+                xOffset++)
+            {
+                Vector2Int viewedChunkCoord =
+                    new Vector2Int(
+                        currentChunkCoordinate.x +
+                        xOffset,
+
+                        currentChunkCoordinate.y +
+                        yOffset
+                    );
+
+
+                if (alreadyUpdatedChunkCoords
+                    .Contains(viewedChunkCoord))
+                {
+                    continue;
+                }
+
+
+                if (terrainChunkDictionary
+                    .TryGetValue(
+                        viewedChunkCoord,
+                        out TerrainChunk existingChunk))
+                {
+                    existingChunk
+                        .UpdateTerrainChunk();
+
+                    continue;
+                }
+
+
+                // -------------------------------------
+                // CREATE NEW CHUNK
+                // -------------------------------------
+
+                TerrainChunk newChunk =
+                    new TerrainChunk(
+                        viewedChunkCoord,
+                        heightMapSettings,
+                        meshSettings,
+                        detailLevels,
+                        colliderLODIndex,
+                        transform,
+                        viewer,
+                        mapMaterial,
+                        vegetationSettings,
+                        vegetationMaterial,
+                        EnvironmentDefinitions,
+                        WorldEnvironmentSampler
+                    );
+
+
+                // Set name and layer immediately.
+                ConfigureChunk(
+                    newChunk,
+                    viewedChunkCoord
+                );
+
+
+                terrainChunkDictionary.Add(
+                    viewedChunkCoord,
+                    newChunk
+                );
+
+
+                newChunk.onVisibilityChanged +=
+                    OnTerrainChunkVisibilityChanged;
+
+
+                newChunk.onColliderReady += OnTerrainChunkColliderReady;
+
+                newChunk.onRenderMeshReady += OnTerrainChunkRenderMeshReady;
+                newChunk.Load();
+            }
+        }
+    }
+
+    private void OnTerrainChunkRenderMeshReady(TerrainChunk chunk)
+    {
+        if (chunk == null)
+        {
+            return;
+        }
+
+        onTerrainRenderMeshReady?.Invoke(chunk);
+    }
+    private void OnTerrainChunkVisibilityChanged(
+        TerrainChunk chunk,
+        bool isVisible)
+    {
+        if (isVisible)
+        {
+            if (!visibleTerrainChunks
+                .Contains(chunk))
+            {
+                visibleTerrainChunks.Add(
+                    chunk
+                );
+            }
+
+            // Animals require terrain physics.
+            chunk.UpdateCollisionMesh();
+        }
+        else
+        {
+            visibleTerrainChunks.Remove(
+                chunk
+            );
+        }
+    }
+    private void OnTerrainChunkColliderReady(
+    TerrainChunk chunk,
+    MeshCollider meshCollider)
+    {
+        if (meshCollider == null)
+        {
+            return;
+        }
+
+        onTerrainColliderReady?.Invoke(meshCollider);
+    }
+
+    // ---------------------------------------------------------
+    // ENVIRONMENT
+    // ---------------------------------------------------------
+
+    public bool TryGetEnvironmentSample(
+        Vector3 worldPosition,
+        out EnvironmentSample sample)
+    {
+        return WorldEnvironmentSampler
+            .TrySample(
+                worldPosition,
+                out sample
+            );
+    }
+
+
+    public bool TryGetEnvironmentSample(
+        Vector2 worldPosition,
+        out EnvironmentSample sample)
+    {
+        return WorldEnvironmentSampler
+            .TrySample(
+                worldPosition,
+                out sample
+            );
+    }
+
+
+    private void EnsureEnvironmentSampler()
+    {
+        EnvironmentDefinitions definitions =
+            EnvironmentDefinitions;
+
+
+        if (
+            worldEnvironmentSampler != null &&
+            worldEnvironmentSampler
+                .HeightMapSettings ==
+                heightMapSettings &&
+
+            worldEnvironmentSampler
+                .MeshSettings ==
+                meshSettings &&
+
+            worldEnvironmentSampler
+                .EnvironmentDefinitions ==
+                definitions &&
+
+            worldEnvironmentSampler
+                .VegetationSettings ==
+                vegetationSettings)
+        {
+            return;
+        }
+
+
+        worldEnvironmentSampler =
+            new TerrainEnvironmentSampler(
+                heightMapSettings,
+                meshSettings,
+                definitions,
+                vegetationSettings
+            );
+    }
+
+
+    // ---------------------------------------------------------
+    // TERRAIN GENERATION
+    // ---------------------------------------------------------
+
+    public void GenerateTerrain(
+        int terrainSeed)
+    {
+        Debug.Log(
+            $"Generating terrain with seed: " +
+            $"{terrainSeed}"
+        );
+
+
+        ClearTerrain();
+
+
+        // Refresh in case you changed the layer
+        // while testing in the editor.
+        CacheChunkLayer();
+
+
+        // Runtime copy.
+        heightMapSettings =
+            Instantiate(
+                originalHeightMapSettings
+            );
+
+
+        // Apply deterministic terrain seed.
+        heightMapSettings
+            .noiseSettings
+            .seed =
+                terrainSeed;
+
+
+        EnsureEnvironmentSampler();
+
+
+        textureSettings.ApplyToMaterial(
+            mapMaterial
+        );
+
+
+        textureSettings.UpdateMeshHeights(
+            mapMaterial,
+            heightMapSettings.minHeight,
+            heightMapSettings.maxHeight
+        );
+
+
+        float maxViewDst =
+            detailLevels[
+                detailLevels.Length - 1
+            ]
+            .visibleDstThreshold;
+
+
+        meshWorldSize =
+            meshSettings.meshWorldSize;
+
+
+        chunksVisibleInViewDst =
+            Mathf.RoundToInt(
+                maxViewDst /
+                meshWorldSize
+            );
+
+
+        viewerPosition =
+            new Vector2(
+                viewer.position.x,
+                viewer.position.z
+            );
+
+
+        viewerPositionOld =
+            viewerPosition;
+
+
+        terrainGenerated =
+            true;
+
+
+        UpdateVisibleChunks();
+    }
+
+
+    // ---------------------------------------------------------
+    // CLEAR TERRAIN
+    // ---------------------------------------------------------
+
+    private void ClearTerrain()
+    {
+        foreach (Transform child
+                 in transform)
+        {
+            Destroy(
+                child.gameObject
+            );
+        }
+
+
+        terrainChunkDictionary.Clear();
+
+        visibleTerrainChunks.Clear();
+
+
+        worldEnvironmentSampler =
+            null;
+
+
+        terrainGenerated =
+            false;
+    }
+
+
+    // ---------------------------------------------------------
+    // ANIMAL SPAWNING
+    // ---------------------------------------------------------
+
+
+    public List<TerrainChunk> GetVisibleTerrainChunks()
+    {
+        return new List<TerrainChunk>(visibleTerrainChunks);
+    }
+
+    public List<MeshCollider>
+        GetSpawnableTerrainColliders()
+    {
+        List<MeshCollider> result =
+            new List<MeshCollider>();
+
+
+        if (chunkLayer < 0)
+        {
+            CacheChunkLayer();
+
+            if (chunkLayer < 0)
+            {
+                return result;
+            }
+        }
+
+
+        MeshCollider[] colliders =
+            GetComponentsInChildren<
+                MeshCollider
+            >(true);
+
+
+        foreach (
+            MeshCollider col
+            in colliders)
+        {
+            if (col == null)
+                continue;
+
+
+            if (!col.gameObject
+                .activeInHierarchy)
+            {
+                continue;
+            }
+
+
+            if (!col.enabled)
+                continue;
+
+
+            if (col.sharedMesh == null)
+                continue;
+
+
+            // --------------------------------
+            // IMPORTANT:
+            // Only AnimalSpawn terrain chunks
+            // --------------------------------
+
+            if (col.gameObject.layer !=
+                chunkLayer)
+            {
+                continue;
+            }
+
+
+            // Ignore small mesh colliders,
+            // e.g. vegetation.
+            if (meshWorldSize > 0f)
+            {
+                if (
+                    col.bounds.size.x <
+                    meshWorldSize * 0.5f ||
+
+                    col.bounds.size.z <
+                    meshWorldSize * 0.5f)
+                {
+                    continue;
+                }
+            }
+
+
+            result.Add(col);
+        }
+
+
+        return result;
+    }
+
+
+    public bool HasSpawnableTerrain()
+    {
+        return
+            GetSpawnableTerrainColliders()
+                .Count > 0;
+    }
 }
 
+
 [System.Serializable]
-public struct LODInfo {
-	[Range(0,MeshSettings.numSupportedLODs-1)]
-	public int lod;
-	public float visibleDstThreshold;
+public struct LODInfo
+{
+    [Range(
+        0,
+        MeshSettings.numSupportedLODs - 1
+    )]
+    public int lod;
 
 
-	public float sqrVisibleDstThreshold {
-		get {
-			return visibleDstThreshold * visibleDstThreshold;
-		}
-	}
+    public float
+        visibleDstThreshold;
+
+
+    public float sqrVisibleDstThreshold
+    {
+        get
+        {
+            return
+                visibleDstThreshold *
+                visibleDstThreshold;
+        }
+    }
 }
