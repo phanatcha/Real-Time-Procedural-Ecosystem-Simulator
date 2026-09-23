@@ -6,6 +6,8 @@ public struct TerrainHeightEvaluation
     public float normalizedHeightInput;
     public float riverStrength;
     public float lakeStrength;
+    public float heightAfterRidges;
+    public float falloff;
 }
 
 public static class TerrainHeightEvaluator
@@ -35,6 +37,7 @@ public static class TerrainHeightEvaluator
             noiseValue = Mathf.Clamp01(noiseValue + ridgeAmount * (1f - noiseValue));
         }
 
+        float heightAfterRidges = noiseValue;
         float riverStrength = 0f;
         if (settings.riverSettings != null && settings.riverSettings.enabled)
         {
@@ -92,7 +95,9 @@ public static class TerrainHeightEvaluator
             height = heightCurve.Evaluate(noiseValue) * settings.heightMultiplier,
             normalizedHeightInput = noiseValue,
             riverStrength = riverStrength,
-            lakeStrength = lakeStrength
+            lakeStrength = lakeStrength,
+            heightAfterRidges = heightAfterRidges,
+            falloff = falloffValue
         };
     }
 }

@@ -8,6 +8,16 @@ public class MapPreviewEditor : Editor
     {
         MapPreview mapPreview = (MapPreview)target;
 
+        if (GUILayout.Button("Open Terrain Report Preview"))
+        {
+            TerrainReportPreviewWindow.Open();
+        }
+
+        if (!mapPreview.HasPreviewReferences)
+        {
+            EditorGUILayout.HelpBox("The legacy scene preview is missing its scene objects or settings. Use Terrain Report Preview above; it does not need a plane or mesh GameObject.", MessageType.Info);
+        }
+
         if (DrawDefaultInspector())
         {
             if (mapPreview.autoUpdate)
@@ -16,9 +26,12 @@ public class MapPreviewEditor : Editor
             }
         }
 
-        if (GUILayout.Button("Generate"))
+        using (new EditorGUI.DisabledScope(!mapPreview.HasPreviewReferences))
         {
-            mapPreview.DrawMapInEditor();
+            if (GUILayout.Button("Generate legacy scene preview"))
+            {
+                mapPreview.DrawMapInEditor();
+            }
         }
     }
 }
