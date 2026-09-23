@@ -23,10 +23,15 @@ public class MapPreview : MonoBehaviour {
 	public int editorPreviewLOD;
 	public bool autoUpdate;
 
+	public bool HasPreviewReferences => textureRender != null && textureRender.sharedMaterial != null
+		&& meshFilter != null && meshSettings != null && heightMapSettings != null
+		&& textureData != null && terrainMaterial != null;
+
 
 
 
 	public void DrawMapInEditor() {
+		if (!HasPreviewReferences) return;
 		textureData.ApplyToMaterial (terrainMaterial);
 		textureData.UpdateMeshHeights (terrainMaterial, heightMapSettings.minHeight, heightMapSettings.maxHeight);
 		HeightMap heightMap = HeightMapGenerator.GenerateHeightMap (meshSettings.numVertsPerLine, meshSettings.numVertsPerLine, heightMapSettings, Vector2.zero);
@@ -68,7 +73,7 @@ public class MapPreview : MonoBehaviour {
 	}
 
 	void OnTextureValuesUpdated() {
-		textureData.ApplyToMaterial (terrainMaterial);
+		if (textureData != null && terrainMaterial != null) textureData.ApplyToMaterial (terrainMaterial);
 	}
 
 	void OnValidate() {
