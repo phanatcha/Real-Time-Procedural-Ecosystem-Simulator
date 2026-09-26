@@ -4,6 +4,7 @@ public static class HeightMapGenerator
 {
     public static HeightMap GenerateHeightMap(int width, int height, HeightMapSettings settings, Vector2 sampleCentre)
     {
+        HydraulicErosionMap erosion = HydraulicErosionCache.Get(settings);
         float[,] baseNoiseValues = Noise.GenerateNoiseMap(width, height, settings.noiseSettings, sampleCentre);
 
         bool useRidges = settings.ridgeSettings != null && settings.ridgeSettings.strength > 0f;
@@ -34,7 +35,8 @@ public static class HeightMapGenerator
                     useRidges ? ridgeValues[i, j] : 0f,
                     terrainPosition,
                     settings,
-                    heightCurve);
+                    heightCurve,
+                    erosion);
 
                 heightValues[i, j] = evaluation.height;
                 riverStrengthValues[i, j] = evaluation.riverStrength;

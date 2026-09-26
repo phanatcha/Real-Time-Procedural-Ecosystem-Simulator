@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using UnityEditor;
 using UnityEngine;
 
@@ -6,6 +7,9 @@ public sealed class TerrainReportRenderer : IDisposable
 {
     readonly PreviewRenderUtility preview;
     readonly Material material;
+    public Vector2? HeightRangeOverride { get; set; }
+    public IReadOnlyList<TerrainReportData.Chunk> MeshesOverride { get; set; }
+    public Color LightTint { get; set; } = Color.white;
 
     public TerrainReportRenderer()
     {
@@ -21,14 +25,16 @@ public sealed class TerrainReportRenderer : IDisposable
     void Draw(TerrainReportData data, float aspect, Vector2 orbit, float zoom)
     {
         float size = data.WorldSize;
-        float relief = data.MaximumHeight - data.MinimumHeight;
-        Vector3 centre = new Vector3(0f, (data.MinimumHeight + data.MaximumHeight) * 0.5f, 0f);
+        Vector2 range = HeightRangeOverride ?? new Vector2(data.MinimumHeight, data.MaximumHeight);
+        float relief = range.y - range.x;
+        Vector3 centre = new Vector3(0f, (range.x + range.y) * 0.5f, 0f);
         Quaternion rotation = Quaternion.Euler(orbit.y, orbit.x, 0f);
         preview.camera.transform.SetPositionAndRotation(centre - rotation * Vector3.forward * (size * 3f + relief), rotation);
         preview.camera.orthographicSize = (size * 0.76f + relief * 0.5f) / Mathf.Min(1f, aspect) / zoom;
         preview.camera.nearClipPlane = 0.1f;
         preview.camera.farClipPlane = size * 8f + relief * 4f + 100f;
-        foreach (TerrainReportData.Chunk chunk in data.Chunks)
+        material.SetColor("_LightTint", LightTint);
+        foreach (TerrainReportData.Chunk chunk in MeshesOverride ?? data.Chunks)
             preview.DrawMesh(chunk.mesh, chunk.offset, Quaternion.identity, material, 0);
         preview.Render(false);
     }

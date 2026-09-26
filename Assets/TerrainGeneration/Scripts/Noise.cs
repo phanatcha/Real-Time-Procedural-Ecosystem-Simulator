@@ -16,7 +16,7 @@ public static class Noise
         return new Vector2(warpX, warpY);
     }
 
-    public static float[,] GenerateNoiseMap(int mapWidth, int mapHeight, int seed, float scale, int octaves, float persistance, float lacunarity, Vector2 offset, NormalizeMode normalizeMode, float warpStrength = 0f, float warpScale = 400f, float globalHeightBias = 0f, float globalContrast = 1f)
+    public static float[,] GenerateNoiseMap(int mapWidth, int mapHeight, int seed, float scale, int octaves, float persistance, float lacunarity, Vector2 offset, NormalizeMode normalizeMode, float warpStrength = 0f, float warpScale = 400f, float globalHeightBias = 0f, float globalContrast = 1f, float sampleSpacing = 1f)
     {
         float[,] noiseMap = new float[mapWidth, mapHeight];
 
@@ -54,15 +54,17 @@ public static class Noise
         {
             for (int x = 0; x < mapWidth; x++)
             {
-                Vector2 warp = DomainWarp(noiseSeed, x - halfWidth + offset.x, offset.y - (y - halfHeight), warpStrength, warpScale);
+                float dx = (x - halfWidth) * sampleSpacing;
+                float dy = (y - halfHeight) * sampleSpacing;
+                Vector2 warp = DomainWarp(noiseSeed, dx + offset.x, offset.y - dy, warpStrength, warpScale);
 
                 float noiseHeight = 0;
                 amplitude = 1;
                 frequency = 1;
                 for (int i = 0; i < octaves; i++)
                 {
-                    float sampleX = (x-halfWidth + octaveOffsets[i].x + warp.x) / scale * frequency;
-                    float sampleY = (y-halfHeight + octaveOffsets[i].y + warp.y) / scale * frequency;
+                    float sampleX = (dx + octaveOffsets[i].x + warp.x) / scale * frequency;
+                    float sampleY = (dy + octaveOffsets[i].y + warp.y) / scale * frequency;
 
                     float noiseValue = OpenSimplex2.Noise2(noiseSeed, sampleX, sampleY);
                     noiseHeight += noiseValue * amplitude;
@@ -100,12 +102,12 @@ public static class Noise
         }
         return noiseMap;
     }
-    public static float[,] GenerateNoiseMap(int mapWidth, int mapHeight, NoiseSettings settings, Vector2 sampleCentre)
+    public static float[,] GenerateNoiseMap(int mapWidth, int mapHeight, NoiseSettings settings, Vector2 sampleCentre, float sampleSpacing = 1f)
     {
-        return GenerateNoiseMap(mapWidth, mapHeight, settings.seed, settings.scale, settings.octaves, settings.persistance, settings.lacunarity, sampleCentre + settings.offset, settings.normalizeMode, settings.domainWarpStrength, settings.domainWarpScale, settings.globalHeightBias, settings.globalContrast);
+        return GenerateNoiseMap(mapWidth, mapHeight, settings.seed, settings.scale, settings.octaves, settings.persistance, settings.lacunarity, sampleCentre + settings.offset, settings.normalizeMode, settings.domainWarpStrength, settings.domainWarpScale, settings.globalHeightBias, settings.globalContrast, sampleSpacing);
     }
 
-    public static float[,] GenerateRidgedNoiseMap(int mapWidth, int mapHeight, int seed, float scale, int octaves, float persistance, float lacunarity, Vector2 offset, float warpStrength, float warpScale)
+    public static float[,] GenerateRidgedNoiseMap(int mapWidth, int mapHeight, int seed, float scale, int octaves, float persistance, float lacunarity, Vector2 offset, float warpStrength, float warpScale, float sampleSpacing = 1f)
     {
         float[,] noiseMap = new float[mapWidth, mapHeight];
 
@@ -140,15 +142,17 @@ public static class Noise
             for (int x = 0; x < mapWidth; x++)
             {
 
-                Vector2 warp = DomainWarp(noiseSeed, x - halfWidth + offset.x, offset.y - (y - halfHeight), warpStrength, warpScale);
+                float dx = (x - halfWidth) * sampleSpacing;
+                float dy = (y - halfHeight) * sampleSpacing;
+                Vector2 warp = DomainWarp(noiseSeed, dx + offset.x, offset.y - dy, warpStrength, warpScale);
 
                 float noiseHeight = 0;
                 amplitude = 1;
                 float frequency = 1;
                 for (int i = 0; i < octaves; i++)
                 {
-                    float sampleX = (x - halfWidth + octaveOffsets[i].x + warp.x) / scale * frequency;
-                    float sampleY = (y - halfHeight + octaveOffsets[i].y + warp.y) / scale * frequency;
+                    float sampleX = (dx + octaveOffsets[i].x + warp.x) / scale * frequency;
+                    float sampleY = (dy + octaveOffsets[i].y + warp.y) / scale * frequency;
 
                     float n = OpenSimplex2.Noise2(noiseSeed, sampleX, sampleY);
                     float ridge = 1f - Mathf.Abs(n);
@@ -166,9 +170,9 @@ public static class Noise
         return noiseMap;
     }
 
-    public static float[,] GenerateRidgedNoiseMap(int mapWidth, int mapHeight, NoiseSettings baseSettings, RidgeSettings ridgeSettings, Vector2 sampleCentre)
+    public static float[,] GenerateRidgedNoiseMap(int mapWidth, int mapHeight, NoiseSettings baseSettings, RidgeSettings ridgeSettings, Vector2 sampleCentre, float sampleSpacing = 1f)
     {
-        return GenerateRidgedNoiseMap(mapWidth, mapHeight, ridgeSettings.seed, ridgeSettings.scale, ridgeSettings.octaves, ridgeSettings.persistance, ridgeSettings.lacunarity, sampleCentre + baseSettings.offset, baseSettings.domainWarpStrength, baseSettings.domainWarpScale);
+        return GenerateRidgedNoiseMap(mapWidth, mapHeight, ridgeSettings.seed, ridgeSettings.scale, ridgeSettings.octaves, ridgeSettings.persistance, ridgeSettings.lacunarity, sampleCentre + baseSettings.offset, baseSettings.domainWarpStrength, baseSettings.domainWarpScale, sampleSpacing);
     }
 
 }

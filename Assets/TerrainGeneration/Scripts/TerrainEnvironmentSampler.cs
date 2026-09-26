@@ -103,6 +103,24 @@ public sealed class TerrainEnvironmentSampler
         return sample;
     }
 
+    public SeasonalEnvironmentSample SampleSeasonal(Vector2 worldPosition, SeasonState season)
+    {
+        return SeasonalEnvironment.Evaluate(Sample(worldPosition), season);
+    }
+
+    public bool TrySampleSeasonal(Vector2 worldPosition, SeasonState season, out SeasonalEnvironmentSample sample)
+    {
+        sample = default;
+        if (!TrySample(worldPosition, out EnvironmentSample environment)) return false;
+        sample = SeasonalEnvironment.Evaluate(environment, season);
+        return true;
+    }
+
+    public bool TrySampleSeasonal(Vector3 worldPosition, SeasonState season, out SeasonalEnvironmentSample sample)
+    {
+        return TrySampleSeasonal(new Vector2(worldPosition.x, worldPosition.z), season, out sample);
+    }
+
     public void CacheHeightMap(Vector2Int chunkCoordinate, HeightMap heightMap)
     {
         if (heightMap.values == null) return;
