@@ -8,12 +8,14 @@ public struct TerrainHeightEvaluation
     public float lakeStrength;
     public float heightAfterRidges;
     public float falloff;
+    public float heightBeforeErosion;
+    public float erosionDelta;
 }
 
 public static class TerrainHeightEvaluator
 {
     public static TerrainHeightEvaluation Evaluate(float baseNoiseValue, float ridgeNoiseValue,
-        Vector2 terrainPosition, HeightMapSettings settings, AnimationCurve heightCurve)
+        Vector2 terrainPosition, HeightMapSettings settings, AnimationCurve heightCurve, HydraulicErosionMap erosion = null)
     {
         float falloffValue = settings.useFalloff
             ? FalloffGenerator.Evaluate(terrainPosition.x, terrainPosition.y, settings.worldRadius)
@@ -90,9 +92,13 @@ public static class TerrainHeightEvaluator
             noiseValue = Mathf.Clamp01(noiseValue - falloffValue);
         }
 
+        float beforeErosion = heightCurve.Evaluate(noiseValue) * settings.heightMultiplier;
+        float height = erosion == null ? beforeErosion : erosion.ApplyHeight(terrainPosition, beforeErosion);
         return new TerrainHeightEvaluation
         {
-            height = heightCurve.Evaluate(noiseValue) * settings.heightMultiplier,
+            height = height,
+            heightBeforeErosion = beforeErosion,
+            erosionDelta = height - beforeErosion,
             normalizedHeightInput = noiseValue,
             riverStrength = riverStrength,
             lakeStrength = lakeStrength,

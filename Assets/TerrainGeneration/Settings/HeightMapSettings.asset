@@ -52,6 +52,22 @@ MonoBehaviour:
     minHeightPercent: 0.1
     maxHeightPercent: 0.42
     bedLevel: 0.16
+  erosionSettings:
+    enabled: 0
+    resolution: 257
+    dropletCount: 6000
+    seed: 1729
+    maxLifetime: 60
+    brushRadius: 3
+    inertia: 0.1
+    erosionRate: 0.3
+    depositionRate: 0.3
+    evaporationRate: 0.02
+    sedimentCapacity: 4
+    minimumCapacity: 0.001
+    gravity: 4
+    maxHeightChange: 6
+    edgeFadeCells: 8
   useFalloff: 1
   worldRadius: 1000
   heightMultiplier: 100

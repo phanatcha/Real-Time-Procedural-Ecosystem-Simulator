@@ -6,6 +6,7 @@ public sealed class TerrainReportRenderer : IDisposable
 {
     readonly PreviewRenderUtility preview;
     readonly Material material;
+    public Vector2? HeightRangeOverride { get; set; }
 
     public TerrainReportRenderer()
     {
@@ -21,8 +22,9 @@ public sealed class TerrainReportRenderer : IDisposable
     void Draw(TerrainReportData data, float aspect, Vector2 orbit, float zoom)
     {
         float size = data.WorldSize;
-        float relief = data.MaximumHeight - data.MinimumHeight;
-        Vector3 centre = new Vector3(0f, (data.MinimumHeight + data.MaximumHeight) * 0.5f, 0f);
+        Vector2 range = HeightRangeOverride ?? new Vector2(data.MinimumHeight, data.MaximumHeight);
+        float relief = range.y - range.x;
+        Vector3 centre = new Vector3(0f, (range.x + range.y) * 0.5f, 0f);
         Quaternion rotation = Quaternion.Euler(orbit.y, orbit.x, 0f);
         preview.camera.transform.SetPositionAndRotation(centre - rotation * Vector3.forward * (size * 3f + relief), rotation);
         preview.camera.orthographicSize = (size * 0.76f + relief * 0.5f) / Mathf.Min(1f, aspect) / zoom;

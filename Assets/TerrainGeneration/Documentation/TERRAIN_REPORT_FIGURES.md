@@ -8,7 +8,7 @@ Open **Tools → Boreal Ecosystem → Terrain Report Preview** in Unity. No plan
 2. Choose **Origin / lowlands**, **Mountain belt**, or enter a center chunk coordinate. A 9 × 9 region provides more context than a single chunk. The mountain preset is an approximate region, not a guarantee of mountains for every configuration.
 3. Use **3D mesh LOD 0** for the full-resolution comparison, then click **Generate report preview**. Regenerate after changing settings; previews are fixed snapshots, not live updates.
 4. Inspect **Report overview**, **Individual stages**, or **3D terrain**. Drag the 3D view to orbit and scroll over it to zoom. **North-up oblique** and **Top down** make comparison with the maps easiest.
-5. Click **Export all PNGs + captions…** and choose a folder outside `Assets`, such as Downloads. A new timestamped folder contains eight map PNGs, two 2048 × 2048 terrain PNGs, suggested captions, and a serialized settings snapshot. Existing exports are not overwritten.
+5. Click **Export all PNGs + captions…** and choose a folder outside `Assets`, such as Downloads. A new timestamped folder contains the stage-map PNGs, 2048 × 2048 terrain PNGs, suggested captions, and a serialized settings snapshot. With hydraulic erosion enabled, it also includes the before-erosion 3D view and numerical CSV samples. Existing exports are not overwritten.
 
 The preview does not modify terrain settings, scenes, gameplay, or animal systems. Closing the window releases its temporary meshes, textures, and rendering resources. The editor scripts and preview shader do not ship with the game.
 
@@ -31,7 +31,7 @@ Use one region and seed for the complete sequence. Use the generated `FIGURE-CAP
 - All 2D maps have north (+Z) at the top and east (+X) at the right. Shared boundary samples overlap once when chunks are stitched. Global normalization is recommended; local normalization retains its existing chunk-dependent behavior.
 - Grayscale uses a fixed 0–1 range for intermediate maps and the settings' minimum/maximum heights for the final heightmap. The sampled region's range is also reported. PNGs are 8-bit illustrations, not lossless numerical height data; values beyond their display range are clipped.
 - The 3D view uses the production mesh generator and the selected LOD, with no vertical exaggeration. Simplified biome-tint lighting makes the geometry readable. It does not reproduce the runtime shader's textures, vegetation, or water-surface meshes. Use an in-game screenshot separately if you also need to demonstrate the finished environment's appearance.
-- These stages do **not** demonstrate hydraulic erosion. Existing erosion-like shader streaks are visual shading, not a simulated erosion algorithm.
+- For Section 3.4, use **Tools → Boreal Ecosystem → Hydraulic Erosion Example**, then generate and inspect the **Hydraulic erosion** tab. See [HYDRAULIC_EROSION.md](HYDRAULIC_EROSION.md) for controls, algorithms, limits, and captions. The preview checkbox enables the real height-changing model on a temporary settings copy. Existing erosion-like shader streaks remain a separate visual effect.
 
 ## Tests
 

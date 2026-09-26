@@ -8,6 +8,9 @@ public class HeightMapSettings : UpdatableData
     public RiverSettings riverSettings = new RiverSettings();
     public LakeSettings lakeSettings = new LakeSettings();
 
+    [Header("Generation-time Hydraulic Erosion")]
+    public HydraulicErosionSettings erosionSettings = new HydraulicErosionSettings();
+
     public bool useFalloff;
     [Tooltip("Distance from world origin (0,0) where the island fully becomes ocean.")]
     public float worldRadius = 1000f;
@@ -34,6 +37,7 @@ public class HeightMapSettings : UpdatableData
 #if UNITY_EDITOR
     protected override void OnValidate()
     {
+        erosionSettings?.ValidateValues();
         if (noiseSettings != null)
         {
             noiseSettings.ValidateValues();

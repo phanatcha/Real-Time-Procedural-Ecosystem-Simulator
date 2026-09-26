@@ -11,7 +11,10 @@ public enum TerrainReportStage
     LakeMask,
     Falloff,
     ShapedHeight,
-    FinalHeight
+    FinalHeight,
+    BeforeErosion,
+    ErosionChange,
+    DropletFlow
 }
 
 public sealed class TerrainReportData : IDisposable
@@ -27,7 +30,10 @@ public sealed class TerrainReportData : IDisposable
         "05  Lake carving mask",
         "06  World falloff mask",
         "07  Shaped height before curve",
-        "08  Final heightmap"
+        "08  Final heightmap",
+        "11  Height before hydraulic erosion",
+        "12  Erosion and deposition change",
+        "13  Accumulated droplet flow"
     };
 
     public static readonly string[] StageDescriptions =
@@ -39,7 +45,10 @@ public sealed class TerrainReportData : IDisposable
         "Actual lake carving weight. White = strongest carving; black = no carving.",
         "World-space height subtraction mask. Black when falloff is disabled.",
         "Height after ridge blending, river/lake carving and falloff, before the height curve.",
-        "Final world height after the configured height curve and height multiplier. This drives the 3D meshes."
+        "Final world height after the height curve, multiplier and optional hydraulic erosion. This drives the 3D meshes.",
+        "The same terrain before hydraulic erosion, on the same fixed height scale as the final heightmap.",
+        "Actual final minus original height. Blue = erosion, orange = deposition, white = unchanged. Units and symmetric color range are recorded in the captions.",
+        "Accumulated water-weighted droplet visits, log-scaled relative to the whole bake. This is a flow-path diagnostic, not water depth or river discharge."
     };
 
     public sealed class Chunk
@@ -62,6 +71,11 @@ public sealed class TerrainReportData : IDisposable
     public float MaximumHeight { get; private set; }
     public float HeightScaleMinimum { get; private set; }
     public float HeightScaleMaximum { get; private set; }
+    public HydraulicErosionMap Erosion { get; private set; }
+    public float ErosionDisplayRange { get; private set; }
+    public float MinimumErosionChange { get; private set; }
+    public float MaximumErosionChange { get; private set; }
+    public double MeanAbsoluteErosionChange { get; private set; }
 
     public static TerrainReportData Generate(HeightMapSettings heights, MeshSettings meshSettings,
         TextureData textureSettings, Vector2Int centre, int chunkCount, int lod,
@@ -98,6 +112,9 @@ public sealed class TerrainReportData : IDisposable
 
         try
         {
+            data.Erosion = HydraulicErosionCache.Get(heights,
+                cancel == null ? null : new Func<float, bool>(progress => cancel(progress * 0.25f)));
+            data.ErosionDisplayRange = heights.erosionSettings == null ? 0f : heights.erosionSettings.ValidatedCopy().maxHeightChange;
             for (int stage = 0; stage < data.Maps.Length; stage++)
                 data.Maps[stage] = new float[size, size];
 
@@ -108,7 +125,7 @@ public sealed class TerrainReportData : IDisposable
             {
                 for (int column = 0; column < chunkCount; column++)
                 {
-                    float progress = (row * chunkCount + column) / (float)(chunkCount * chunkCount);
+                    float progress = 0.25f + 0.75f * (row * chunkCount + column) / (float)(chunkCount * chunkCount);
                     if (cancel != null && cancel(progress)) throw new OperationCanceledException();
                     Vector2Int coordinate = centre + new Vector2Int(column - radius, radius - row);
                     Vector2 world = TerrainGrid.ChunkCoordinateToWorldPosition(coordinate, meshSettings);
@@ -131,7 +148,7 @@ public sealed class TerrainReportData : IDisposable
                                 sampleCentre.y - (y - n / 2f));
                             TerrainHeightEvaluation result = TerrainHeightEvaluator.Evaluate(
                                 warped[x, y], useRidges ? ridges[x, y] : 0f,
-                                terrainPosition, heights, curve);
+                                terrainPosition, heights, curve, data.Erosion);
                             final[x, y] = result.height;
                             if (x == 0 || y == 0 || x == n - 1 || y == n - 1) continue;
                             int atlasX = column * stride + x - 1;
@@ -144,6 +161,10 @@ public sealed class TerrainReportData : IDisposable
                             data.Maps[(int)TerrainReportStage.Falloff][atlasX, atlasY] = result.falloff;
                             data.Maps[(int)TerrainReportStage.ShapedHeight][atlasX, atlasY] = result.normalizedHeightInput;
                             data.Maps[(int)TerrainReportStage.FinalHeight][atlasX, atlasY] = result.height;
+                            data.Maps[(int)TerrainReportStage.BeforeErosion][atlasX, atlasY] = result.heightBeforeErosion;
+                            data.Maps[(int)TerrainReportStage.ErosionChange][atlasX, atlasY] = result.erosionDelta;
+                            data.Maps[(int)TerrainReportStage.DropletFlow][atlasX, atlasY] = data.Erosion == null || data.Erosion.MaximumFlow <= 0f
+                                ? 0f : Mathf.Log(1f + data.Erosion.SampleFlow(terrainPosition)) / Mathf.Log(1f + data.Erosion.MaximumFlow);
                             data.MinimumHeight = Mathf.Min(data.MinimumHeight, result.height);
                             data.MaximumHeight = Mathf.Max(data.MaximumHeight, result.height);
                         }
@@ -164,11 +185,19 @@ public sealed class TerrainReportData : IDisposable
 
             for (int stage = 0; stage < data.Maps.Length; stage++)
             {
-                bool isHeight = stage == (int)TerrainReportStage.FinalHeight;
-                data.Textures[stage] = CreateTexture(data.Maps[stage],
-                    isHeight ? heights.minHeight : 0f, isHeight ? heights.maxHeight : 1f);
+                bool isHeight = stage == (int)TerrainReportStage.FinalHeight || stage == (int)TerrainReportStage.BeforeErosion;
+                data.Textures[stage] = stage == (int)TerrainReportStage.ErosionChange
+                    ? CreateChangeTexture(data.Maps[stage], data.ErosionDisplayRange)
+                    : CreateTexture(data.Maps[stage], isHeight ? heights.minHeight : 0f, isHeight ? heights.maxHeight : 1f);
                 data.Textures[stage].name = StageTitles[stage];
             }
+            foreach (float change in data.Maps[(int)TerrainReportStage.ErosionChange])
+            {
+                data.MinimumErosionChange = Mathf.Min(data.MinimumErosionChange, change);
+                data.MaximumErosionChange = Mathf.Max(data.MaximumErosionChange, change);
+                data.MeanAbsoluteErosionChange += Math.Abs(change);
+            }
+            data.MeanAbsoluteErosionChange /= size * size;
             return data;
         }
         catch
@@ -176,6 +205,30 @@ public sealed class TerrainReportData : IDisposable
             data.Dispose();
             throw;
         }
+    }
+
+    public static Texture2D CreateChangeTexture(float[,] values, float range)
+    {
+        int width = values.GetLength(0);
+        int height = values.GetLength(1);
+        Color[] colors = new Color[width * height];
+        for (int y = 0; y < height; y++)
+            for (int x = 0; x < width; x++)
+            {
+                float change = values[x, y];
+                Color target = change < 0f ? new Color(0.08f, 0.3f, 0.75f) : new Color(0.86f, 0.29f, 0.04f);
+                colors[(height - 1 - y) * width + x] = Color.Lerp(Color.white, target,
+                    range <= 0f ? 0f : Mathf.Clamp01(Mathf.Abs(change) / range));
+            }
+        Texture2D texture = new Texture2D(width, height, TextureFormat.RGBA32, false)
+        {
+            hideFlags = HideFlags.HideAndDontSave,
+            filterMode = FilterMode.Bilinear,
+            wrapMode = TextureWrapMode.Clamp
+        };
+        texture.SetPixels(colors);
+        texture.Apply();
+        return texture;
     }
 
     public static Texture2D CreateTexture(float[,] values, float minimum, float maximum)
