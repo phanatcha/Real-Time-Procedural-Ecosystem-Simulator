@@ -2,6 +2,8 @@
 
 This is the terrain-facing contract for animals, plants, food systems, spawning, and navigation. Animal code should read the environment through this API instead of duplicating terrain noise, water thresholds, or biome rules.
 
+For opt-in seasonal temperature, snow, food accessibility and growth factors, see [SEASONAL_SCENARIOS.md](SEASONAL_SCENARIOS.md). `SampleSeasonal` wraps the unchanged base environment; the existing calls below do not automatically apply a season or change animal behavior.
+
 ## Recommended call from an animal
 
 Give the animal system a reference to the scene's `TerrainGenerator`, then query with a world-space position:

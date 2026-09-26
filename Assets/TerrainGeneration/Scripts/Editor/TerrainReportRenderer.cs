@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using UnityEditor;
 using UnityEngine;
 
@@ -7,6 +8,8 @@ public sealed class TerrainReportRenderer : IDisposable
     readonly PreviewRenderUtility preview;
     readonly Material material;
     public Vector2? HeightRangeOverride { get; set; }
+    public IReadOnlyList<TerrainReportData.Chunk> MeshesOverride { get; set; }
+    public Color LightTint { get; set; } = Color.white;
 
     public TerrainReportRenderer()
     {
@@ -30,7 +33,8 @@ public sealed class TerrainReportRenderer : IDisposable
         preview.camera.orthographicSize = (size * 0.76f + relief * 0.5f) / Mathf.Min(1f, aspect) / zoom;
         preview.camera.nearClipPlane = 0.1f;
         preview.camera.farClipPlane = size * 8f + relief * 4f + 100f;
-        foreach (TerrainReportData.Chunk chunk in data.Chunks)
+        material.SetColor("_LightTint", LightTint);
+        foreach (TerrainReportData.Chunk chunk in MeshesOverride ?? data.Chunks)
             preview.DrawMesh(chunk.mesh, chunk.offset, Quaternion.identity, material, 0);
         preview.Render(false);
     }

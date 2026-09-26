@@ -35,4 +35,6 @@ Use one region and seed for the complete sequence. Use the generated `FIGURE-CAP
 
 ## Tests
 
+For four seasonal views with actual procedural vegetation, open **Tools → Boreal Ecosystem → Seasonal Scenario Preview**. See [SEASONAL_SCENARIOS.md](SEASONAL_SCENARIOS.md) for the report workflow, API and mockup limitations. The original noise/erosion views remain unchanged.
+
 In Unity's **Window → General → Test Runner**, run the EditMode fixture `TerrainReportDataTests`. It checks runtime/preview agreement across whole regions and shared borders (including negative coordinates), mesh agreement at different LODs, disabled effects, grayscale orientation, repeatability, unchanged settings, cancellation, and size limits.

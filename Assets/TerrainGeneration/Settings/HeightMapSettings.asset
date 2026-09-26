@@ -53,7 +53,7 @@ MonoBehaviour:
     maxHeightPercent: 0.42
     bedLevel: 0.16
   erosionSettings:
-    enabled: 0
+    enabled: 1
     resolution: 257
     dropletCount: 6000
     seed: 1729

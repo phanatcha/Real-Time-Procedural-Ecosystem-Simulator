@@ -9,6 +9,7 @@ Shader "Hidden/TerrainGeneration/ReportPreview"
             #pragma vertex vert
             #pragma fragment frag
             #include "UnityCG.cginc"
+            float4 _LightTint;
 
             struct appdata
             {
@@ -36,7 +37,7 @@ Shader "Hidden/TerrainGeneration/ReportPreview"
             fixed4 frag(v2f input) : SV_Target
             {
                 float diffuse = saturate(dot(normalize(input.normal), normalize(float3(-0.5, 0.8, -0.3))));
-                return fixed4(input.color.rgb * (0.48 + 0.52 * diffuse), 1);
+                return fixed4(input.color.rgb * _LightTint.rgb * (0.48 + 0.52 * diffuse), 1);
             }
             ENDCG
         }
