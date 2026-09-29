@@ -8,6 +8,8 @@ public struct EcosystemSimulationStepStats
     public int distantCellsUpdated;
     public int migrationTransfers;
     public float migratedPopulation;
+    // Net births minus deaths across the updated cells.
+    public float populationChange;
 }
 
 public sealed class EcosystemPopulationSimulation
@@ -24,10 +26,15 @@ public sealed class EcosystemPopulationSimulation
     readonly EcosystemSimulationSettings settings;
     readonly Dictionary<string, EcosystemSpeciesDefinition> speciesById = new Dictionary<string, EcosystemSpeciesDefinition>();
     readonly List<PopulationTransfer> pendingTransfers = new List<PopulationTransfer>();
+    readonly List<string> growingSpecies = new List<string>();
 
     public EcosystemGrid Grid => grid;
     public EcosystemSimulationStepStats LastStepStats { get; private set; }
     public event Action<EcosystemCell, float> CellUpdated;
+
+    // Materialized animals of a species standing in a cell. They take up part of the cell's capacity,
+    // so the abstract population there only grows into the room they leave.
+    public Func<EcosystemCell, string, float> OccupiedPopulation { get; set; }
 
     public EcosystemPopulationSimulation(EcosystemGrid grid, EcosystemSimulationSettings settings,
         IEnumerable<EcosystemSpeciesDefinition> speciesDefinitions = null, bool seedPopulations = true)
@@ -92,6 +99,7 @@ public sealed class EcosystemPopulationSimulation
             cell.UpdateCount++;
             cell.LastUpdateDuration = elapsed;
             CellUpdated?.Invoke(cell, elapsed);
+            stats.populationChange += GrowPopulations(cell, elapsed);
             GatherMigration(cell, elapsed);
 
             if (isNearby) stats.nearbyCellsUpdated++;
@@ -128,6 +136,46 @@ public sealed class EcosystemPopulationSimulation
         }
 
         return total;
+    }
+
+    // Logistic growth toward a capacity, exact for any time step, so a distant cell updated every few
+    // seconds ends where it would after many short steps:
+    //     N(t) = K / (1 + (K − N) / N · e^(−r·t))
+    // Small populations grow by about r per second, slowing to zero at K; populations above K fall back
+    // to it. Where the capacity is zero or less, the population instead dies out at the death rate.
+    public static float GrowLogistic(float population, float capacity, float growthRate, float deathRate,
+        float elapsed)
+    {
+        if (population <= 0f || elapsed <= 0f) return Mathf.Max(0f, population);
+        if (capacity <= 0f) return population * Mathf.Exp(-Mathf.Max(0f, deathRate) * elapsed);
+        if (growthRate <= 0f) return population;
+
+        return capacity / (1f + (capacity - population) / population * Mathf.Exp(-growthRate * elapsed));
+    }
+
+    // Species without a definition keep their count; they only migrate.
+    float GrowPopulations(EcosystemCell cell, float elapsed)
+    {
+        if (cell.Populations.Count == 0) return 0f;
+
+        float change = 0f;
+        growingSpecies.Clear();
+        growingSpecies.AddRange(cell.Populations.Keys);
+        for (int i = 0; i < growingSpecies.Count; i++)
+        {
+            string speciesId = growingSpecies[i];
+            EcosystemSpeciesDefinition species = GetSpecies(speciesId);
+            if (species == null) continue;
+
+            float occupied = OccupiedPopulation == null ? 0f : Mathf.Max(0f, OccupiedPopulation(cell, speciesId));
+            float capacity = species.GetCarryingCapacity(cell.Environment) - occupied;
+            float before = cell.GetPopulation(speciesId);
+            cell.SetPopulation(speciesId, GrowLogistic(
+                before, capacity, species.growthRatePerSecond, species.deathRatePerSecond, elapsed));
+            change += cell.GetPopulation(speciesId) - before;
+        }
+
+        return change;
     }
 
     void GatherMigration(EcosystemCell source, float elapsed)
