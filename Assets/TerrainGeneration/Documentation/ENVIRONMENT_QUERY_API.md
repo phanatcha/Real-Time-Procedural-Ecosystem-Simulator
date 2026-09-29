@@ -59,7 +59,7 @@ bool TryReadEnvironment(float worldX, float worldZ, out EnvironmentSample enviro
 
 `TerrainEnvironmentSampler` is not a `MonoBehaviour` or `UnityEngine.Object`. The first query in an uncached terrain chunk generates that chunk's deterministic data synchronously; subsequent queries reuse the cached data. The default cache holds 128 chunks. Construct it with a different final argument to change that limit, or call `ClearCache()` after changing generation settings.
 
-Call it from Unity's main thread because its configuration is stored in Unity `ScriptableObject` assets.
+Construct it (and call `ClearCache()`) on Unity's main thread, because its configuration is stored in Unity `ScriptableObject` assets. It reads the terrain's height range at those two points, so after that, `TrySample` and `TrySampleCached` can also be called from background threads, as long as the settings assets are not changed meanwhile. The chunk cache is locked internally.
 
 For high-frequency runtime systems that must never generate terrain synchronously, use the cached-only variant:
 

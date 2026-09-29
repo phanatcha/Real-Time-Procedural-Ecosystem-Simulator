@@ -9,7 +9,12 @@ public enum FoodType
 
 public class FoodItem : MonoBehaviour
 {
+    // Food never moves once enabled, so it is filed into a coarse grid for fast nearby lookups.
+    private const float LookupCellSize = 32f;
+
     private static readonly HashSet<FoodItem> activeItems = new HashSet<FoodItem>();
+    private static readonly Dictionary<Vector2Int, List<FoodItem>> itemsByCell =
+        new Dictionary<Vector2Int, List<FoodItem>>();
     private static readonly int BaseColorId = Shader.PropertyToID("_BaseColor");
     private static readonly int ColorId = Shader.PropertyToID("_Color");
 
@@ -21,6 +26,11 @@ public class FoodItem : MonoBehaviour
     [Header("Accessibility")]
     [Tooltip("Optional minimum feeding reach. Vertical height is checked automatically; use this for branches or other access difficulty.")]
     [Min(0f)] public float requiredFeedingReach;
+    [Tooltip("How far this food sits above the ground it grows from, such as leaves up a tree. Animals walk " +
+             "to the ground below it and need enough feeding reach to eat it.")]
+    [Min(0f)] public float heightAboveGround;
+
+    public Vector3 GroundPosition => transform.position - Vector3.up * heightAboveGround;
 
     [Header("Plant Growth Temperature")]
     public bool temperatureAffectsGrowth = true;
@@ -50,6 +60,8 @@ public class FoodItem : MonoBehaviour
 
     private bool consumed;
     private float temperatureSampleTimer;
+    private bool isInLookup;
+    private Vector2Int lookupCell;
 
     public static IEnumerable<FoodItem> ActiveItems => activeItems;
     public static int ActiveCount => activeItems.Count;
@@ -63,6 +75,7 @@ public class FoodItem : MonoBehaviour
     private static void ResetRegistry()
     {
         activeItems.Clear();
+        itemsByCell.Clear();
     }
 
     void OnEnable()
@@ -70,11 +83,64 @@ public class FoodItem : MonoBehaviour
         consumed = false;
         ResetFreshness();
         activeItems.Add(this);
+        AddToLookup();
     }
 
     void OnDisable()
     {
         activeItems.Remove(this);
+        RemoveFromLookup();
+    }
+
+    // Fills results with every active food item in the lookup cells overlapping the radius. Callers
+    // still check exact distances.
+    public static void FindNearby(Vector3 position, float radius, List<FoodItem> results)
+    {
+        results.Clear();
+        Vector2Int minimum = ToLookupCell(new Vector3(position.x - radius, 0f, position.z - radius));
+        Vector2Int maximum = ToLookupCell(new Vector3(position.x + radius, 0f, position.z + radius));
+        for (int cellZ = minimum.y; cellZ <= maximum.y; cellZ++)
+        {
+            for (int cellX = minimum.x; cellX <= maximum.x; cellX++)
+            {
+                if (itemsByCell.TryGetValue(new Vector2Int(cellX, cellZ), out List<FoodItem> items))
+                {
+                    results.AddRange(items);
+                }
+            }
+        }
+    }
+
+    static Vector2Int ToLookupCell(Vector3 position)
+    {
+        return new Vector2Int(Mathf.FloorToInt(position.x / LookupCellSize),
+                              Mathf.FloorToInt(position.z / LookupCellSize));
+    }
+
+    void AddToLookup()
+    {
+        lookupCell = ToLookupCell(transform.position);
+        if (!itemsByCell.TryGetValue(lookupCell, out List<FoodItem> items))
+        {
+            items = new List<FoodItem>();
+            itemsByCell.Add(lookupCell, items);
+        }
+
+        items.Add(this);
+        isInLookup = true;
+    }
+
+    void RemoveFromLookup()
+    {
+        if (!isInLookup) return;
+
+        if (itemsByCell.TryGetValue(lookupCell, out List<FoodItem> items))
+        {
+            items.Remove(this);
+            if (items.Count == 0) itemsByCell.Remove(lookupCell);
+        }
+
+        isInLookup = false;
     }
 
     public void Configure(FoodType type, float rawNutrition, string sourceSpecies = "", float lifetime = 0f,

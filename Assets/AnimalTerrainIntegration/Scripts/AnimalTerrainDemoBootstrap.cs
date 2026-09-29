@@ -1,4 +1,5 @@
 using System.Collections;
+using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.AI;
 
@@ -11,19 +12,28 @@ public sealed class AnimalTerrainDemoBootstrap : MonoBehaviour
 
     [Header("Disposable Primitive Demo")]
     [Range(0, 12)] public int founderAnimalCount = 3;
-    [Range(0, 500)] public int initialFoodCount = 90;
+    [Tooltip("Founders start within this distance of the simulation focus, then spread across the island. " +
+             "Plants load around the camera and the animals; tune them on the Food Spawner component.")]
     [Min(10f)] public float animalSpawnRadius = 120f;
-    [Min(10f)] public float foodSpawnRadius = 380f;
     public bool createWorldBorders = true;
 
+    [Header("Founder Species")]
+    [Tooltip("Spawn every founder as an identical member of one species, so all diversity has to evolve. " +
+             "Disable for the original three-diet demo.")]
+    public bool singleFounderSpecies = true;
+    [Tooltip("0 = herbivore, 1 = carnivore. Meat-eating has to evolve from this starting diet.")]
+    [Range(0f, 1f)] public float founderDietAffinity = 0.15f;
+
     AnimalTerrainWorld terrainWorld;
-    ProceduralTerrainNavMesh proceduralNavMesh;
+    HabitatNavigation habitatNavigation;
     FoodSpawner foodSpawner;
     Transform animalParent;
     Transform foodParent;
     Transform templateParent;
     Material animalMaterial;
     Material foodMaterial;
+    Coroutine ecosystemBuild;
+    bool hasBuiltEcosystem;
 
     void Awake()
     {
@@ -41,10 +51,12 @@ public sealed class AnimalTerrainDemoBootstrap : MonoBehaviour
         terrainWorld = GetOrAddComponent<AnimalTerrainWorld>();
         terrainWorld.terrainGenerator = terrainGenerator;
 
-        proceduralNavMesh = GetOrAddComponent<ProceduralTerrainNavMesh>();
-        proceduralNavMesh.terrainWorld = terrainWorld;
-        proceduralNavMesh.focus = simulationFocus;
-        proceduralNavMesh.buildRadius = Mathf.Max(600f, foodSpawnRadius + 100f);
+        // Navigation streams in tiles around the animals, so they can spread across the whole island.
+        habitatNavigation = GetOrAddComponent<HabitatNavigation>();
+        habitatNavigation.terrainWorld = terrainWorld;
+
+        // The older single-area NavMesh would overlap the streamed one.
+        if (TryGetComponent(out ProceduralTerrainNavMesh legacyNavigation)) legacyNavigation.enabled = false;
 
         ProceduralTerrainTemperatureProvider temperatureProvider =
             GetOrAddComponent<ProceduralTerrainTemperatureProvider>();
@@ -68,49 +80,110 @@ public sealed class AnimalTerrainDemoBootstrap : MonoBehaviour
         animalParent = GetOrCreateChild("Placeholder Animals", true);
         foodParent = GetOrCreateChild("Placeholder Food", true);
         templateParent = GetOrCreateChild("Runtime Templates", false);
-        animalMaterial = CreatePlaceholderMaterial("Cylinder Animal Material", Color.white, 0.28f);
+        animalMaterial = CreatePlaceholderMaterial("Animal Material", Color.white, 0.28f);
         foodMaterial = CreatePlaceholderMaterial(
             "Plant Food Material", new Color(0.35f, 0.8f, 0.24f), 0.12f);
 
-        foodSpawner = GetOrAddComponent<FoodSpawner>();
-        foodSpawner.spawnCenter = simulationFocus;
+        // Reuse a Food Spawner already in the scene, so its tuning is kept.
+        foodSpawner = FindAnyObjectByType<FoodSpawner>();
+        if (foodSpawner == null) foodSpawner = gameObject.AddComponent<FoodSpawner>();
         foodSpawner.spawnedFoodParent = foodParent;
-        foodSpawner.spawnRadius = foodSpawnRadius;
-        foodSpawner.maxFoodCount = Mathf.Max(100, initialFoodCount * 3);
-        foodSpawner.spawnChancePerSecond = 8f;
-        foodSpawner.surfaceOffset = 1f;
-        foodSpawner.terrainSearchRadius = 42f;
-        foodSpawner.navMeshSampleDistance = 18f;
+        foodSpawner.terrainGenerator = terrainGenerator;
+        foodSpawner.terrainWorld = terrainWorld;
         foodSpawner.foodPrefab = CreateFoodTemplate();
+
+        GetOrAddComponent<EcosystemHud>();
+
+        terrainGenerator.onTerrainGenerated += HandleTerrainGenerated;
     }
 
-    IEnumerator Start()
+    void Start()
     {
-        float deadline = Time.realtimeSinceStartup + 10f;
-        while (!proceduralNavMesh.IsReady && Time.realtimeSinceStartup < deadline)
+        // A SeedManager may already have generated terrain; if not, generate it here. Either way,
+        // HandleTerrainGenerated builds the ecosystem for it.
+        if (!terrainGenerator.IsGenerated)
         {
-            yield return null;
+            GenerateTerrainIfNeeded();
         }
-
-        if (!proceduralNavMesh.IsReady)
+        else if (!hasBuiltEcosystem && ecosystemBuild == null)
         {
-            Debug.LogError("The placeholder animals were not created because no walkable NavMesh could be built.", this);
-            yield break;
+            HandleTerrainGenerated();
+        }
+    }
+
+    // Terrain is only drawn once something calls GenerateTerrain. SeedManager does that from its
+    // Generate button, but scenes without one need it done here. Reusing the terrain asset's own seed
+    // keeps the default world the same one the terrain team designed.
+    void GenerateTerrainIfNeeded()
+    {
+        if (terrainGenerator.IsGenerated || terrainGenerator.heightMapSettings == null) return;
+        if (terrainGenerator.viewer == null) terrainGenerator.viewer = simulationFocus;
+
+        terrainGenerator.GenerateTerrain(terrainGenerator.heightMapSettings.noiseSettings.seed);
+    }
+
+    // Everything living on the old terrain is invalid once new terrain is generated, so rebuild the
+    // navigation, food and animals from scratch.
+    void HandleTerrainGenerated()
+    {
+        if (ecosystemBuild != null) StopCoroutine(ecosystemBuild);
+        ecosystemBuild = StartCoroutine(BuildEcosystem());
+    }
+
+    IEnumerator BuildEcosystem()
+    {
+        // The first build keeps any animals placed in the scene by hand, as the demo always has.
+        bool keepPlacedAnimals = !hasBuiltEcosystem;
+        hasBuiltEcosystem = true;
+        ClearEcosystem(keepPlacedAnimals);
+        habitatNavigation.ResetWorld();
+        // The terrain seed also seeds the plant layout, so a world seed always grows the same plants.
+        foodSpawner.ResetWorld(terrainGenerator.heightMapSettings.noiseSettings.seed);
+        yield return null;
+
+        // Only the founders' area is built up front; afterwards navigation grows with the animals.
+        Vector3 center = simulationFocus.position;
+        float founderAreaRadius = animalSpawnRadius * 2f;
+        habitatNavigation.RequestArea(center, founderAreaRadius);
+        float deadline = Time.realtimeSinceStartup + 30f;
+        while (!habitatNavigation.IsAreaReady(center, founderAreaRadius))
+        {
+            if (Time.realtimeSinceStartup >= deadline)
+            {
+                Debug.LogError("No animals were created because no walkable NavMesh could be built around " +
+                               "the simulation focus on the generated terrain.", this);
+                ecosystemBuild = null;
+                yield break;
+            }
+
+            yield return null;
         }
 
         int existingAnimals = FindObjectsByType<SeekFood>().Length;
         int createdAnimals = existingAnimals == 0 ? SpawnFounderAnimals() : 0;
-
-        int missingFood = Mathf.Max(0, initialFoodCount - FoodItem.ActiveCount);
-        int spawnedFood = foodSpawner.SpawnImmediately(missingFood);
-        if (spawnedFood < missingFood)
-        {
-            Debug.LogWarning($"Placed {spawnedFood} of {missingFood} requested placeholder food cubes.", this);
-        }
         Debug.Log(
-            $"Animal terrain demo ready: {existingAnimals + createdAnimals} cylinder animals, " +
-            $"{FoodItem.ActiveCount} food items, and land-only navigation are active.",
+            $"Ecosystem ready: {existingAnimals + createdAnimals} founder animals. Navigation and plants grow " +
+            "outward as the animals spread, and plants also load wherever the camera looks.",
             this);
+        ecosystemBuild = null;
+    }
+
+    void ClearEcosystem(bool keepPlacedAnimals)
+    {
+        // Plants belong to the Food Spawner, which clears them itself; carcasses are left to clear here.
+        foreach (FoodItem food in new List<FoodItem>(FoodItem.ActiveItems))
+        {
+            if (food != null && food.foodType == FoodType.Meat) Destroy(food.gameObject);
+        }
+
+        if (keepPlacedAnimals) return;
+
+        // Reset first, so the animals removed below are not recorded as deaths of the new world.
+        if (SpeciesManager.Instance != null) SpeciesManager.Instance.ResetSimulation();
+        foreach (SeekFood animal in FindObjectsByType<SeekFood>())
+        {
+            Destroy(animal.gameObject);
+        }
     }
 
     int SpawnFounderAnimals()
@@ -126,10 +199,8 @@ public sealed class AnimalTerrainDemoBootstrap : MonoBehaviour
         int primaryAttempts = Mathf.Max(20, founderAnimalCount * 20);
         int attempts = Mathf.Max(60, founderAnimalCount * 60);
         int totalAttempts = attempts;
-        float fallbackRadius = Mathf.Max(
-            animalSpawnRadius,
-            Mathf.Min(foodSpawnRadius,
-                proceduralNavMesh.buildRadius - proceduralNavMesh.sampleSpacing * 2f));
+        // The whole founder area is navigable before founders are placed.
+        float fallbackRadius = animalSpawnRadius * 2f;
 
         while (created < founderAnimalCount && attempts-- > 0)
         {
@@ -146,42 +217,54 @@ public sealed class AnimalTerrainDemoBootstrap : MonoBehaviour
                 offset = direction.normalized * Random.Range(animalSpawnRadius, fallbackRadius);
             }
             Vector3 candidate = simulationFocus.position + new Vector3(offset.x, 0f, offset.y);
-            if (!proceduralNavMesh.TryProjectToNavigation(candidate, 40f, out Vector3 position)) continue;
+            if (!habitatNavigation.TryProjectToNavigation(candidate, 40f, out Vector3 position)) continue;
 
-            int variant = created % colors.Length;
-            CreateFounder(created, position, colors[variant], diets[variant]);
+            if (singleFounderSpecies)
+            {
+                CreateFounder(created, "A", position, colors[0], founderDietAffinity);
+            }
+            else
+            {
+                int variant = created % colors.Length;
+                CreateFounder(created, ((char)('A' + created)).ToString(), position,
+                    colors[variant], diets[variant]);
+            }
             created++;
         }
 
         if (created < founderAnimalCount)
         {
-            Debug.LogWarning($"Placed {created} of {founderAnimalCount} requested cylinder founders.", this);
+            Debug.LogWarning($"Placed {created} of {founderAnimalCount} requested founders. " +
+                             habitatNavigation.DescribeArea(simulationFocus.position, fallbackRadius), this);
         }
         return created;
     }
 
-    void CreateFounder(int index, Vector3 position, Color color, float dietAffinity)
+    // The founder is a plain "cell": a capsule lying on the ground with no body parts. Legs, necks, horns
+    // and other parts grow on its descendants through mutation.
+    void CreateFounder(int index, string speciesName, Vector3 position, Color color, float dietAffinity)
     {
-        GameObject animal = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+        GameObject animal = GameObject.CreatePrimitive(PrimitiveType.Capsule);
         animal.SetActive(false);
-        animal.name = $"Cylinder_Founder_{(char)('A' + index)}";
+        animal.name = $"Capsule_Founder_{index + 1}";
         animal.transform.SetParent(animalParent, true);
         animal.transform.position = position;
         animal.transform.rotation = Quaternion.Euler(0f, Random.Range(0f, 360f), 0f);
-        animal.transform.localScale = new Vector3(2.2f, 2.5f, 2.2f);
-        ShiftPrimitiveMeshToGround(animal);
+        animal.transform.localScale = new Vector3(2.2f, 2f, 2.2f);
+        LayCapsuleOnGround(animal);
         animal.GetComponent<MeshRenderer>().sharedMaterial = animalMaterial;
 
         Collider bodyCollider = animal.GetComponent<Collider>();
         if (bodyCollider is CapsuleCollider capsuleCollider)
         {
-            capsuleCollider.center = Vector3.up;
+            capsuleCollider.direction = 2;
+            capsuleCollider.center = new Vector3(0f, 0.5f, 0f);
         }
 
         NavMeshAgent agent = animal.AddComponent<NavMeshAgent>();
-        agent.agentTypeID = proceduralNavMesh.agentTypeId;
+        agent.agentTypeID = habitatNavigation.AgentTypeId;
         agent.radius = 1.1f;
-        agent.height = 5f;
+        agent.height = 2f;
         agent.baseOffset = 0f;
         agent.angularSpeed = 240f;
         agent.acceleration = 36f;
@@ -195,11 +278,12 @@ public sealed class AnimalTerrainDemoBootstrap : MonoBehaviour
         temperature.heatTolerance = 16f;
 
         SeekFood behavior = animal.AddComponent<SeekFood>();
-        behavior.speciesName = ((char)('A' + index)).ToString();
+        behavior.speciesName = speciesName;
         behavior.speciesColor = color;
         behavior.dietAffinity = dietAffinity;
         behavior.currentEnergy = 105f;
-        behavior.moveSpeed = 12f;
+        // A legless capsule crawls: two full-size leg pairs double this.
+        behavior.moveSpeed = 6f;
         behavior.visionRadius = 110f;
         behavior.wanderRadius = 75f;
         behavior.foodInteractionRange = 5f;
@@ -265,16 +349,33 @@ public sealed class AnimalTerrainDemoBootstrap : MonoBehaviour
         return material;
     }
 
-    void ShiftPrimitiveMeshToGround(GameObject animal)
+    // Turns the capsule primitive to lie along the forward axis, with its underside at the pivot.
+    void LayCapsuleOnGround(GameObject animal)
     {
         MeshFilter filter = animal.GetComponent<MeshFilter>();
-        Mesh shiftedMesh = Instantiate(filter.sharedMesh);
-        shiftedMesh.name = "Grounded Cylinder Placeholder";
-        Vector3[] vertices = shiftedMesh.vertices;
-        for (int index = 0; index < vertices.Length; index++) vertices[index].y += 1f;
-        shiftedMesh.vertices = vertices;
-        shiftedMesh.RecalculateBounds();
-        filter.sharedMesh = shiftedMesh;
+        Mesh lyingMesh = Instantiate(filter.sharedMesh);
+        lyingMesh.name = "Lying Capsule Body";
+        Quaternion layDown = Quaternion.Euler(90f, 0f, 0f);
+        Vector3 raise = new Vector3(0f, 0.5f, 0f);
+        Vector3[] vertices = lyingMesh.vertices;
+        Vector3[] normals = lyingMesh.normals;
+        Vector4[] tangents = lyingMesh.tangents;
+        for (int index = 0; index < vertices.Length; index++)
+        {
+            vertices[index] = layDown * vertices[index] + raise;
+            if (index < normals.Length) normals[index] = layDown * normals[index];
+            if (index < tangents.Length)
+            {
+                Vector3 tangent = layDown * (Vector3)tangents[index];
+                tangents[index] = new Vector4(tangent.x, tangent.y, tangent.z, tangents[index].w);
+            }
+        }
+
+        lyingMesh.vertices = vertices;
+        lyingMesh.normals = normals;
+        if (tangents.Length > 0) lyingMesh.tangents = tangents;
+        lyingMesh.RecalculateBounds();
+        filter.sharedMesh = lyingMesh;
     }
 
     Transform GetOrCreateChild(string childName, bool active)
@@ -300,6 +401,7 @@ public sealed class AnimalTerrainDemoBootstrap : MonoBehaviour
 
     void OnDestroy()
     {
+        if (terrainGenerator != null) terrainGenerator.onTerrainGenerated -= HandleTerrainGenerated;
         if (!Application.isPlaying) return;
         if (animalMaterial != null) Destroy(animalMaterial);
         if (foodMaterial != null) Destroy(foodMaterial);

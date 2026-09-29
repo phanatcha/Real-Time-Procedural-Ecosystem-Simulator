@@ -198,7 +198,14 @@ public class UtilityDecisionPolicy : AnimalDecisionPolicy
 
         float travelTime = distance / self.GetCurrentMovementSpeed();
         float travelCost = travelTime * self.CurrentEnergyDrainPerSecond * travelEnergyWeight;
-        return self.EstimateDigestibleEnergy(food) - travelCost;
+        return UsableEnergy(self, self.EstimateDigestibleEnergy(food)) - travelCost;
+    }
+
+    // Energy only counts up to what still fits under the animal's maximum, so a full animal gains nothing
+    // from food and leaves it for hungrier ones (it can't eat while full anyway).
+    static float UsableEnergy(SeekFood self, float digestibleEnergy)
+    {
+        return Mathf.Min(digestibleEnergy, Mathf.Max(0f, self.maxEnergy - self.currentEnergy));
     }
 
     float ScoreHunt(SeekFood self, SeekFood prey, float distance)
@@ -208,8 +215,8 @@ public class UtilityDecisionPolicy : AnimalDecisionPolicy
             return float.NegativeInfinity;
         }
 
-        float digestibleCarcassEnergy = prey.EstimatedCarcassRawEnergy *
-                                         self.GetDigestionEfficiency(FoodType.Meat);
+        float digestibleCarcassEnergy = UsableEnergy(self, prey.EstimatedCarcassRawEnergy *
+                                                           self.GetDigestionEfficiency(FoodType.Meat));
         float attacksRequired = Mathf.Ceil(prey.currentHealth / self.strength);
         float attackCost = attacksRequired * self.attackEnergyCost * attackEnergyWeight;
         float staminaDemand = attacksRequired * self.attackStaminaCost;
@@ -226,14 +233,15 @@ public class UtilityDecisionPolicy : AnimalDecisionPolicy
 
     float GetRelativeSizeRatio(SeekFood observer, SeekFood other)
     {
-        float heightContribution = Mathf.Clamp01(heightIntimidationContribution);
-        float observerPerceivedSize = Mathf.Lerp(Mathf.Max(0.01f, observer.bodyBulk),
-                                                 Mathf.Max(0.01f, observer.bodyHeight),
-                                                 heightContribution);
-        float otherPerceivedSize = Mathf.Lerp(Mathf.Max(0.01f, other.bodyBulk),
-                                              Mathf.Max(0.01f, other.bodyHeight),
-                                              heightContribution);
-        return otherPerceivedSize / Mathf.Max(0.01f, observerPerceivedSize);
+        return GetPerceivedSize(other) / Mathf.Max(0.01f, GetPerceivedSize(observer));
+    }
+
+    // Body build, made larger by the weight of horns, plates and other body parts.
+    float GetPerceivedSize(SeekFood animal)
+    {
+        float build = Mathf.Lerp(Mathf.Max(0.01f, animal.bodyBulk), Mathf.Max(0.01f, animal.bodyHeight),
+                                 Mathf.Clamp01(heightIntimidationContribution));
+        return build * (1f + 0.5f * animal.BodyPartsMass);
     }
 
     float CalculateSizeIntimidationMultiplier(float relativeSizeRatio)

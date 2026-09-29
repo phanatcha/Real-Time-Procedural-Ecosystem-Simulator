@@ -33,10 +33,24 @@ public class ThreadedDataRequester : MonoBehaviour {
 	}
 
 	void Update() {
-		if (dataQueue.Count > 0) {
-			for (int i = 0; i < dataQueue.Count; i++) {
-				ThreadInfo threadInfo = dataQueue.Dequeue ();
+		// Worker threads enqueue while this runs, so empty the queue under the same lock.
+		// Callbacks run outside the lock because they may request more data.
+		ThreadInfo[] readyData;
+		lock (dataQueue) {
+			if (dataQueue.Count == 0) {
+				return;
+			}
+			readyData = dataQueue.ToArray ();
+			dataQueue.Clear ();
+		}
+
+		// Results have already left the queue, so a callback that throws must not stop the rest
+		// (each lost result is a chunk or tile that never appears).
+		foreach (ThreadInfo threadInfo in readyData) {
+			try {
 				threadInfo.callback (threadInfo.parameter);
+			} catch (Exception e) {
+				Debug.LogException (e);
 			}
 		}
 	}

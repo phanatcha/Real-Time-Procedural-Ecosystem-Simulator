@@ -8,6 +8,10 @@ public class TerrainGenerator : MonoBehaviour
     public event System.Action<TerrainChunk> onRenderMeshReady;
 
     public event System.Action<TerrainChunk> onTerrainRenderMeshReady;
+
+    // Raised after GenerateTerrain replaces the terrain, so systems built on the old terrain
+    // (navigation, food, animals) can rebuild.
+    public event System.Action onTerrainGenerated;
     const float sqrViewerMoveThresholdForChunkUpdate =
         viewerMoveThresholdForChunkUpdate *
         viewerMoveThresholdForChunkUpdate;
@@ -75,6 +79,17 @@ public class TerrainGenerator : MonoBehaviour
         originalHeightMapSettings;
 
 
+    // Transparent water over every chunk that dips below the water level.
+    // Null when TextureData has no water material.
+    WaterSurface
+        waterSurface;
+
+
+    // The viewer every chunk currently judges its distance from.
+    Transform
+        chunkViewer;
+
+
     // ---------------------------------------------------------
     // PROPERTIES
     // ---------------------------------------------------------
@@ -101,6 +116,31 @@ public class TerrainGenerator : MonoBehaviour
     }
 
 
+    public bool IsGenerated
+    {
+        get
+        {
+            return terrainGenerated;
+        }
+    }
+
+
+    // World-space height of the water surface (the canonical water level).
+    // Valid once terrain has been generated.
+    public float WaterLevelHeight { get; private set; }
+
+
+    // True while transparent water is drawn over the terrain
+    // (TextureData has a water material).
+    public bool HasWaterSurface
+    {
+        get
+        {
+            return waterSurface != null;
+        }
+    }
+
+
     // ---------------------------------------------------------
     // UNITY
     // ---------------------------------------------------------
@@ -114,6 +154,15 @@ public class TerrainGenerator : MonoBehaviour
     }
 
 
+    private void OnDestroy()
+    {
+        // Also hands the water layers back to the terrain shader,
+        // so editor previews show painted water again.
+        waterSurface?.Dispose();
+        waterSurface = null;
+    }
+
+
     private void Update()
     {
         if (!terrainGenerated)
@@ -121,6 +170,27 @@ public class TerrainGenerator : MonoBehaviour
 
         if (viewer == null)
             return;
+
+
+        // The viewer changed (GodCamera replaces the scene's player after the
+        // first chunks exist). Chunks judge visibility and detail from their
+        // own viewer, so hand them the new one and re-check them straight away.
+        bool viewerChanged =
+            viewer != chunkViewer;
+
+        if (viewerChanged)
+        {
+            chunkViewer =
+                viewer;
+
+            foreach (TerrainChunk chunk
+                     in terrainChunkDictionary.Values)
+            {
+                chunk.SetViewer(
+                    viewer
+                );
+            }
+        }
 
 
         viewerPosition =
@@ -131,7 +201,8 @@ public class TerrainGenerator : MonoBehaviour
 
 
         // Update terrain collision meshes when viewer moves.
-        if (viewerPosition != viewerPositionOld)
+        if (viewerChanged ||
+            viewerPosition != viewerPositionOld)
         {
             foreach (
                 TerrainChunk chunk
@@ -143,7 +214,8 @@ public class TerrainGenerator : MonoBehaviour
 
 
         // Update visible chunks only after moving far enough.
-        if ((viewerPositionOld - viewerPosition)
+        if (viewerChanged ||
+            (viewerPositionOld - viewerPosition)
             .sqrMagnitude >
             sqrViewerMoveThresholdForChunkUpdate)
         {
@@ -344,6 +416,8 @@ public class TerrainGenerator : MonoBehaviour
             return;
         }
 
+        waterSurface?.AddTileIfNeeded(chunk);
+
         onTerrainRenderMeshReady?.Invoke(chunk);
     }
     private void OnTerrainChunkVisibilityChanged(
@@ -438,12 +512,15 @@ public class TerrainGenerator : MonoBehaviour
         }
 
 
+        // Animals and plants sample terrain well beyond the camera's view, so cache far more
+        // chunks than the default (about 34 KB each).
         worldEnvironmentSampler =
             new TerrainEnvironmentSampler(
                 heightMapSettings,
                 meshSettings,
                 definitions,
-                vegetationSettings
+                vegetationSettings,
+                1024
             );
     }
 
@@ -498,6 +575,10 @@ public class TerrainGenerator : MonoBehaviour
         );
 
 
+        // Before any chunk exists, so every chunk gets its water.
+        CreateWaterSurface();
+
+
         float maxViewDst =
             detailLevels[
                 detailLevels.Length - 1
@@ -527,11 +608,53 @@ public class TerrainGenerator : MonoBehaviour
             viewerPosition;
 
 
+        // New chunks are created with the current viewer.
+        chunkViewer =
+            viewer;
+
+
         terrainGenerated =
             true;
 
 
         UpdateVisibleChunks();
+
+        onTerrainGenerated?.Invoke();
+    }
+
+
+    // ---------------------------------------------------------
+    // WATER
+    // ---------------------------------------------------------
+
+    private void CreateWaterSurface()
+    {
+        waterSurface?.Dispose();
+        waterSurface = null;
+
+        if (EnvironmentDefinitions == null)
+            return;
+
+
+        // Same level the environment classifies as water
+        // (the terrain shader's normalizedWaterLevel).
+        WaterLevelHeight =
+            Mathf.Lerp(
+                heightMapSettings.minHeight,
+                heightMapSettings.maxHeight,
+                EnvironmentDefinitions.ShorelineThreshold
+            );
+
+
+        if (textureSettings.waterMaterial != null)
+        {
+            waterSurface =
+                new WaterSurface(
+                    textureSettings.waterMaterial,
+                    WaterLevelHeight,
+                    meshSettings.meshWorldSize
+                );
+        }
     }
 
 

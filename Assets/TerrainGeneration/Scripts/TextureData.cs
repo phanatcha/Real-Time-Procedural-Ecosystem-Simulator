@@ -38,6 +38,12 @@ public class TextureData : UpdatableData
     [Tooltip("World units per groove - smaller = finer, more frequent streaking.")]
     public float erosionScale = 6f;
 
+    [Header("Water Surface")]
+    [Tooltip("Transparent low-poly water drawn at the water level over lakes, rivers and the sea (Water Mat, " +
+             "Custom/Water shader). Its lake and river bed colours replace the painted water layers while it is shown. " +
+             "Leave empty to keep water painted on the terrain only.")]
+    public Material waterMaterial;
+
     float savedMinHeight;
     float savedMaxHeight;
 

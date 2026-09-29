@@ -47,3 +47,4 @@ MonoBehaviour:
     tint: {r: 0.9411765, g: 0.95686275, b: 0.9607843, a: 0}
     biome: 7
     blendStrength: 0.2
+  waterMaterial: {fileID: 2100000, guid: d3e9fbeac8f144d48595943ef47cab47, type: 2}

@@ -15,6 +15,12 @@ public sealed class TerrainEnvironmentSampler
     readonly Queue<Vector2Int> cacheOrder = new Queue<Vector2Int>();
     readonly object cacheLock = new object();
 
+    // The height range comes from the height curve, and AnimationCurve.Evaluate returns wrong values
+    // when several threads evaluate the same curve at once. Reading it once, on the thread that creates
+    // the sampler or clears its cache, lets background threads sample terrain safely.
+    float terrainMinHeight;
+    float terrainMaxHeight;
+
     public HeightMapSettings HeightMapSettings => heightMapSettings;
     public MeshSettings MeshSettings => meshSettings;
     public EnvironmentDefinitions EnvironmentDefinitions => environmentDefinitions;
@@ -46,6 +52,7 @@ public sealed class TerrainEnvironmentSampler
         this.environmentDefinitions = environmentDefinitions;
         this.vegetationSettings = vegetationSettings;
         this.maxCachedChunks = Mathf.Max(1, maxCachedChunks);
+        RefreshHeightRange();
     }
 
     public bool TrySample(Vector3 worldPosition, out EnvironmentSample sample)
@@ -138,6 +145,16 @@ public sealed class TerrainEnvironmentSampler
             heightMapCache.Clear();
             cacheOrder.Clear();
         }
+
+        RefreshHeightRange();
+    }
+
+    void RefreshHeightRange()
+    {
+        if (heightMapSettings == null || heightMapSettings.heightCurve == null) return;
+
+        terrainMinHeight = heightMapSettings.minHeight;
+        terrainMaxHeight = heightMapSettings.maxHeight;
     }
 
     HeightMap GetOrGenerateHeightMap(Vector2Int chunkCoordinate)
@@ -177,8 +194,8 @@ public sealed class TerrainEnvironmentSampler
         return EnvironmentSampler.TrySample(
             worldPosition,
             heightMap,
-            heightMapSettings.minHeight,
-            heightMapSettings.maxHeight,
+            terrainMinHeight,
+            terrainMaxHeight,
             environmentDefinitions,
             vegetationSettings,
             chunkWorldCentre,

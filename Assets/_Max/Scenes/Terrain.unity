@@ -158,13 +158,13 @@ MonoBehaviour:
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 222451718}
-  m_Enabled: 1
+  m_Enabled: 0
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: d57569b51648f5343856dcca34cc3ac6, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::AnimalSpawner
   terrainGenerator: {fileID: 1992321899}
-  animalPrefab: {fileID: 7789648082565237324, guid: f83c116d17340504a9761dd112d14c42, type: 3}
+  animalPrefab: {fileID: 7937863726326360013, guid: f3716ed2e1f74414791064a67c8e66fd, type: 3}
   spawnCount: 10
   minimumSpawnHeight: 5
   idealMinimumHeight: 15
@@ -320,6 +320,7 @@ GameObject:
   - component: {fileID: 330585546}
   - component: {fileID: 330585545}
   - component: {fileID: 330585547}
+  - component: {fileID: 330585548}
   m_Layer: 0
   m_Name: Main Camera
   m_TagString: MainCamera
@@ -360,7 +361,7 @@ Camera:
     height: 1
   near clip plane: 0.3
   far clip plane: 1000
-  field of view: 60
+  field of view: 80
   orthographic: 0
   orthographic size: 5
   m_Depth: -1
@@ -437,6 +438,28 @@ MonoBehaviour:
     m_VarianceClampScale: 0.9
     m_ContrastAdaptiveSharpening: 0
   m_Version: 2
+--- !u!114 &330585548
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 330585543}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 8b2e5f07c9d14a61a3f6e1d4b72c9e05, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::GodCamera
+  moveSpeed: 60
+  fastMultiplier: 4
+  scrollSpeedStep: 1.2
+  minimumMoveSpeed: 5
+  maximumMoveSpeed: 1000
+  lookSensitivity: 0.15
+  terrainGenerator: {fileID: 0}
+  loadTerrainAroundCamera: 1
+  minimumHeightAboveGround: 2
+  minimumHeightAboveWater: 1.5
 --- !u!1 &410087039
 GameObject:
   m_ObjectHideFlags: 0
@@ -799,8 +822,7 @@ MonoBehaviour:
   seedText: {fileID: 2091231310}
   seedInputField: {fileID: 1634752475}
   terrainGenerator: {fileID: 1992321899}
-  animalSpawner: {fileID: 222451720}
-  animalSpawnHeatmap: {fileID: 1524211707}
+  generateOnStart: 1
 --- !u!4 &675013031
 Transform:
   m_ObjectHideFlags: 0
@@ -811,6 +833,57 @@ Transform:
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
   m_LocalPosition: {x: -28.85499, y: -63.72104, z: -86.86816}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!1 &804511667
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 804511669}
+  - component: {fileID: 804511668}
+  m_Layer: 0
+  m_Name: Animal Terrain Integration
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!114 &804511668
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 804511667}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 93054301359e4ec8a04bcdbfd9f62e28, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::AnimalTerrainDemoBootstrap
+  terrainGenerator: {fileID: 1992321899}
+  simulationFocus: {fileID: 2107046740}
+  founderAnimalCount: 3
+  animalSpawnRadius: 120
+  createWorldBorders: 1
+  singleFounderSpecies: 1
+  founderDietAffinity: 0.15
+--- !u!4 &804511669
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 804511667}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
@@ -1395,6 +1468,7 @@ Transform:
   - {fileID: 222451719}
   - {fileID: 1815314935}
   - {fileID: 1524211706}
+  - {fileID: 2134915300}
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &1524211705
@@ -1436,7 +1510,7 @@ MonoBehaviour:
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 1524211705}
-  m_Enabled: 1
+  m_Enabled: 0
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 5915e0825a6485149a01d96c2e66a3cf, type: 3}
   m_Name: 
@@ -2227,11 +2301,145 @@ CanvasRenderer:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 2091231308}
   m_CullTransparentMesh: 1
+--- !u!1 &2097554845
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 2097554847}
+  - component: {fileID: 2097554846}
+  m_Layer: 0
+  m_Name: SpeciesManager
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!114 &2097554846
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 2097554845}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: ceac323a49d05458c841fccc170ccc0c, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::SpeciesManager
+  simulationSpeed: 1
+  optimizePhysicsForFastForward: 1
+  maximumSimulationFixedStep: 0.2
+  protectedFastForwardThreshold: 20
+  protectedPhysicsStepsPerRealSecond: 100
+  protectedMaximumDeltaTime: 1
+  enableSafetyPause: 1
+  minimumSafeFrameRate: 10
+  lowFrameRateGracePeriod: 3
+  emergencyPopulationLimit: 500
+  appliedSimulationSpeed: 1
+  achievedSimulationSpeed: 1
+  measuredFrameRate: 0
+  protectedFastForwardActive: 0
+  safetyPaused: 0
+  lastSafetyPauseReason: 
+  logLifecycleEvents: 0
+  logTelemetryToConsole: 0
+  telemetryLogInterval: 30
+  speciationThreshold: 0.02
+  speciesCensusInterval: 10
+  minimumNewSpeciesSize: 3
+  populationCeiling: 400
+--- !u!4 &2097554847
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 2097554845}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 102255.48, y: 0.00025, z: 6062.69}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!4 &2107046740 stripped
 Transform:
   m_CorrespondingSourceObject: {fileID: 4207293392497186, guid: 11aaea5348574644a9eb4f4504fcce3f, type: 3}
   m_PrefabInstance: {fileID: 1026432411}
   m_PrefabAsset: {fileID: 0}
+--- !u!1 &2134915299
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 2134915300}
+  - component: {fileID: 2134915301}
+  m_Layer: 0
+  m_Name: FoodSpawner
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &2134915300
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 2134915299}
+  serializedVersion: 2
+  m_LocalRotation: {x: -0, y: -0, z: -0, w: 1}
+  m_LocalPosition: {x: 87150.68, y: -0.00092, z: 5233.165}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 1163969679}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &2134915301
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 2134915299}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: df706d3964025421f9aab396f0a00284, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::FoodSpawner
+  foodPrefab: {fileID: 0}
+  spawnedFoodParent: {fileID: 0}
+  terrainGenerator: {fileID: 0}
+  terrainWorld: {fileID: 0}
+  tileSize: 128
+  cameraRadius: 300
+  tilesAroundAnimals: 1
+  unloadDelay: 10
+  refreshInterval: 0.5
+  retryAfterSeconds: 15
+  maxPlantsCreatedPerFrame: 64
+  siteSpacing: 16
+  minimumGrassBiomass: 0.02
+  surfaceOffset: 1
+  baseNutrition: 75
+  moistureNutritionMultiplier: {x: 0.6, y: 1.4}
+  moistureSizeMultiplier: {x: 0.75, y: 1.3}
+  baseRegrowSeconds: 90
+  minimumGrowthRate: 0.05
+  loadedTileCount: 0
+  shownTileCount: 0
+  plantSiteCount: 0
+  shownPlantCount: 0
 --- !u!114 &6951245743841522
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -3090,3 +3298,5 @@ SceneRoots:
   - {fileID: 1767687714}
   - {fileID: 1968945652}
   - {fileID: 1163969679}
+  - {fileID: 2097554847}
+  - {fileID: 804511669}
