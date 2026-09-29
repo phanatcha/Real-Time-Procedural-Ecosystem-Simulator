@@ -164,6 +164,63 @@ public class EcosystemSimulationTests
     }
 
     [Test]
+    public void PopulationGrowsTowardTheCellCapacity()
+    {
+        EcosystemSimulationSettings settings = CreateFastSettings();
+        settings.nearbySimulationRadius = 100000f;
+        EcosystemSpeciesDefinition species = CreateGrowingSpecies();
+        EcosystemGrid grid = CreateGrid(settings);
+        EcosystemCell cell = MostSuitableCell(grid, species);
+        float capacity = species.GetCarryingCapacity(cell.Environment);
+        cell.SetPopulation(species.Id, 2f);
+        EcosystemPopulationSimulation simulation = new EcosystemPopulationSimulation(grid, settings, new[] { species }, false);
+
+        EcosystemSimulationStepStats stats = simulation.Advance(200f, cell.WorldCentre);
+
+        float expected = EcosystemPopulationSimulation.GrowLogistic(
+            2f, capacity, species.growthRatePerSecond, species.deathRatePerSecond, 200f);
+        Assert.That(cell.GetPopulation(species.Id), Is.EqualTo(expected).Within(0.001f));
+        Assert.That(stats.populationChange, Is.EqualTo(expected - 2f).Within(0.001f));
+        Assert.Greater(expected, 2f);
+        Assert.Less(expected, capacity);
+    }
+
+    [Test]
+    public void MaterializedAnimalsUseUpPartOfTheCapacity()
+    {
+        EcosystemSimulationSettings settings = CreateFastSettings();
+        settings.nearbySimulationRadius = 100000f;
+        EcosystemSpeciesDefinition species = CreateGrowingSpecies();
+        EcosystemGrid grid = CreateGrid(settings);
+        EcosystemCell cell = MostSuitableCell(grid, species);
+        float capacity = species.GetCarryingCapacity(cell.Environment);
+        cell.SetPopulation(species.Id, 1f);
+        EcosystemPopulationSimulation simulation = new EcosystemPopulationSimulation(grid, settings, new[] { species }, false)
+        {
+            OccupiedPopulation = (occupiedCell, speciesId) => occupiedCell == cell ? capacity * 0.75f : 0f
+        };
+
+        simulation.Advance(5000f, cell.WorldCentre);
+
+        Assert.That(cell.GetPopulation(species.Id), Is.EqualTo(capacity * 0.25f).Within(0.01f));
+    }
+
+    EcosystemSpeciesDefinition CreateGrowingSpecies()
+    {
+        EcosystemSpeciesDefinition species = Track(ScriptableObject.CreateInstance<EcosystemSpeciesDefinition>());
+        species.speciesId = "growing-species";
+        species.seedPopulation = false;
+        species.carryingCapacityPerCell = 24f;
+        species.useCustomMigrationRate = true;
+        species.migrationRatePerSecond = 0f;
+        species.minimumLandFraction = 0f;
+        species.maximumSlopeDegrees = 90f;
+        species.resourcePreference = EcosystemResourcePreference.None;
+        species.resourceImportance = 0f;
+        return species;
+    }
+
+    [Test]
     public void MaterializedAnimalReturnsToPopulationAfterLeavingTheActiveArea()
     {
         EcosystemSimulationSettings settings = CreateFastSettings();

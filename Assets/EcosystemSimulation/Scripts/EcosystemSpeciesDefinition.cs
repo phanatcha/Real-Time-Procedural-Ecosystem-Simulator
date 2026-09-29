@@ -25,6 +25,16 @@ public class EcosystemSpeciesDefinition : ScriptableObject
     [Range(0f, 1f)]
     public float migrationRatePerSecond = 0.004f;
 
+    [Header("Growth")]
+    [Tooltip("Births minus deaths per animal per simulated second while the population is small. " +
+             "0.011 is the founders' rate from EstimateGrowthRate.")]
+    [Min(0f)]
+    public float growthRatePerSecond = 0.011f;
+    [Tooltip("Share of the population dying per simulated second where a cell has no room at all. " +
+             "1/300 is one lifetime of the founders' 300 s lifespan.")]
+    [Min(0f)]
+    public float deathRatePerSecond = 1f / 300f;
+
     [Header("Habitat")]
     [Range(0f, 1f)]
     public float minimumLandFraction = 0.5f;
@@ -88,6 +98,18 @@ public class EcosystemSpeciesDefinition : ScriptableObject
         return useCustomMigrationRate ? migrationRatePerSecond : defaultRate;
     }
 
+    // The fastest a small population of live animals can grow: every animal matures, then breeds once per
+    // cooldown until it dies of old age. Births per animal per second are the share of life spent mature
+    // divided by the cooldown; deaths are one per lifespan. Food and temperature only slow this down.
+    // Founders: (1 − 45 / 300) / 60 − 1 / 300 ≈ 0.011 per second.
+    public static float EstimateGrowthRate(float maturitySeconds, float reproductionCooldownSeconds,
+        float lifespanSeconds)
+    {
+        float lifespan = Mathf.Max(0.01f, lifespanSeconds);
+        float matureShare = Mathf.Clamp01(1f - Mathf.Max(0f, maturitySeconds) / lifespan);
+        return matureShare / Mathf.Max(0.01f, reproductionCooldownSeconds) - 1f / lifespan;
+    }
+
     float GetSlopeSuitability(float slopeDegrees)
     {
         float maximumSlope = Mathf.Max(maximumSlopeDegrees, 0.01f);
@@ -115,6 +137,8 @@ public class EcosystemSpeciesDefinition : ScriptableObject
     void OnValidate()
     {
         carryingCapacityPerCell = Mathf.Max(0f, carryingCapacityPerCell);
+        growthRatePerSecond = Mathf.Max(0f, growthRatePerSecond);
+        deathRatePerSecond = Mathf.Max(0f, deathRatePerSecond);
         maximumTemperature = Mathf.Max(minimumTemperature, maximumTemperature);
         populationPerGameObject = Mathf.Max(0.01f, populationPerGameObject);
         maximumMaterializedPerCell = Mathf.Max(0, maximumMaterializedPerCell);

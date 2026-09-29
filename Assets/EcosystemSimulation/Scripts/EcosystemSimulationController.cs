@@ -19,6 +19,8 @@ public class EcosystemSimulationController : MonoBehaviour
     public bool initializeOnStart = true;
 
     readonly List<EcosystemAnimalProxy> materializedAnimals = new List<EcosystemAnimalProxy>();
+    readonly Dictionary<(Vector2Int cell, string speciesId), float> occupiedPopulation =
+        new Dictionary<(Vector2Int cell, string speciesId), float>();
 
     TerrainEnvironmentSampler terrainSampler;
     System.Random materializationRandom;
@@ -41,6 +43,7 @@ public class EcosystemSimulationController : MonoBehaviour
         if (!IsInitialized) return;
 
         Vector2 focus = GetSimulationFocus();
+        CountOccupiedPopulation();
         PopulationSimulation.Advance(Time.deltaTime, focus);
         materializationTimer -= Time.deltaTime;
         if (materializationTimer > 0f) return;
@@ -63,6 +66,7 @@ public class EcosystemSimulationController : MonoBehaviour
             simulationSettings,
             speciesDefinitions,
             true);
+        PopulationSimulation.OccupiedPopulation = GetOccupiedPopulation;
         materializationRandom = new System.Random(simulationSettings.materializationSeed);
         materializationTimer = 0f;
         return true;
@@ -71,7 +75,28 @@ public class EcosystemSimulationController : MonoBehaviour
     public EcosystemSimulationStepStats AdvanceSimulation(float deltaTime)
     {
         if (!IsInitialized) return default;
+        CountOccupiedPopulation();
         return PopulationSimulation.Advance(deltaTime, GetSimulationFocus());
+    }
+
+    // Tallies materialized animals by the cell they were last seen in, for the population simulation.
+    void CountOccupiedPopulation()
+    {
+        occupiedPopulation.Clear();
+        for (int i = 0; i < materializedAnimals.Count; i++)
+        {
+            EcosystemAnimalProxy proxy = materializedAnimals[i];
+            if (proxy == null || !proxy.HasLastHabitableCell) continue;
+
+            (Vector2Int, string) key = (proxy.LastHabitableCell, proxy.SpeciesId);
+            occupiedPopulation.TryGetValue(key, out float population);
+            occupiedPopulation[key] = population + proxy.RepresentedPopulation;
+        }
+    }
+
+    float GetOccupiedPopulation(EcosystemCell cell, string speciesId)
+    {
+        return occupiedPopulation.TryGetValue((cell.Coordinate, speciesId), out float population) ? population : 0f;
     }
 
     public void RefreshMaterialization()
