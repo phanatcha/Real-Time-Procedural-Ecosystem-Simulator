@@ -141,12 +141,21 @@ public class SeedManager : MonoBehaviour
 
     public int GetSeed(string systemName)
     {
+        return GetSeed(seedString, systemName);
+    }
+
+
+
+    // The seed a system gets from a seed string, e.g. GetSeed("FOREST-001", "Terrain"). Editor tools use
+    // it to rebuild the same world without a SeedManager in the scene.
+    public static int GetSeed(string seedString, string systemName)
+    {
         return StringToSeed(seedString + "_" + systemName);
     }
 
 
 
-    private int StringToSeed(string input)
+    private static int StringToSeed(string input)
     {
         unchecked
         {
