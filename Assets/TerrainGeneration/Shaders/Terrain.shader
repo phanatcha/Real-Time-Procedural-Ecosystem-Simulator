@@ -52,6 +52,16 @@ Shader "Custom/Terrain"
             float erosionDarkening;
             float erosionScale;
 
+            // Set globally by WaterSurface while a water surface is drawn over the terrain. When it is 0 the water
+            // layers stay painted on, as they are in the editor previews.
+            float _TerrainWaterSurface;
+            float _TerrainWaterHeight;
+            float4 _TerrainLakebedShallow;
+            float4 _TerrainLakebedDeep;
+            float _TerrainLakebedDeepDepth;
+            float _TerrainCaustics;
+            float _TerrainWetShore;
+
             struct Attributes
             {
                 float4 positionOS : POSITION;
@@ -91,6 +101,44 @@ Shader "Custom/Terrain"
                 return lerp(a, b, u.x) + (c - a) * u.y * (1.0 - u.x) + (d - b) * u.x * u.y;
             }
 
+            float2 Hash22(float2 p)
+            {
+                float3 p3 = frac(p.xyx * float3(0.1031, 0.1030, 0.0973));
+                p3 += dot(p3, p3.yzx + 33.33);
+                return frac((p3.xx + p3.yz) * p3.zy);
+            }
+
+            // Distance to the nearest border between drifting cells, 0 on a border.
+            float CellBorderDistance(float2 p, float time)
+            {
+                float2 cell = floor(p);
+                float2 local = frac(p);
+                float nearest = 8.0;
+                float second = 8.0;
+                [unroll]
+                for (int y = -1; y <= 1; y++)
+                {
+                    [unroll]
+                    for (int x = -1; x <= 1; x++)
+                    {
+                        float2 offset = float2(x, y);
+                        float2 toPoint = offset + 0.5 + 0.4 * sin(time + 6.2831853 * Hash22(cell + offset)) - local;
+                        float distanceSquared = dot(toPoint, toPoint);
+                        second = min(second, max(nearest, distanceSquared));
+                        nearest = min(nearest, distanceSquared);
+                    }
+                }
+                return sqrt(second) - sqrt(nearest);
+            }
+
+            // Threads of sunlight focused by the waves onto a shallow bed: two drifting cell patterns.
+            float Caustics(float2 positionXZ, float time)
+            {
+                float a = CellBorderDistance(positionXZ * 0.45, time * 0.9);
+                float b = CellBorderDistance(positionXZ * 0.62 + 17.3, -time * 0.7);
+                return 1.0 - smoothstep(0.0, 0.16, min(a, b));
+            }
+
             Varyings vert(Attributes IN)
             {
                 Varyings OUT;
@@ -123,6 +171,21 @@ Shader "Custom/Terrain"
                     }
 
                     albedo = albedo * (1 - drawStrength) + baseColours[i].rgb * drawStrength;
+                }
+
+                // Metres below the water surface (negative above it).
+                float waterDepth = _TerrainWaterHeight - IN.positionWS.y;
+                if (_TerrainWaterSurface > 0.5)
+                {
+                    // The surface drawn on top supplies the blue, so beds become sand at the shore and silt deeper down.
+                    float underwater = smoothstep(-0.1, 0.2, waterDepth);
+                    float3 bed = lerp(_TerrainLakebedShallow.rgb, _TerrainLakebedDeep.rgb,
+                                      saturate(waterDepth / max(_TerrainLakebedDeepDepth, 0.01)));
+                    albedo = lerp(albedo, bed, underwater);
+
+                    // Damp, darker ground in a thin band just above the water line.
+                    float wet = 1.0 - smoothstep(0.0, max(_TerrainWetShore, 0.001), -waterDepth);
+                    albedo *= 1.0 - 0.3 * wet * (1.0 - underwater);
                 }
 
                 if (enableErosion)
@@ -158,6 +221,19 @@ Shader "Custom/Terrain"
                 Light mainLight = GetMainLight(IN.shadowCoord);
                 float NdotL = saturate(dot(normalWS, mainLight.direction));
                 float3 radiance = mainLight.color * (NdotL * mainLight.shadowAttenuation * mainLight.distanceAttenuation);
+
+                // Caustics on shallow beds near the camera; they fade with depth and with distance, where the thin
+                // threads would shimmer.
+                if (_TerrainWaterSurface > 0.5 && _TerrainCaustics > 0.0 && waterDepth > 0.0)
+                {
+                    float causticFade = smoothstep(0.0, 0.5, waterDepth) * exp(-waterDepth / 3.0)
+                                      * (1.0 - smoothstep(60.0, 160.0, distance(IN.positionWS, _WorldSpaceCameraPos)));
+                    if (causticFade > 0.001)
+                    {
+                        radiance += mainLight.color * (mainLight.shadowAttenuation * mainLight.distanceAttenuation
+                                    * _TerrainCaustics * causticFade * Caustics(IN.positionWS.xz, _Time.y));
+                    }
+                }
 
                 float3 ambient = SampleSH(normalWS);
 
@@ -226,6 +302,94 @@ Shader "Custom/Terrain"
             half4 ShadowFrag(Varyings IN) : SV_Target
             {
                 return 0;
+            }
+            ENDHLSL
+        }
+
+        // The depth passes put the terrain into the camera depth texture (URP fills it from a DepthNormals prepass
+        // while SSAO is on). The water surface reads it to find the shore and how deep the water is.
+        Pass
+        {
+            Name "DepthOnly"
+            Tags { "LightMode" = "DepthOnly" }
+
+            ZWrite On
+            ColorMask R
+
+            HLSLPROGRAM
+            #pragma vertex DepthVert
+            #pragma fragment DepthFrag
+
+            #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
+
+            struct Attributes
+            {
+                float4 positionOS : POSITION;
+            };
+
+            struct Varyings
+            {
+                float4 positionCS : SV_POSITION;
+            };
+
+            Varyings DepthVert(Attributes IN)
+            {
+                Varyings OUT;
+                OUT.positionCS = TransformObjectToHClip(IN.positionOS.xyz);
+                return OUT;
+            }
+
+            half DepthFrag(Varyings IN) : SV_Target
+            {
+                return IN.positionCS.z;
+            }
+            ENDHLSL
+        }
+
+        Pass
+        {
+            Name "DepthNormals"
+            Tags { "LightMode" = "DepthNormals" }
+
+            ZWrite On
+
+            HLSLPROGRAM
+            #pragma vertex DepthNormalsVert
+            #pragma fragment DepthNormalsFrag
+
+            #include_with_pragmas "Packages/com.unity.render-pipelines.universal/ShaderLibrary/RenderingLayers.hlsl"
+            #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
+
+            struct Attributes
+            {
+                float4 positionOS : POSITION;
+                float3 normalOS : NORMAL;
+            };
+
+            struct Varyings
+            {
+                float4 positionCS : SV_POSITION;
+                float3 normalWS : TEXCOORD0;
+            };
+
+            Varyings DepthNormalsVert(Attributes IN)
+            {
+                Varyings OUT;
+                OUT.positionCS = TransformObjectToHClip(IN.positionOS.xyz);
+                OUT.normalWS = TransformObjectToWorldNormal(IN.normalOS);
+                return OUT;
+            }
+
+            void DepthNormalsFrag(Varyings IN, out half4 outNormalWS : SV_Target0
+            #ifdef _WRITE_RENDERING_LAYERS
+                , out uint outRenderingLayers : SV_Target1
+            #endif
+            )
+            {
+                outNormalWS = half4(NormalizeNormalPerPixel(IN.normalWS), 0.0);
+            #ifdef _WRITE_RENDERING_LAYERS
+                outRenderingLayers = EncodeMeshRenderingLayer();
+            #endif
             }
             ENDHLSL
         }

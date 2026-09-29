@@ -1,6 +1,9 @@
 using UnityEngine;
 using TMPro;
 
+// Runs before AnimalTerrainDemoBootstrap, so the world is generated from the seed string before the
+// ecosystem would otherwise generate a default one.
+[DefaultExecutionOrder(-1100)]
 public class SeedManager : MonoBehaviour
 {
     public static SeedManager Instance { get; private set; }
@@ -30,17 +33,9 @@ public class SeedManager : MonoBehaviour
     [SerializeField]
     private TerrainGenerator terrainGenerator;
 
+    [Tooltip("Generate the world from the seed string as soon as the scene starts.")]
     [SerializeField]
-    private AnimalSpawner animalSpawner;
-
-    [SerializeField]
-    private AnimalSpawnHeatmap animalSpawnHeatmap;
-
-    //[SerializeField]
-    //private BiomeGenerator biomeGenerator;
-
-    //[SerializeField]
-    //private TreeGenerator treeGenerator;
+    private bool generateOnStart = true;
 
 
     private void Awake()
@@ -61,7 +56,14 @@ public class SeedManager : MonoBehaviour
     }
 
 
-  
+    private void Start()
+    {
+        if (generateOnStart)
+        {
+            GenerateWorld();
+        }
+    }
+
 
     private void GenerateSeed()
     {
@@ -115,6 +117,8 @@ public class SeedManager : MonoBehaviour
 
 
 
+    // Only the terrain is generated here. The ecosystem (navigation, plant food and founder animals)
+    // rebuilds itself whenever TerrainGenerator reports new terrain.
     private void GenerateWorld()
     {
         Debug.Log($"Generating world: {seedString}");
@@ -130,28 +134,6 @@ public class SeedManager : MonoBehaviour
         else
         {
             Debug.LogError("TerrainGenerator is not assigned!");
-        }
-
-        if (animalSpawner != null)
-        {
-            int animalSeed = GetSeed("Animals");
-
-            Debug.Log($"Animal Seed: {animalSeed}");
-
-            animalSpawner.SpawnAnimals(animalSeed);
-        }
-        else
-        {
-            Debug.LogWarning("AnimalSpawner is not assigned!");
-        }
-
-        if (animalSpawnHeatmap != null)
-        {
-            animalSpawnHeatmap.GenerateHeatmap();
-        }
-        else
-        {
-            Debug.LogWarning("animatSpwan heat map is not assigned!");
         }
     }
 
@@ -193,11 +175,6 @@ public class SeedManager : MonoBehaviour
             $"Numeric: {Seed}\n\n" +
 
             $"<b>SYSTEM SEEDS</b>\n\n" +
-            $"Terrain: {GetSeed("Terrain")}\n" +
-            $"Biome:   {GetSeed("Biome")}\n" +
-            $"Grass:   {GetSeed("Grass")}\n" +
-            $"Rabbit:  {GetSeed("Rabbit")}\n" +
-            $"Trees:   {GetSeed("Trees")}\n" +
-            $"Fox:     {GetSeed("Fox")}";
+            $"Terrain and plants: {GetSeed("Terrain")}";
     }
 }

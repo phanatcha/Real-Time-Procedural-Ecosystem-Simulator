@@ -107,11 +107,20 @@ public sealed class AnimalTerrainWorld : MonoBehaviour
         return IsWalkable(sample);
     }
 
+    // Half-width of the square animals may use, centred on the world origin.
+    public float HabitableExtent => Mathf.Max(0f, WorldRadius - Mathf.Max(0f, boundaryInset));
+
     public bool IsWalkable(EnvironmentSample sample)
+    {
+        return IsWalkable(sample, maximumWalkableSlopeDegrees, excludeShore);
+    }
+
+    // The same rule without instance state, for background threads using settings copied beforehand.
+    public static bool IsWalkable(EnvironmentSample sample, float maximumSlopeDegrees, bool excludeShore)
     {
         if (!sample.isValid || !sample.isLand || sample.isWater) return false;
         if (excludeShore && sample.isShore) return false;
-        return sample.slopeDegrees <= Mathf.Clamp(maximumWalkableSlopeDegrees, 0f, 60f);
+        return sample.slopeDegrees <= Mathf.Clamp(maximumSlopeDegrees, 0f, 60f);
     }
 
     public bool IsInsideHabitableBounds(Vector3 worldPosition)
@@ -121,13 +130,13 @@ public sealed class AnimalTerrainWorld : MonoBehaviour
 
     public bool IsInsideHabitableBounds(Vector2 worldPosition)
     {
-        float extent = Mathf.Max(0f, WorldRadius - Mathf.Max(0f, boundaryInset));
+        float extent = HabitableExtent;
         return extent > 0f && Mathf.Abs(worldPosition.x) <= extent && Mathf.Abs(worldPosition.y) <= extent;
     }
 
     public Vector3 ClampToHabitableBounds(Vector3 worldPosition)
     {
-        float extent = Mathf.Max(0f, WorldRadius - Mathf.Max(0f, boundaryInset));
+        float extent = HabitableExtent;
         worldPosition.x = Mathf.Clamp(worldPosition.x, -extent, extent);
         worldPosition.z = Mathf.Clamp(worldPosition.z, -extent, extent);
         return worldPosition;

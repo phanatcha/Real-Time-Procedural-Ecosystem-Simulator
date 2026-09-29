@@ -317,6 +317,17 @@ public class TerrainChunk
     }
 
 
+    // The generator's viewer can change after chunks exist (the god camera
+    // takes over from the player), so chunks follow it instead of keeping
+    // the one they were created with.
+    public void SetViewer(
+        Transform newViewer)
+    {
+        viewer =
+            newViewer;
+    }
+
+
     // ---------------------------------------------------------
     // TERRAIN LOD
     // ---------------------------------------------------------

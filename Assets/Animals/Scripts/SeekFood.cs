@@ -10,6 +10,7 @@ public class SeekFood : MonoBehaviour, IEcosystemMaterializationLifecycle
     private NavMeshAgent agent;
     private AnimalDecisionPolicy decisionPolicy;
     private AnimalTemperature thermalResponse;
+    private AnimalGenome genome;
     private FoodItem currentFoodTarget;
     private SeekFood currentPreyTarget;
     private SeekFood currentFleeThreat;
@@ -135,6 +136,10 @@ public class SeekFood : MonoBehaviour, IEcosystemMaterializationLifecycle
     [Range(0f, 1f)] public float minimumHuntEnergyFraction = 0.15f;
     [Tooltip("How long an abandoned prey is ignored as a voluntary hunting target.")]
     [Min(0.1f)] public float failedHuntCooldown = 8f;
+    [Tooltip("Give up on a plant or carcass after chasing it for this many simulated seconds without eating it.")]
+    [Min(0.1f)] public float maximumFoodChaseDuration = 20f;
+    [Tooltip("Simulated seconds that food the animal could not get to (across water, up a cliff) is ignored.")]
+    [Min(0.1f)] public float unreachableFoodMemory = 30f;
 
     [Header("Predation")]
     [Min(0f)] public float attackEnergyCost = 2f;
@@ -157,13 +162,18 @@ public class SeekFood : MonoBehaviour, IEcosystemMaterializationLifecycle
 
     [Header("Reproduction (Mitosis)")]
     [Range(0f, 1f)] public float reproductionThreshold = 0.95f;
+    [Tooltip("Simulated seconds after giving birth before this animal can reproduce again. Without it, " +
+             "every meal can become a birth and populations explode.")]
+    [Min(0f)] public float reproductionCooldown = 60f;
     [Range(0f, 100f)] public float mutationChance = 5f;
     [Min(0f)] public float mutationMagnitude = 0.1f;
 
     public AnimalTemperature ThermalResponse => thermalResponse;
+    public AnimalGenome Genome => genome;
     public float CurrentEnergyDrainPerSecond => currentEnergyDrainPerSecond *
         (thermalResponse != null ? thermalResponse.EnergyDrainMultiplier : 1f);
     public float CurrentAge => currentAge;
+    public int Generation => generation;
     public float RemainingLifespan => Mathf.Max(0f, maxLifespan - currentAge);
     public float AgeFraction => maxLifespan <= Mathf.Epsilon
         ? 1f
@@ -191,8 +201,13 @@ public class SeekFood : MonoBehaviour, IEcosystemMaterializationLifecycle
     public float MaturityProgress => maturityTime <= Mathf.Epsilon
         ? 1f
         : Mathf.Clamp01(currentAge / maturityTime);
-    public string DietClassification => dietAffinity < 1f / 3f ? "Herbivore" :
-                                        dietAffinity > 2f / 3f ? "Carnivore" : "Omnivore";
+    public string DietClassification => ClassifyDiet(dietAffinity);
+
+    public static string ClassifyDiet(float affinity)
+    {
+        return affinity < 1f / 3f ? "Herbivore" :
+               affinity > 2f / 3f ? "Carnivore" : "Omnivore";
+    }
 
     private static readonly int BaseColorId = Shader.PropertyToID("_BaseColor");
     private static readonly int ColorId = Shader.PropertyToID("_Color");
@@ -202,23 +217,37 @@ public class SeekFood : MonoBehaviour, IEcosystemMaterializationLifecycle
     private float decisionRealTimeCooldown;
     private float preyPathRefreshTimer;
     private float attackCooldownTimer;
+    private float reproductionCooldownTimer;
+    [SerializeField, Tooltip("Founders are generation 0; each child is one more than its parent.")]
+    private int generation;
     private SeekFood lastPreyPathTarget;
     private Vector3 lastPreyPathDestination;
     private bool hasPreyPathDestination;
     private SeekFood temporarilyAvoidedPrey;
     private float failedHuntCooldownTimer;
     private float unproductiveHuntTimer;
+    private float foodChaseTimer;
     private bool registeredWithSpeciesManager;
     private bool isDying;
     private AgentDeathCause deathCause = AgentDeathCause.Other;
     private SeekFood firstParent;
     private SeekFood secondParent;
     private readonly List<ThreatMemory> rememberedThreats = new List<ThreatMemory>();
+    // Food this animal recently failed to get to, ignored until the simulated time stored with it.
+    private readonly List<UnreachableFood> unreachableFood = new List<UnreachableFood>();
+    // Shared scratch list for perception; animals only update on the main thread.
+    private static readonly List<FoodItem> nearbyFood = new List<FoodItem>();
 
     private sealed class ThreatMemory
     {
         public SeekFood attacker;
         public float timeRemaining;
+    }
+
+    private struct UnreachableFood
+    {
+        public FoodItem food;
+        public float retryTime;
     }
 
     private enum State { Idling, Wandering, Chasing, Hunting, Fighting, Fleeing, Escaping }
@@ -227,6 +256,9 @@ public class SeekFood : MonoBehaviour, IEcosystemMaterializationLifecycle
     void Start()
     {
         agent = GetComponent<NavMeshAgent>();
+        thermalResponse = GetComponent<AnimalTemperature>();
+        if (thermalResponse == null) thermalResponse = gameObject.AddComponent<AnimalTemperature>();
+        InitializeGenome();
         minimumBodyBulk = Mathf.Max(0.01f, minimumBodyBulk);
         maximumBodyBulk = Mathf.Max(minimumBodyBulk, maximumBodyBulk);
         bodyBulk = Mathf.Clamp(bodyBulk, minimumBodyBulk, maximumBodyBulk);
@@ -257,10 +289,16 @@ public class SeekFood : MonoBehaviour, IEcosystemMaterializationLifecycle
         dietAffinity = Mathf.Clamp01(dietAffinity);
         InitializeMetabolicReference();
         RefreshMetabolicRate();
-        thermalResponse = GetComponent<AnimalTemperature>();
-        if (thermalResponse == null) thermalResponse = gameObject.AddComponent<AnimalTemperature>();
         thermalResponse.ResetRuntimeState();
         RefreshMovementSpeed();
+
+        // Join the parent's current species in case it split off while this animal was being born.
+        if (firstParent != null && firstParent.speciesName != speciesName)
+        {
+            speciesName = firstParent.speciesName;
+            speciesColor = firstParent.speciesColor;
+            gameObject.name = $"Capsule_Species_{speciesName}";
+        }
         ApplySpeciesColor();
 
         if (SpeciesManager.Instance != null)
@@ -304,6 +342,7 @@ public class SeekFood : MonoBehaviour, IEcosystemMaterializationLifecycle
         attackCooldownTimer = attackCooldownTimer > 0f
             ? attackCooldownTimer - deltaTime
             : 0f;
+        reproductionCooldownTimer = Mathf.Max(0f, reproductionCooldownTimer - deltaTime);
         UpdateThreatMemory(deltaTime);
         UpdateFailedHuntMemory(deltaTime);
         thermalResponse.Tick(deltaTime);
@@ -333,7 +372,9 @@ public class SeekFood : MonoBehaviour, IEcosystemMaterializationLifecycle
             }
         }
 
-        if (IsMature && maxEnergy > 0f && currentEnergy >= maxEnergy * reproductionThreshold)
+        bool atPopulationCeiling = SpeciesManager.Instance != null && SpeciesManager.Instance.IsAtPopulationCeiling;
+        if (IsMature && maxEnergy > 0f && currentEnergy >= maxEnergy * reproductionThreshold &&
+            reproductionCooldownTimer <= 0f && !atPopulationCeiling)
         {
             ClearTargets();
             currentState = State.Idling;
@@ -366,7 +407,7 @@ public class SeekFood : MonoBehaviour, IEcosystemMaterializationLifecycle
         }
 
         UpdateDecision(deltaTime);
-        ExecuteCurrentIntent();
+        ExecuteCurrentIntent(deltaTime);
 
         if (currentState == State.Chasing || currentState == State.Hunting ||
             currentState == State.Fighting)
@@ -418,14 +459,15 @@ public class SeekFood : MonoBehaviour, IEcosystemMaterializationLifecycle
         };
 
         float visionRadiusSquared = visionRadius * visionRadius;
-        foreach (FoodItem food in FoodItem.ActiveItems)
+        FoodItem.FindNearby(transform.position, visionRadius, nearbyFood);
+        foreach (FoodItem food in nearbyFood)
         {
             if (food == null || !food.IsAvailable)
             {
                 continue;
             }
 
-            if (!CanReachFood(food))
+            if (!CanReachFood(food) || IsRememberedAsUnreachable(food))
             {
                 continue;
             }
@@ -497,8 +539,13 @@ public class SeekFood : MonoBehaviour, IEcosystemMaterializationLifecycle
                 {
                     currentFoodTarget = decision.foodTarget;
                     currentState = State.Chasing;
-                    if (previousFoodTarget != currentFoodTarget ||
-                        (!agent.pathPending && !agent.hasPath))
+                    bool isNewTarget = previousFoodTarget != currentFoodTarget;
+                    if (isNewTarget)
+                    {
+                        foodChaseTimer = 0f;
+                    }
+
+                    if (isNewTarget || (!agent.pathPending && !agent.hasPath))
                     {
                         TrySetDestination(currentFoodTarget.transform.position);
                     }
@@ -561,12 +608,13 @@ public class SeekFood : MonoBehaviour, IEcosystemMaterializationLifecycle
         }
     }
 
-    void ExecuteCurrentIntent()
+    void ExecuteCurrentIntent(float deltaTime)
     {
         if (currentState == State.Chasing)
         {
             if (IsCurrentFoodTargetAvailable())
             {
+                foodChaseTimer += deltaTime;
                 float interactionRangeSquared = CurrentFoodInteractionRange * CurrentFoodInteractionRange;
                 Vector3 horizontalOffset = transform.position - currentFoodTarget.transform.position;
                 horizontalOffset.y = 0f;
@@ -574,6 +622,10 @@ public class SeekFood : MonoBehaviour, IEcosystemMaterializationLifecycle
                     CanReachFood(currentFoodTarget))
                 {
                     TryConsumeFood(currentFoodTarget);
+                }
+                else if (IsCurrentFoodOutOfReach())
+                {
+                    GiveUpOnCurrentFood();
                 }
                 else if (!agent.pathPending && !agent.hasPath)
                 {
@@ -967,6 +1019,94 @@ public class SeekFood : MonoBehaviour, IEcosystemMaterializationLifecycle
         return currentFoodTarget != null && currentFoodTarget.IsAvailable;
     }
 
+    // True once chasing the current food can't work: its route stops short of it (across water or up a cliff),
+    // the animal has walked as far as the route goes and still can't eat it, or the chase is taking far longer
+    // than crossing its whole field of view would. Without this, relatives that all pick the same unreachable
+    // plant wait at the shore until they starve.
+    bool IsCurrentFoodOutOfReach()
+    {
+        float speed = Mathf.Max(0.1f, GetCurrentMovementSpeed());
+        float allowedChaseTime = Mathf.Max(maximumFoodChaseDuration, 3f * visionRadius / speed);
+        if (foodChaseTimer >= allowedChaseTime)
+        {
+            return true;
+        }
+
+        if (agent == null || !agent.enabled || !agent.isOnNavMesh || agent.pathPending)
+        {
+            return false;
+        }
+
+        if (agent.hasPath && agent.pathStatus != NavMeshPathStatus.PathComplete)
+        {
+            Vector3 shortfall = agent.pathEndPosition - currentFoodTarget.transform.position;
+            shortfall.y = 0f;
+            float range = CurrentFoodInteractionRange;
+            if (shortfall.sqrMagnitude > range * range)
+            {
+                return true;
+            }
+        }
+
+        return !agent.hasPath || agent.remainingDistance <= agent.stoppingDistance + 0.5f;
+    }
+
+    void GiveUpOnCurrentFood()
+    {
+        FoodItem abandonedFood = currentFoodTarget;
+        RememberUnreachableFood(abandonedFood);
+        ClearTargets();
+        foodChaseTimer = 0f;
+        currentState = State.Idling;
+        timer = 0f;
+        decisionTimer = 0f;
+        TryResetPath();
+
+        if (SpeciesManager.Instance != null && SpeciesManager.Instance.ShouldLogLifecycleEvents)
+        {
+            Debug.Log($"{gameObject.name} gave up on {abandonedFood.gameObject.name}, which it could not reach.");
+        }
+    }
+
+    void RememberUnreachableFood(FoodItem food)
+    {
+        if (food == null)
+        {
+            return;
+        }
+
+        // A short memory is enough; the oldest entry makes room.
+        if (unreachableFood.Count >= 16)
+        {
+            unreachableFood.RemoveAt(0);
+        }
+
+        unreachableFood.Add(new UnreachableFood
+        {
+            food = food,
+            retryTime = Time.time + Mathf.Max(0.1f, unreachableFoodMemory)
+        });
+    }
+
+    bool IsRememberedAsUnreachable(FoodItem food)
+    {
+        float now = Time.time;
+        for (int index = unreachableFood.Count - 1; index >= 0; index--)
+        {
+            UnreachableFood entry = unreachableFood[index];
+            if (entry.food == null || now >= entry.retryTime)
+            {
+                unreachableFood.RemoveAt(index);
+            }
+            else if (entry.food == food)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     public bool IsTargetingAsPrey(SeekFood possibleTarget)
     {
         return possibleTarget != null && currentPreyTarget == possibleTarget &&
@@ -1194,6 +1334,7 @@ public class SeekFood : MonoBehaviour, IEcosystemMaterializationLifecycle
     {
         float childEnergy = currentEnergy * 0.5f;
         currentEnergy -= childEnergy;
+        reproductionCooldownTimer = reproductionCooldown;
 
         Vector2 offset = Random.insideUnitCircle * 3f;
         Vector3 spawnPosition = transform.position + new Vector3(offset.x, 0f, offset.y);
@@ -1221,80 +1362,72 @@ public class SeekFood : MonoBehaviour, IEcosystemMaterializationLifecycle
 
         childScript.currentEnergy = childEnergy;
         childScript.currentAge = 0f;
+        childScript.generation = generation + 1;
         childScript.firstParent = this;
         childScript.secondParent = null;
-        childScript.moveSpeed = MutateTrait(moveSpeed, out bool speedMutated);
-        childScript.strength = MutateTrait(strength, out bool strengthMutated);
-        childScript.bodyBulk = MutateBoundedTrait(bodyBulk, minimumBodyBulk, maximumBodyBulk,
-                                                  out bool bodyBulkMutated);
-        childScript.bodyHeight = MutateBoundedTrait(bodyHeight, minimumBodyHeight,
-                                                    maximumBodyHeight, out bool bodyHeightMutated);
-        childScript.visionRadius = MutateTrait(visionRadius, out bool visionMutated);
-        childScript.maxEnergy = MutateTrait(maxEnergy, out bool energyMutated);
-        childScript.maxStamina = MutateTrait(maxStamina, out bool staminaMutated);
-        childScript.maxHealth = MutateTrait(maxHealth, out bool healthMutated);
-        childScript.maturityTime = MutateTrait(maturityTime, out bool maturityMutated);
-        childScript.maxLifespan = MutateTrait(maxLifespan, out bool lifespanMutated);
-        childScript.dietAffinity = MutateDietAffinity(dietAffinity, out bool dietMutated);
-        AnimalTemperature childTemperature = child.GetComponent<AnimalTemperature>();
-        if (childTemperature == null) childTemperature = child.AddComponent<AnimalTemperature>();
-        bool thermalTraitsMutated = childTemperature.InheritAndMutate(thermalResponse,
-                                                                      mutationChance, mutationMagnitude);
+        // The child copies this genome into its traits when it starts.
+        childScript.genome = genome.CreateMutatedCopy(mutationChance, mutationMagnitude, out bool mutated);
 
-        bool didMutate = speedMutated || strengthMutated || bodyBulkMutated || bodyHeightMutated ||
-                          visionMutated || energyMutated || staminaMutated ||
-                          healthMutated || maturityMutated ||
-                          lifespanMutated || dietMutated || thermalTraitsMutated;
-        if (didMutate && SpeciesManager.Instance != null)
-        {
-            childScript.speciesName = SpeciesManager.Instance.GetNextSpeciesName();
-            childScript.speciesColor = SpeciesManager.Instance.GenerateUniqueColor();
-            child.name = $"Capsule_Species_{childScript.speciesName}";
-            if (SpeciesManager.Instance.ShouldLogLifecycleEvents)
-            {
-                Debug.Log($"Speciation event: {speciesName} evolved into {childScript.speciesName} " +
-                          $"({childScript.DietClassification}, affinity {childScript.dietAffinity:F2}).");
-            }
-        }
-        else
-        {
-            childScript.speciesName = speciesName;
-            childScript.speciesColor = speciesColor;
-            child.name = $"Capsule_Species_{childScript.speciesName}";
-        }
+        // Offspring start in their parent's species. SpeciesManager splits species whose members drift
+        // genetically apart.
+        childScript.speciesName = speciesName;
+        childScript.speciesColor = speciesColor;
+        child.name = $"Capsule_Species_{childScript.speciesName}";
 
         if (SpeciesManager.Instance != null)
         {
-            SpeciesManager.Instance.RecordReproduction(this, childScript.speciesName);
+            SpeciesManager.Instance.RecordReproduction(this, mutated);
         }
     }
 
-    float MutateTrait(float parentTrait, out bool mutated)
+    void InitializeGenome()
     {
-        mutated = Random.Range(0f, 100f) <= mutationChance;
-        if (!mutated)
+        // Offspring receive a genome from their parent. Founders placed by a scene or the demo
+        // bootstrap describe their genes through their inspector values instead.
+        if (genome == null || !genome.IsValid)
         {
-            return parentTrait;
+            genome = CaptureGenome();
         }
 
-        float randomShift = Random.Range(-mutationMagnitude, mutationMagnitude);
-        return Mathf.Max(0.01f, parentTrait * (1f + randomShift));
+        ApplyGenome();
     }
 
-    float MutateBoundedTrait(float parentTrait, float minimum, float maximum, out bool mutated)
+    AnimalGenome CaptureGenome()
     {
-        float mutatedValue = MutateTrait(parentTrait, out mutated);
-        float lowerBound = Mathf.Max(0.01f, minimum);
-        float upperBound = Mathf.Max(lowerBound, maximum);
-        return Mathf.Clamp(mutatedValue, lowerBound, upperBound);
+        AnimalGenome captured = AnimalGenome.Create();
+        captured[AnimalGene.MoveSpeed] = moveSpeed;
+        captured[AnimalGene.Strength] = strength;
+        captured[AnimalGene.BodyBulk] = bodyBulk;
+        captured[AnimalGene.BodyHeight] = bodyHeight;
+        captured[AnimalGene.VisionRadius] = visionRadius;
+        captured[AnimalGene.MaxEnergy] = maxEnergy;
+        captured[AnimalGene.MaxStamina] = maxStamina;
+        captured[AnimalGene.MaxHealth] = maxHealth;
+        captured[AnimalGene.MaturityTime] = maturityTime;
+        captured[AnimalGene.MaxLifespan] = maxLifespan;
+        captured[AnimalGene.DietAffinity] = dietAffinity;
+        captured[AnimalGene.PreferredTemperature] = thermalResponse.preferredTemperature;
+        captured[AnimalGene.ColdTolerance] = thermalResponse.coldTolerance;
+        captured[AnimalGene.HeatTolerance] = thermalResponse.heatTolerance;
+        return captured;
     }
 
-    float MutateDietAffinity(float parentAffinity, out bool mutated)
+    void ApplyGenome()
     {
-        mutated = Random.Range(0f, 100f) <= mutationChance;
-        return mutated
-            ? Mathf.Clamp01(parentAffinity + Random.Range(-mutationMagnitude, mutationMagnitude))
-            : parentAffinity;
+        moveSpeed = genome[AnimalGene.MoveSpeed];
+        strength = genome[AnimalGene.Strength];
+        bodyBulk = genome[AnimalGene.BodyBulk];
+        bodyHeight = genome[AnimalGene.BodyHeight];
+        visionRadius = genome[AnimalGene.VisionRadius];
+        maxEnergy = genome[AnimalGene.MaxEnergy];
+        maxStamina = genome[AnimalGene.MaxStamina];
+        maxHealth = genome[AnimalGene.MaxHealth];
+        maturityTime = genome[AnimalGene.MaturityTime];
+        maxLifespan = genome[AnimalGene.MaxLifespan];
+        dietAffinity = genome[AnimalGene.DietAffinity];
+        thermalResponse.preferredTemperature = genome[AnimalGene.PreferredTemperature];
+        thermalResponse.coldTolerance = genome[AnimalGene.ColdTolerance];
+        thermalResponse.heatTolerance = genome[AnimalGene.HeatTolerance];
     }
 
     void InitializeBodyProportionReferences()
@@ -1369,6 +1502,15 @@ public class SeekFood : MonoBehaviour, IEcosystemMaterializationLifecycle
         float maximum = Mathf.Max(minimum, maximumMetabolicMultiplier);
         float multiplier = Mathf.Clamp(weightedTraitCost / totalWeight, minimum, maximum);
         currentEnergyDrainPerSecond = Mathf.Max(0f, baseEnergyDrainPerSecond) * multiplier;
+    }
+
+    // Called by SpeciesManager when this animal's group splits off into a new species.
+    public void AssignSpecies(string newSpeciesName, Color newSpeciesColor)
+    {
+        speciesName = newSpeciesName;
+        speciesColor = newSpeciesColor;
+        gameObject.name = $"Capsule_Species_{speciesName}";
+        ApplySpeciesColor();
     }
 
     void ApplySpeciesColor()

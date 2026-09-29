@@ -12,10 +12,22 @@ public enum AgentDeathCause
     HeatExposure
 }
 
+// One species' history. Trait values are the living members' averages, refreshed at every species
+// census; after extinction they keep the last averages.
 [System.Serializable]
 public sealed class SpeciesTelemetryRecord
 {
     public string speciesName;
+    public string parentSpeciesName;
+    public Color color;
+    [Tooltip("Simulated seconds since the simulation started.")]
+    public float originTime;
+    [Tooltip("Simulated seconds since the simulation started, or -1 while the species survives.")]
+    public float extinctionTime = -1f;
+    [Tooltip("Lowest (x) and highest (y) values among the living members at the last census.")]
+    public Vector2 dietRange;
+    public Vector2 bodyBulkRange;
+    public Vector2 bodyHeightRange;
     public float dietAffinity;
     public string dietClassification;
     public float strength;
@@ -98,13 +110,33 @@ public class SpeciesManager : MonoBehaviour
     [SerializeField, TextArea] private string lastSafetyPauseReason;
 
     [Header("Telemetry")]
-    [Tooltip("Enables individual birth, death, speciation, and extinction messages. Leave off for large or fast simulations.")]
+    [Tooltip("Enables individual birth and death messages. Leave off for large or fast simulations. " +
+             "Speciation and extinction are always logged because they are rare.")]
     public bool logLifecycleEvents;
     public bool logTelemetryToConsole;
     [Min(1f)] public float telemetryLogInterval = 30f;
 
+    [Header("Speciation")]
+    [Tooltip("Genetic distance at which animals count as separate species: 0 means identical and 1 means " +
+             "opposite ends of every gene's range. Lower values produce more species.")]
+    [Range(0.005f, 0.5f)] public float speciationThreshold = 0.03f;
+    [Tooltip("Simulated seconds between checks for species that have drifted into separate groups.")]
+    [Min(1f)] public float speciesCensusInterval = 10f;
+    [Tooltip("A separated group becomes its own species once it has at least this many members.")]
+    [Min(1)] public int minimumNewSpeciesSize = 3;
+
+    [Header("Population Ceiling")]
+    [Tooltip("Animals stop giving birth while the population is this large, so an open world stays " +
+             "affordable to simulate. Set to 0 to disable.")]
+    [Min(0)] public int populationCeiling = 400;
+
     private int currentSpeciesIndex;
     private float telemetryTimer;
+    private float censusTimer;
+    private bool isShuttingDown;
+    // Newborns register on their first frame, so births are counted here until then. Otherwise every
+    // parent in a busy frame sees room under the ceiling and the population overshoots it.
+    private int pendingBirths;
     private float baseFixedDeltaTime;
     private float baseMaximumDeltaTime;
     private float performanceMeasurementRealTime;
@@ -123,6 +155,13 @@ public class SpeciesManager : MonoBehaviour
     public IReadOnlyDictionary<string, SpeciesTelemetryRecord> Telemetry => telemetry;
     public IEnumerable<SeekFood> ActiveAgents => activeAgents;
     public int TotalPopulation { get; private set; }
+    public bool IsAtPopulationCeiling =>
+        populationCeiling > 0 && TotalPopulation + pendingBirths >= populationCeiling;
+    // Simulated time (Time.time) when the current world's history began.
+    public float WorldStartTime { get; private set; }
+    // Refreshed at every species census. Founders are generation 0.
+    public float AverageGeneration { get; private set; }
+    public int HighestGeneration { get; private set; }
     public bool ShouldLogLifecycleEvents => logLifecycleEvents;
     public float AppliedSimulationSpeed => appliedSimulationSpeed;
     public float AchievedSimulationSpeed => achievedSimulationSpeed;
@@ -155,6 +194,13 @@ public class SpeciesManager : MonoBehaviour
                 LogTelemetrySnapshot();
             }
         }
+
+        censusTimer += Time.deltaTime;
+        if (censusTimer >= Mathf.Max(1f, speciesCensusInterval))
+        {
+            censusTimer = 0f;
+            RunSpeciesCensus();
+        }
     }
 
     void Awake()
@@ -169,6 +215,12 @@ public class SpeciesManager : MonoBehaviour
         {
             Destroy(gameObject);
         }
+    }
+
+    // Leaving Play mode destroys every animal; those are not deaths or extinctions.
+    void OnApplicationQuit()
+    {
+        isShuttingDown = true;
     }
 
     void OnDestroy()
@@ -292,6 +344,25 @@ public class SpeciesManager : MonoBehaviour
         lowFrameRateDuration = 0f;
     }
 
+    // Forgets every animal and species so a newly generated world starts a fresh history. Animals
+    // destroyed afterwards are no longer registered, so they are not recorded as deaths.
+    public void ResetSimulation()
+    {
+        activeAgents.Clear();
+        speciesPopulation.Clear();
+        speciesColors.Clear();
+        assignedSpeciesNames.Clear();
+        telemetry.Clear();
+        currentSpeciesIndex = 0;
+        TotalPopulation = 0;
+        pendingBirths = 0;
+        telemetryTimer = 0f;
+        censusTimer = 0f;
+        WorldStartTime = Time.time;
+        AverageGeneration = 0f;
+        HighestGeneration = 0;
+    }
+
     public string GetNextSpeciesName()
     {
         string name;
@@ -319,33 +390,16 @@ public class SpeciesManager : MonoBehaviour
         return name;
     }
 
-    public Color GenerateUniqueColor()
+    // Daughter species get a colour close to their parent's, so related species look alike while
+    // sister species stay distinguishable.
+    public static Color GenerateDaughterColor(Color parentColor)
     {
-        Color newColor;
-        bool isUnique;
-        int safetyCounter = 0;
-
-        do
-        {
-            newColor = new Color(Random.value, Random.value, Random.value);
-            isUnique = true;
-
-            foreach (var existingColor in speciesColors.Values)
-            {
-                float diff = Mathf.Abs(existingColor.r - newColor.r) + 
-                             Mathf.Abs(existingColor.g - newColor.g) + 
-                             Mathf.Abs(existingColor.b - newColor.b);
-                
-                if (diff < 0.4f) 
-                {
-                    isUnique = false;
-                    break;
-                }
-            }
-            safetyCounter++;
-        } while (!isUnique && safetyCounter < 100); 
-
-        return newColor;
+        Color.RGBToHSV(parentColor, out float hue, out float saturation, out float brightness);
+        float hueShift = Random.Range(0.06f, 0.14f) * (Random.value < 0.5f ? -1f : 1f);
+        return Color.HSVToRGB(
+            Mathf.Repeat(hue + hueShift, 1f),
+            Mathf.Clamp(saturation + Random.Range(-0.15f, 0.15f), 0.35f, 1f),
+            Mathf.Clamp(brightness + Random.Range(-0.15f, 0.15f), 0.45f, 1f));
     }
 
     public void RegisterAgent(SeekFood agent)
@@ -355,6 +409,7 @@ public class SpeciesManager : MonoBehaviour
             return;
         }
 
+        if (pendingBirths > 0) pendingBirths--;
         string speciesName = agent.speciesName;
         Color color = agent.speciesColor;
         assignedSpeciesNames.Add(speciesName);
@@ -364,34 +419,24 @@ public class SpeciesManager : MonoBehaviour
             speciesPopulation[speciesName] = 0;
             speciesColors[speciesName] = color;
         }
+        bool isFirstLivingMember = speciesPopulation[speciesName] == 0;
         speciesPopulation[speciesName]++;
         TotalPopulation++;
         SpeciesTelemetryRecord telemetryRecord = GetOrCreateTelemetry(speciesName);
-        if (telemetryRecord.births == 0)
+        telemetryRecord.extinctionTime = -1f;
+
+        // Until the next census, a brand-new species' traits are its first member's.
+        if (isFirstLivingMember)
         {
-            telemetryRecord.dietAffinity = agent.dietAffinity;
-            telemetryRecord.dietClassification = agent.DietClassification;
-            telemetryRecord.strength = agent.strength;
-            telemetryRecord.bodyBulk = agent.bodyBulk;
-            telemetryRecord.bodyHeight = agent.bodyHeight;
-            telemetryRecord.bodyMassFactor = agent.BodyMassFactor;
-            telemetryRecord.feedingReach = agent.FeedingReach;
-            telemetryRecord.maxStamina = agent.maxStamina;
-            telemetryRecord.maturityTime = agent.maturityTime;
-            telemetryRecord.maxLifespan = agent.maxLifespan;
-            if (agent.ThermalResponse != null)
-            {
-                telemetryRecord.preferredTemperature = agent.ThermalResponse.preferredTemperature;
-                telemetryRecord.coldTolerance = agent.ThermalResponse.coldTolerance;
-                telemetryRecord.heatTolerance = agent.ThermalResponse.heatTolerance;
-            }
+            BlendTraits(telemetryRecord, agent, 1f);
+            WidenTraitRanges(telemetryRecord, agent, true);
         }
         telemetryRecord.births++;
     }
 
     public void DeregisterAgent(SeekFood agent, AgentDeathCause deathCause)
     {
-        if (agent == null || !activeAgents.Remove(agent))
+        if (agent == null || !activeAgents.Remove(agent) || isShuttingDown)
         {
             return;
         }
@@ -413,10 +458,8 @@ public class SpeciesManager : MonoBehaviour
             {
                 speciesPopulation.Remove(speciesName);
                 speciesColors.Remove(speciesName);
-                if (logLifecycleEvents)
-                {
-                    Debug.Log($"Species {speciesName} has gone extinct! Color recycled.");
-                }
+                record.extinctionTime = Time.time;
+                Debug.Log($"Extinction: species {speciesName} died out at {Time.time:F0} simulated seconds.");
             }
         }
     }
@@ -463,16 +506,17 @@ public class SpeciesManager : MonoBehaviour
         }
     }
 
-    public void RecordReproduction(SeekFood parent, string childSpeciesName)
+    public void RecordReproduction(SeekFood parent, bool offspringMutated)
     {
         if (parent == null)
         {
             return;
         }
 
+        pendingBirths++;
         SpeciesTelemetryRecord record = GetOrCreateTelemetry(parent.speciesName);
         record.reproductionEvents++;
-        if (childSpeciesName != parent.speciesName)
+        if (offspringMutated)
         {
             record.mutatedOffspring++;
         }
@@ -508,11 +552,158 @@ public class SpeciesManager : MonoBehaviour
     {
         if (!telemetry.TryGetValue(speciesName, out SpeciesTelemetryRecord record))
         {
-            record = new SpeciesTelemetryRecord { speciesName = speciesName };
+            record = new SpeciesTelemetryRecord
+            {
+                speciesName = speciesName,
+                originTime = Time.time,
+                color = speciesColors.TryGetValue(speciesName, out Color color) ? color : Color.white
+            };
             telemetry.Add(speciesName, record);
         }
 
         return record;
+    }
+
+    // Splits species whose members have drifted into genetically separate groups, then refreshes every
+    // species' average traits.
+    void RunSpeciesCensus()
+    {
+        Dictionary<string, List<SeekFood>> membersBySpecies = new Dictionary<string, List<SeekFood>>();
+        foreach (SeekFood agent in activeAgents)
+        {
+            if (agent == null || !agent.IsAlive || agent.Genome == null || !agent.Genome.IsValid)
+            {
+                continue;
+            }
+
+            if (!membersBySpecies.TryGetValue(agent.speciesName, out List<SeekFood> members))
+            {
+                members = new List<SeekFood>();
+                membersBySpecies.Add(agent.speciesName, members);
+            }
+
+            members.Add(agent);
+        }
+
+        foreach (KeyValuePair<string, List<SeekFood>> species in membersBySpecies)
+        {
+            SplitSeparatedGroups(species.Key, species.Value);
+        }
+
+        RefreshAverageTraits();
+    }
+
+    // A group splits off when none of its members is within the speciation threshold of anyone outside
+    // it. The largest group keeps the species name; each other large-enough group becomes a daughter
+    // species. Smaller groups stay put until they grow.
+    void SplitSeparatedGroups(string speciesName, List<SeekFood> members)
+    {
+        int minimumSize = Mathf.Max(1, minimumNewSpeciesSize);
+        if (members.Count < minimumSize * 2)
+        {
+            return;
+        }
+
+        List<AnimalGenome> genomes = new List<AnimalGenome>(members.Count);
+        foreach (SeekFood member in members)
+        {
+            genomes.Add(member.Genome);
+        }
+
+        List<List<int>> groups = AnimalGenome.GroupByDistance(genomes, speciationThreshold);
+        for (int groupIndex = 1; groupIndex < groups.Count && groups[groupIndex].Count >= minimumSize; groupIndex++)
+        {
+            List<int> group = groups[groupIndex];
+            string daughterName = GetNextSpeciesName();
+            Color parentColor = speciesColors.TryGetValue(speciesName, out Color color) ? color : members[0].speciesColor;
+            Color daughterColor = GenerateDaughterColor(parentColor);
+
+            speciesColors[daughterName] = daughterColor;
+            speciesPopulation[daughterName] = group.Count;
+            speciesPopulation[speciesName] -= group.Count;
+            GetOrCreateTelemetry(daughterName).parentSpeciesName = speciesName;
+
+            foreach (int memberIndex in group)
+            {
+                members[memberIndex].AssignSpecies(daughterName, daughterColor);
+            }
+
+            Debug.Log($"Speciation: {daughterName} ({group.Count} animals) split from {speciesName} " +
+                      $"at {Time.time:F0} simulated seconds.");
+        }
+    }
+
+    void RefreshAverageTraits()
+    {
+        Dictionary<string, int> sampleCounts = new Dictionary<string, int>();
+        long generationTotal = 0;
+        int livingCount = 0;
+        int highestGeneration = 0;
+        foreach (SeekFood agent in activeAgents)
+        {
+            if (agent == null || !agent.IsAlive)
+            {
+                continue;
+            }
+
+            sampleCounts.TryGetValue(agent.speciesName, out int count);
+            count++;
+            sampleCounts[agent.speciesName] = count;
+            SpeciesTelemetryRecord record = GetOrCreateTelemetry(agent.speciesName);
+            BlendTraits(record, agent, 1f / count);
+            WidenTraitRanges(record, agent, count == 1);
+
+            generationTotal += agent.Generation;
+            livingCount++;
+            highestGeneration = Mathf.Max(highestGeneration, agent.Generation);
+        }
+
+        AverageGeneration = livingCount > 0 ? (float)generationTotal / livingCount : 0f;
+        HighestGeneration = highestGeneration;
+    }
+
+    // Variation among members shows evolution long before the averages move or a species splits.
+    static void WidenTraitRanges(SpeciesTelemetryRecord record, SeekFood agent, bool isFirstMember)
+    {
+        if (isFirstMember)
+        {
+            record.dietRange = new Vector2(agent.dietAffinity, agent.dietAffinity);
+            record.bodyBulkRange = new Vector2(agent.bodyBulk, agent.bodyBulk);
+            record.bodyHeightRange = new Vector2(agent.bodyHeight, agent.bodyHeight);
+            return;
+        }
+
+        record.dietRange = Widen(record.dietRange, agent.dietAffinity);
+        record.bodyBulkRange = Widen(record.bodyBulkRange, agent.bodyBulk);
+        record.bodyHeightRange = Widen(record.bodyHeightRange, agent.bodyHeight);
+    }
+
+    static Vector2 Widen(Vector2 range, float value)
+    {
+        return new Vector2(Mathf.Min(range.x, value), Mathf.Max(range.y, value));
+    }
+
+    // Moves the record's traits towards the agent's. A weight of 1 copies the agent, and blending the
+    // n-th agent with weight 1/n leaves the record at the average of all n.
+    static void BlendTraits(SpeciesTelemetryRecord record, SeekFood agent, float weight)
+    {
+        record.dietAffinity = Mathf.Lerp(record.dietAffinity, agent.dietAffinity, weight);
+        record.dietClassification = SeekFood.ClassifyDiet(record.dietAffinity);
+        record.strength = Mathf.Lerp(record.strength, agent.strength, weight);
+        record.bodyBulk = Mathf.Lerp(record.bodyBulk, agent.bodyBulk, weight);
+        record.bodyHeight = Mathf.Lerp(record.bodyHeight, agent.bodyHeight, weight);
+        record.bodyMassFactor = Mathf.Lerp(record.bodyMassFactor, agent.BodyMassFactor, weight);
+        record.feedingReach = Mathf.Lerp(record.feedingReach, agent.FeedingReach, weight);
+        record.maxStamina = Mathf.Lerp(record.maxStamina, agent.maxStamina, weight);
+        record.maturityTime = Mathf.Lerp(record.maturityTime, agent.maturityTime, weight);
+        record.maxLifespan = Mathf.Lerp(record.maxLifespan, agent.maxLifespan, weight);
+        if (agent.ThermalResponse != null)
+        {
+            record.preferredTemperature = Mathf.Lerp(record.preferredTemperature,
+                                                     agent.ThermalResponse.preferredTemperature, weight);
+            record.coldTolerance = Mathf.Lerp(record.coldTolerance, agent.ThermalResponse.coldTolerance, weight);
+            record.heatTolerance = Mathf.Lerp(record.heatTolerance, agent.ThermalResponse.heatTolerance, weight);
+        }
     }
 
     [ContextMenu("Log Telemetry Snapshot")]
@@ -522,7 +713,14 @@ public class SpeciesManager : MonoBehaviour
         foreach (SpeciesTelemetryRecord record in telemetry.Values)
         {
             speciesPopulation.TryGetValue(record.speciesName, out int living);
-            builder.Append($"\n{record.speciesName} ({record.dietClassification}, {record.dietAffinity:F2}, ");
+            string lineage = string.IsNullOrEmpty(record.parentSpeciesName)
+                ? "founder"
+                : $"from {record.parentSpeciesName}";
+            string lifetime = record.extinctionTime >= 0f
+                ? $"{record.originTime:F0}-{record.extinctionTime:F0}s, extinct"
+                : $"since {record.originTime:F0}s";
+            builder.Append($"\n{record.speciesName} [{lineage}, {lifetime}] ");
+            builder.Append($"({record.dietClassification}, {record.dietAffinity:F2}, ");
             builder.Append($"strength={record.strength:F1}, bulk={record.bodyBulk:F2}, ");
             builder.Append($"height={record.bodyHeight:F2}, mass={record.bodyMassFactor:F2}, ");
             builder.Append($"reach={record.feedingReach:F1}, stamina={record.maxStamina:F1}, ");
