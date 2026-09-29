@@ -168,6 +168,15 @@ public class SeekFood : MonoBehaviour, IEcosystemMaterializationLifecycle
     [Range(0f, 100f)] public float mutationChance = 5f;
     [Min(0f)] public float mutationMagnitude = 0.1f;
 
+    [Header("Body Plan")]
+    [Tooltip("How body parts sprout, grow, shrink and turn into other parts at birth.")]
+    public BodyPlanMutation bodyPlanMutation = BodyPlanMutation.Default;
+    [Tooltip("How far a full-size leg pair lifts the body off the ground at body height 1, in world units. " +
+             "Standing taller also raises the animal's feeding reach.")]
+    [Min(0f)] public float fullLegLength = 1.6f;
+    [SerializeField, Tooltip("This animal's body parts and their sizes (0-1), for reference.")]
+    private string bodyPlan;
+
     public AnimalTemperature ThermalResponse => thermalResponse;
     public AnimalGenome Genome => genome;
     public float CurrentEnergyDrainPerSecond => currentEnergyDrainPerSecond *
@@ -180,9 +189,12 @@ public class SeekFood : MonoBehaviour, IEcosystemMaterializationLifecycle
         : Mathf.Clamp01(currentAge / maxLifespan);
     public float HealthFraction => currentHealth / Mathf.Max(0.01f, maxHealth);
     public float StaminaFraction => currentStamina / Mathf.Max(0.01f, maxStamina);
-    public float FeedingReach => Mathf.Max(0f, baseFeedingReach) * Mathf.Max(0.01f, bodyHeight);
+    // A neck adds reach on top of the body's own; legs add it by lifting the whole animal.
+    public float FeedingReach => Mathf.Max(0f, baseFeedingReach) * Mathf.Max(0.01f, bodyHeight) +
+                                 bodyEffects.extraFeedingReach;
     public float CurrentFoodInteractionRange => foodInteractionRange * Mathf.Max(0.01f, bodyBulk);
     public float CurrentAttackRange => attackRange * Mathf.Max(0.01f, bodyBulk);
+    // Includes the weight of body parts, which also feeds the carcass and the metabolism.
     public float BodyMassFactor
     {
         get
@@ -190,9 +202,12 @@ public class SeekFood : MonoBehaviour, IEcosystemMaterializationLifecycle
             float bulk = Mathf.Max(0.01f, bodyBulk);
             float heightFactor = Mathf.Lerp(1f, Mathf.Max(0.01f, bodyHeight),
                                             Mathf.Clamp01(heightMassContribution));
-            return bulk * bulk * heightFactor;
+            return bulk * bulk * heightFactor * (1f + bodyEffects.partsMass);
         }
     }
+    public float BodyPartsMass => bodyEffects.partsMass;
+    // How far the longest legs lift the body off the ground, in world units.
+    public float LegLift => Mathf.Max(0f, fullLegLength) * bodyEffects.longestLegs * Mathf.Max(0.01f, bodyHeight);
     public float EstimatedCarcassRawEnergy => Mathf.Max(0f, currentEnergy) *
                                                carcassEnergyTransferEfficiency *
                                                BodyMassFactor;
@@ -227,6 +242,8 @@ public class SeekFood : MonoBehaviour, IEcosystemMaterializationLifecycle
     private float failedHuntCooldownTimer;
     private float unproductiveHuntTimer;
     private float foodChaseTimer;
+    private BodyPlanEffects bodyEffects = BodyPlanEffects.None;
+    private AnimalBodyView bodyView;
     private bool registeredWithSpeciesManager;
     private bool isDying;
     private AgentDeathCause deathCause = AgentDeathCause.Other;
@@ -300,6 +317,7 @@ public class SeekFood : MonoBehaviour, IEcosystemMaterializationLifecycle
             gameObject.name = $"Capsule_Species_{speciesName}";
         }
         ApplySpeciesColor();
+        BuildBodyView();
 
         if (SpeciesManager.Instance != null)
         {
@@ -547,7 +565,7 @@ public class SeekFood : MonoBehaviour, IEcosystemMaterializationLifecycle
 
                     if (isNewTarget || (!agent.pathPending && !agent.hasPath))
                     {
-                        TrySetDestination(currentFoodTarget.transform.position);
+                        TrySetDestination(currentFoodTarget.GroundPosition);
                     }
                 }
                 break;
@@ -629,7 +647,7 @@ public class SeekFood : MonoBehaviour, IEcosystemMaterializationLifecycle
                 }
                 else if (!agent.pathPending && !agent.hasPath)
                 {
-                    TrySetDestination(currentFoodTarget.transform.position);
+                    TrySetDestination(currentFoodTarget.GroundPosition);
                 }
             }
             else
@@ -1292,6 +1310,12 @@ public class SeekFood : MonoBehaviour, IEcosystemMaterializationLifecycle
             TryResetPath();
         }
 
+        // Plates absorb part of every attack, but not starvation.
+        if (attacker != null)
+        {
+            amount *= bodyEffects.damageTakenMultiplier;
+        }
+
         currentHealth -= amount;
         if (currentHealth <= 0f)
         {
@@ -1366,7 +1390,8 @@ public class SeekFood : MonoBehaviour, IEcosystemMaterializationLifecycle
         childScript.firstParent = this;
         childScript.secondParent = null;
         // The child copies this genome into its traits when it starts.
-        childScript.genome = genome.CreateMutatedCopy(mutationChance, mutationMagnitude, out bool mutated);
+        childScript.genome = genome.CreateMutatedCopy(mutationChance, mutationMagnitude, bodyPlanMutation,
+                                                      out bool mutated);
 
         // Offspring start in their parent's species. SpeciesManager splits species whose members drift
         // genetically apart.
@@ -1390,6 +1415,20 @@ public class SeekFood : MonoBehaviour, IEcosystemMaterializationLifecycle
         }
 
         ApplyGenome();
+        ApplyBodyPlan();
+    }
+
+    // Body parts adjust the traits the genes have just set (see AnimalBodyPlan). The genome keeps the
+    // unadjusted values, so parts never compound over generations.
+    void ApplyBodyPlan()
+    {
+        bodyEffects = AnimalBodyPlan.Evaluate(genome);
+        moveSpeed *= bodyEffects.speedMultiplier;
+        strength *= bodyEffects.strengthMultiplier;
+        visionRadius *= bodyEffects.visionMultiplier;
+        thermalResponse.coldTolerance = Mathf.Max(0f, thermalResponse.coldTolerance + bodyEffects.coldToleranceChange);
+        thermalResponse.heatTolerance = Mathf.Max(0f, thermalResponse.heatTolerance + bodyEffects.heatToleranceChange);
+        bodyPlan = AnimalBodyPlan.Describe(genome);
     }
 
     AnimalGenome CaptureGenome()
@@ -1455,7 +1494,8 @@ public class SeekFood : MonoBehaviour, IEcosystemMaterializationLifecycle
 
         agent.radius = Mathf.Max(0.01f, referenceAgentRadius * bodyBulk);
         agent.height = Mathf.Max(0.01f, referenceAgentHeight * bodyHeight);
-        agent.baseOffset = referenceAgentBaseOffset * bodyHeight;
+        // Legs stand the body up off the ground. The agent's offset is in the scaled local space.
+        agent.baseOffset = referenceAgentBaseOffset * bodyHeight + LegLift / Mathf.Max(0.01f, transform.lossyScale.y);
     }
 
     void InitializeMetabolicReference()
@@ -1485,9 +1525,11 @@ public class SeekFood : MonoBehaviour, IEcosystemMaterializationLifecycle
 
         float bulkRatio = Mathf.Max(0.01f, bodyBulk) / referenceBodyBulk;
         float heightRatio = Mathf.Max(0.01f, bodyHeight) / referenceBodyHeight;
+        // Body parts add their weight; their other advantages (speed, strength, vision) are charged below.
         float relativeMassBurden = bulkRatio * bulkRatio *
                                    Mathf.Lerp(1f, heightRatio,
-                                              Mathf.Clamp01(heightMassContribution));
+                                              Mathf.Clamp01(heightMassContribution)) *
+                                   (1f + bodyEffects.partsMass);
 
         float weightedTraitCost =
             (Mathf.Max(0.01f, moveSpeed) / referenceMoveSpeed) * speedMetabolicWeight +
@@ -1521,6 +1563,23 @@ public class SeekFood : MonoBehaviour, IEcosystemMaterializationLifecycle
         propertyBlock.SetColor(BaseColorId, speciesColor);
         propertyBlock.SetColor(ColorId, speciesColor);
         meshRenderer.SetPropertyBlock(propertyBlock);
+
+        if (bodyView != null)
+        {
+            bodyView.SetColor(speciesColor);
+        }
+    }
+
+    // Draws this animal's body parts. Offspring copy their parent's part objects, so every animal
+    // rebuilds them from its own genome.
+    void BuildBodyView()
+    {
+        if (bodyView == null && !TryGetComponent(out bodyView))
+        {
+            bodyView = gameObject.AddComponent<AnimalBodyView>();
+        }
+
+        bodyView.Build(genome, Mathf.Max(0f, fullLegLength) * Mathf.Max(0.01f, bodyHeight), speciesColor);
     }
 
     void ClearTargets()

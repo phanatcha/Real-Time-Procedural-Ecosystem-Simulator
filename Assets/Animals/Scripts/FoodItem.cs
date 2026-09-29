@@ -26,6 +26,11 @@ public class FoodItem : MonoBehaviour
     [Header("Accessibility")]
     [Tooltip("Optional minimum feeding reach. Vertical height is checked automatically; use this for branches or other access difficulty.")]
     [Min(0f)] public float requiredFeedingReach;
+    [Tooltip("How far this food sits above the ground it grows from, such as leaves up a tree. Animals walk " +
+             "to the ground below it and need enough feeding reach to eat it.")]
+    [Min(0f)] public float heightAboveGround;
+
+    public Vector3 GroundPosition => transform.position - Vector3.up * heightAboveGround;
 
     [Header("Plant Growth Temperature")]
     public bool temperatureAffectsGrowth = true;

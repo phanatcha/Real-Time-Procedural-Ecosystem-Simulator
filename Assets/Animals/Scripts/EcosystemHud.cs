@@ -28,6 +28,17 @@ public class EcosystemHud : MonoBehaviour
     private float speedBeforePause = 1f;
     private float lastWorldStartTime = -1f;
     private GUIStyle style;
+    // The body-plan line is recounted a couple of times a second rather than on every GUI pass.
+    private static readonly BodyPartType[] ShownParts =
+    {
+        BodyPartType.Legs, BodyPartType.Neck, BodyPartType.Horn,
+        BodyPartType.Plates, BodyPartType.EyeStalks, BodyPartType.Fins
+    };
+    private readonly int[] animalsWithPart = new int[ShownParts.Length];
+    private readonly float[] partSizeTotals = new float[ShownParts.Length];
+    private string bodySummary = "";
+    private string bodySummarySpecies;
+    private float nextBodySummaryTime;
 
     void Update()
     {
@@ -172,6 +183,61 @@ public class EcosystemHud : MonoBehaviour
                     $"bulk {Describe(now.bulk, record.bodyBulkRange, now.bulk - first.bulk)}   " +
                     $"height {Describe(now.height, record.bodyHeightRange, now.height - first.height)}   " +
                     $"lifespan {now.lifespan:0}s {Signed(now.lifespan - first.lifespan, "0")}");
+        text.Append($"\n   body parts: {DescribeBodyParts(manager, largest)}");
+    }
+
+    // Share of the species' animals carrying each part, with the average size of those parts (0-1).
+    string DescribeBodyParts(SpeciesManager manager, string species)
+    {
+        if (species == bodySummarySpecies && Time.unscaledTime < nextBodySummaryTime)
+        {
+            return bodySummary;
+        }
+
+        bodySummarySpecies = species;
+        nextBodySummaryTime = Time.unscaledTime + 0.5f;
+        System.Array.Clear(animalsWithPart, 0, animalsWithPart.Length);
+        System.Array.Clear(partSizeTotals, 0, partSizeTotals.Length);
+        int members = 0;
+        foreach (SeekFood animal in manager.ActiveAgents)
+        {
+            AnimalGenome genome = animal != null ? animal.Genome : null;
+            if (genome == null || !genome.IsValid || animal.speciesName != species)
+            {
+                continue;
+            }
+
+            members++;
+            for (int part = 0; part < ShownParts.Length; part++)
+            {
+                float largest = 0f;
+                for (int site = 0; site < AnimalGenome.SiteCount; site++)
+                {
+                    if (genome.GetPartType((BodySite)site) == ShownParts[part])
+                    {
+                        largest = Mathf.Max(largest, genome.GetPartSize((BodySite)site));
+                    }
+                }
+
+                if (largest > 0f)
+                {
+                    animalsWithPart[part]++;
+                    partSizeTotals[part] += largest;
+                }
+            }
+        }
+
+        StringBuilder summary = new StringBuilder();
+        for (int part = 0; part < ShownParts.Length; part++)
+        {
+            if (animalsWithPart[part] == 0) continue;
+            if (summary.Length > 0) summary.Append(", ");
+            summary.Append($"{AnimalBodyPlan.PartName(ShownParts[part])} {100f * animalsWithPart[part] / members:0}% " +
+                           $"(size {partSizeTotals[part] / animalsWithPart[part]:0.00})");
+        }
+
+        bodySummary = summary.Length > 0 ? summary.ToString() : "none yet, still a plain capsule";
+        return bodySummary;
     }
 
     static string Describe(float average, Vector2 range, float change)

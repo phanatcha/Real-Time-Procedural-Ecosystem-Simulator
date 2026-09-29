@@ -233,14 +233,15 @@ public class UtilityDecisionPolicy : AnimalDecisionPolicy
 
     float GetRelativeSizeRatio(SeekFood observer, SeekFood other)
     {
-        float heightContribution = Mathf.Clamp01(heightIntimidationContribution);
-        float observerPerceivedSize = Mathf.Lerp(Mathf.Max(0.01f, observer.bodyBulk),
-                                                 Mathf.Max(0.01f, observer.bodyHeight),
-                                                 heightContribution);
-        float otherPerceivedSize = Mathf.Lerp(Mathf.Max(0.01f, other.bodyBulk),
-                                              Mathf.Max(0.01f, other.bodyHeight),
-                                              heightContribution);
-        return otherPerceivedSize / Mathf.Max(0.01f, observerPerceivedSize);
+        return GetPerceivedSize(other) / Mathf.Max(0.01f, GetPerceivedSize(observer));
+    }
+
+    // Body build, made larger by the weight of horns, plates and other body parts.
+    float GetPerceivedSize(SeekFood animal)
+    {
+        float build = Mathf.Lerp(Mathf.Max(0.01f, animal.bodyBulk), Mathf.Max(0.01f, animal.bodyHeight),
+                                 Mathf.Clamp01(heightIntimidationContribution));
+        return build * (1f + 0.5f * animal.BodyPartsMass);
     }
 
     float CalculateSizeIntimidationMultiplier(float relativeSizeRatio)

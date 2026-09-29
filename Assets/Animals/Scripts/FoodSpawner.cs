@@ -6,6 +6,7 @@ using UnityEngine;
 // - Density follows the terrain's grass biomass, so lush lowland holds more plants than tundra.
 // - Nutrition follows moisture, so wetter ground grows richer (and larger) plants.
 // - Regrowth speed follows temperature, so an eaten plant comes back fastest where it is warm.
+// - Well-wooded ground also grows richer leaves high up, which only animals that reach high enough can eat.
 // Plant positions come from a hash of the world seed and fixed world cells, so a seed always gives the
 // same layout. Tiles that nothing needs are unloaded but remember what was eaten, and keep regrowing.
 public class FoodSpawner : MonoBehaviour
@@ -52,6 +53,19 @@ public class FoodSpawner : MonoBehaviour
     [Tooltip("Sites too cold to regrow faster than this fraction of the ideal rate get no plant.")]
     [Range(0.01f, 1f)] public float minimumGrowthRate = 0.05f;
 
+    [Header("Tall Forest Food")]
+    [Tooltip("Leaves high up in well-wooded ground, which only animals with enough feeding reach (a tall " +
+             "body, long legs or a neck) can eat. They are extra food; ground plants are unchanged.")]
+    public bool growTallFood = true;
+    [Tooltip("Tree cover a cell needs before it can hold tall food.")]
+    [Range(0f, 1f)] public float minimumTreeCover = 0.5f;
+    [Tooltip("Chance that a wooded cell holds tall food, multiplied by its tree cover.")]
+    [Range(0f, 1f)] public float tallFoodChance = 0.35f;
+    [Tooltip("Height of the leaves above the ground, lowest (x) to highest (y), in world units.")]
+    public Vector2 tallFoodHeight = new Vector2(6f, 14f);
+    [Tooltip("Tall food is richer than ground plants.")]
+    [Min(1f)] public float tallFoodNutritionMultiplier = 1.6f;
+
     [Header("Runtime")]
     [SerializeField] private int loadedTileCount;
     [SerializeField] private int shownTileCount;
@@ -64,6 +78,9 @@ public class FoodSpawner : MonoBehaviour
         public float nutrition;
         public float sizeMultiplier;
         public float regrowSeconds;
+        // How far the plant's centre is above the ground it grows from.
+        public float heightAboveGround;
+        public bool isTall;
         // Progress towards the next plant, advancing only while the site is empty; 1 or more means a
         // grown plant is ready to appear.
         public float regrowProgress;
@@ -84,7 +101,21 @@ public class FoodSpawner : MonoBehaviour
         public Vector2Int coordinate;
         public readonly List<Vector3> positions = new List<Vector3>();
         public readonly List<float> moistures = new List<float>();
+        // 0 for ground plants, otherwise the height of tall food above the ground.
+        public readonly List<float> heights = new List<float>();
+
+        public void Add(EnvironmentSample environment, float height)
+        {
+            positions.Add(environment.position);
+            moistures.Add(environment.moisture);
+            heights.Add(height);
+        }
     }
+
+    private static readonly int BaseColorId = Shader.PropertyToID("_BaseColor");
+    private static readonly int ColorId = Shader.PropertyToID("_Color");
+    private static readonly Color TallFoodColor = new Color(0.16f, 0.5f, 0.2f);
+    private static readonly Color TrunkColor = new Color(0.36f, 0.25f, 0.16f);
 
     private readonly Dictionary<Vector2Int, FoodTile> tiles = new Dictionary<Vector2Int, FoodTile>();
     private readonly HashSet<Vector2Int> neededTiles = new HashSet<Vector2Int>();
@@ -224,9 +255,17 @@ public class FoodSpawner : MonoBehaviour
         float extent = terrainWorld.HabitableExtent;
         float maximumSlope = terrainWorld.maximumWalkableSlopeDegrees;
         bool excludeShore = terrainWorld.excludeShore;
+        TallFoodRules tallFood = new TallFoodRules
+        {
+            enabled = growTallFood,
+            minimumTreeCover = minimumTreeCover,
+            chance = tallFoodChance,
+            lowest = Mathf.Min(tallFoodHeight.x, tallFoodHeight.y),
+            highest = Mathf.Max(tallFoodHeight.x, tallFoodHeight.y)
+        };
         ThreadedDataRequester.RequestData(
             () => FindPlantCandidates(version, coordinate, sampler, seed, size, spacing, minimumGrass,
-                                      extent, maximumSlope, excludeShore),
+                                      extent, maximumSlope, excludeShore, tallFood),
             OnPlantCandidatesFound);
         return tile;
     }
@@ -250,13 +289,18 @@ public class FoodSpawner : MonoBehaviour
             if (growthRate < minimumGrowthRate) continue;
 
             float moisture = candidates.moistures[index];
+            bool isTall = candidates.heights[index] > 0f;
+            float heightAboveGround = isTall ? candidates.heights[index] : surfaceOffset;
             tile.sites.Add(new PlantSite
             {
-                position = position + Vector3.up * surfaceOffset,
+                position = position + Vector3.up * heightAboveGround,
                 nutrition = baseNutrition * Mathf.Lerp(moistureNutritionMultiplier.x,
-                                                       moistureNutritionMultiplier.y, moisture),
+                                                       moistureNutritionMultiplier.y, moisture) *
+                            (isTall ? tallFoodNutritionMultiplier : 1f),
                 sizeMultiplier = Mathf.Lerp(moistureSizeMultiplier.x, moistureSizeMultiplier.y, moisture),
                 regrowSeconds = baseRegrowSeconds / growthRate,
+                heightAboveGround = heightAboveGround,
+                isTall = isTall,
                 regrowProgress = 1f
             });
         }
@@ -269,13 +313,57 @@ public class FoodSpawner : MonoBehaviour
     void CreatePlant(PlantSite site)
     {
         GameObject plantObject = Instantiate(foodPrefab, site.position, Quaternion.identity, spawnedFoodParent);
-        plantObject.transform.localScale = foodPrefab.transform.localScale * site.sizeMultiplier;
+        Vector3 scale = foodPrefab.transform.localScale * site.sizeMultiplier;
+        // Tall food is a wide, flat clump of leaves.
+        plantObject.transform.localScale = site.isTall ? Vector3.Scale(scale, new Vector3(1.5f, 0.7f, 1.5f)) : scale;
         if (!plantObject.activeSelf) plantObject.SetActive(true);
 
         // Plants stay until eaten; the next one starts growing once this one is gone.
         site.plant = plantObject.GetComponent<FoodItem>();
         site.plant.Configure(FoodType.Plant, site.nutrition);
+        site.plant.heightAboveGround = site.heightAboveGround;
         site.regrowProgress = 0f;
+
+        if (site.isTall)
+        {
+            DressAsTree(plantObject, site.heightAboveGround);
+        }
+    }
+
+    // Darker leaves on a thin trunk that reaches down to the ground, so tall food reads as a small tree.
+    static void DressAsTree(GameObject leaves, float heightAboveGround)
+    {
+        if (!leaves.TryGetComponent(out MeshRenderer leafRenderer))
+        {
+            return;
+        }
+
+        SetColor(leafRenderer, TallFoodColor);
+
+        GameObject trunk = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+        trunk.name = "Trunk";
+        DestroyImmediate(trunk.GetComponent<Collider>());
+        trunk.transform.SetParent(leaves.transform, false);
+
+        // The leaves are unrotated, so undoing their scale keeps the trunk's own proportions.
+        Vector3 leafScale = leaves.transform.lossyScale;
+        float leafHalfHeight = leafScale.y * 0.5f;
+        float trunkLength = Mathf.Max(0.1f, heightAboveGround - leafHalfHeight);
+        trunk.transform.localScale = new Vector3(0.35f / leafScale.x, trunkLength * 0.5f / leafScale.y, 0.35f / leafScale.z);
+        trunk.transform.localPosition = new Vector3(0f, -(leafHalfHeight + trunkLength * 0.5f) / leafScale.y, 0f);
+
+        MeshRenderer trunkRenderer = trunk.GetComponent<MeshRenderer>();
+        trunkRenderer.sharedMaterial = leafRenderer.sharedMaterial;
+        SetColor(trunkRenderer, TrunkColor);
+    }
+
+    static void SetColor(Renderer target, Color color)
+    {
+        MaterialPropertyBlock block = new MaterialPropertyBlock();
+        target.GetPropertyBlock(block);
+        block.SetColor(BaseColorId, color);
+        block.SetColor(ColorId, color);
+        target.SetPropertyBlock(block);
     }
 
     void HideTile(FoodTile tile)
@@ -339,10 +427,21 @@ public class FoodSpawner : MonoBehaviour
         if (terrainGenerator == null && terrainWorld != null) terrainGenerator = terrainWorld.terrainGenerator;
     }
 
+    // Copied settings for tall food, so the background thread never reads the component.
+    private struct TallFoodRules
+    {
+        public bool enabled;
+        public float minimumTreeCover;
+        public float chance;
+        public float lowest;
+        public float highest;
+    }
+
     // Runs on a background thread. Cells are fixed in world space, so a tile's plants are the same
     // whenever it loads for the same seed.
     static PlantCandidates FindPlantCandidates(int version, Vector2Int coordinate, TerrainEnvironmentSampler sampler,
-        int seed, float size, float spacing, float minimumGrass, float extent, float maximumSlope, bool excludeShore)
+        int seed, float size, float spacing, float minimumGrass, float extent, float maximumSlope, bool excludeShore,
+        TallFoodRules tallFood)
     {
         int cellsPerSide = Mathf.Max(1, Mathf.RoundToInt(size / spacing));
         float cellSize = size / cellsPerSide;
@@ -353,25 +452,49 @@ public class FoodSpawner : MonoBehaviour
             {
                 int cellX = coordinate.x * cellsPerSide + localX;
                 int cellZ = coordinate.y * cellsPerSide + localZ;
-                Vector2 position = new Vector2((cellX + Hash01(seed, cellX, cellZ, 0)) * cellSize,
-                                               (cellZ + Hash01(seed, cellX, cellZ, 1)) * cellSize);
-                if (Mathf.Abs(position.x) > extent || Mathf.Abs(position.y) > extent) continue;
 
                 // Grass biomass is both the minimum requirement and the chance a cell holds a plant.
-                if (!sampler.TrySample(position, out EnvironmentSample environment) ||
-                    !AnimalTerrainWorld.IsWalkable(environment, maximumSlope, excludeShore) ||
-                    environment.grassBiomass < minimumGrass ||
-                    Hash01(seed, cellX, cellZ, 2) >= environment.grassBiomass)
+                Vector2 position = CellPoint(seed, cellX, cellZ, cellSize, 0);
+                if (IsInside(position, extent) &&
+                    sampler.TrySample(position, out EnvironmentSample environment) &&
+                    AnimalTerrainWorld.IsWalkable(environment, maximumSlope, excludeShore) &&
+                    environment.grassBiomass >= minimumGrass &&
+                    Hash01(seed, cellX, cellZ, 2) < environment.grassBiomass)
+                {
+                    candidates.Add(environment, 0f);
+                }
+
+                // Wooded cells can also hold leaves up high, growing from their own spot in the cell.
+                if (!tallFood.enabled)
                 {
                     continue;
                 }
 
-                candidates.positions.Add(environment.position);
-                candidates.moistures.Add(environment.moisture);
+                Vector2 treePosition = CellPoint(seed, cellX, cellZ, cellSize, 3);
+                if (IsInside(treePosition, extent) &&
+                    sampler.TrySample(treePosition, out EnvironmentSample woods) &&
+                    AnimalTerrainWorld.IsWalkable(woods, maximumSlope, excludeShore) &&
+                    woods.treeCover >= tallFood.minimumTreeCover &&
+                    Hash01(seed, cellX, cellZ, 5) < tallFood.chance * woods.treeCover)
+                {
+                    candidates.Add(woods, Mathf.Lerp(tallFood.lowest, tallFood.highest, Hash01(seed, cellX, cellZ, 6)));
+                }
             }
         }
 
         return candidates;
+    }
+
+    // A fixed random point in a world cell; each salt gives an independent point.
+    static Vector2 CellPoint(int seed, int cellX, int cellZ, float cellSize, int salt)
+    {
+        return new Vector2((cellX + Hash01(seed, cellX, cellZ, salt)) * cellSize,
+                           (cellZ + Hash01(seed, cellX, cellZ, salt + 1)) * cellSize);
+    }
+
+    static bool IsInside(Vector2 position, float extent)
+    {
+        return Mathf.Abs(position.x) <= extent && Mathf.Abs(position.y) <= extent;
     }
 
     // Fraction of the ideal regrowth rate at this position, from the food's growth temperature range.

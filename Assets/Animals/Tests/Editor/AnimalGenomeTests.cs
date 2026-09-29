@@ -147,7 +147,7 @@ public class AnimalGenomeTests
     }
 
     [Test]
-    public void DistanceIsOneBetweenOppositeEndsOfEveryGene()
+    public void DistanceIsOneBetweenOppositeEndsOfEveryGeneAndFullyDifferentBodies()
     {
         AnimalGenome minimum = AnimalGenome.Create();
         AnimalGenome maximum = AnimalGenome.Create();
@@ -157,7 +157,155 @@ public class AnimalGenomeTests
             maximum[gene] = AnimalGenome.GetDefinition(gene).maximum;
         }
 
+        for (int index = 0; index < AnimalGenome.SiteCount; index++)
+        {
+            BodySite site = (BodySite)index;
+            maximum.SetPart(site, AnimalGenome.GetAllowedParts(site)[0], 1f);
+        }
+
         Assert.That(AnimalGenome.Distance(minimum, maximum), Is.EqualTo(1f).Within(Tolerance));
+    }
+
+    [Test]
+    public void NewGenomeIsAPlainBody()
+    {
+        AnimalGenome genome = AnimalGenome.Create();
+        for (int index = 0; index < AnimalGenome.SiteCount; index++)
+        {
+            Assert.AreEqual(BodyPartType.None, genome.GetPartType((BodySite)index));
+            Assert.AreEqual(0f, genome.GetPartSize((BodySite)index));
+        }
+    }
+
+    [Test]
+    public void OnlyAllowedPartsCanBeSet()
+    {
+        AnimalGenome genome = AnimalGenome.Create();
+        genome.SetPart(BodySite.Head, BodyPartType.Neck, 0.4f);
+        Assert.AreEqual(BodyPartType.Neck, genome.GetPartType(BodySite.Head));
+        Assert.Throws<System.ArgumentException>(() => genome.SetPart(BodySite.Head, BodyPartType.Legs, 0.4f));
+
+        genome.SetPart(BodySite.Head, BodyPartType.Neck, 0f);
+        Assert.AreEqual(BodyPartType.None, genome.GetPartType(BodySite.Head));
+    }
+
+    [Test]
+    public void CloneCopiesTheBodyPlanIndependently()
+    {
+        AnimalGenome parent = CreateMidpointGenome();
+        parent.SetPart(BodySite.FrontPair, BodyPartType.Legs, 0.5f);
+
+        AnimalGenome clone = parent.Clone();
+        clone.SetPart(BodySite.FrontPair, BodyPartType.Legs, 0.9f);
+
+        Assert.AreEqual(0.5f, parent.GetPartSize(BodySite.FrontPair));
+        Assert.AreEqual(0.9f, clone.GetPartSize(BodySite.FrontPair));
+    }
+
+    [Test]
+    public void GeneOnlyMutationLeavesTheBodyPlanAlone()
+    {
+        AnimalGenome parent = CreateMidpointGenome();
+        parent.SetPart(BodySite.Head, BodyPartType.Horn, 0.3f);
+
+        for (int sample = 0; sample < 200; sample++)
+        {
+            AnimalGenome child = parent.CreateMutatedCopy(100f, 0.5f, out _);
+            Assert.AreEqual(BodyPartType.Horn, child.GetPartType(BodySite.Head));
+            Assert.AreEqual(0.3f, child.GetPartSize(BodySite.Head));
+            Assert.AreEqual(BodyPartType.None, child.GetPartType(BodySite.Back));
+        }
+    }
+
+    [Test]
+    public void CertainSproutingGrowsAnAllowedStubAtEveryEmptySite()
+    {
+        BodyPlanMutation rules = new BodyPlanMutation { sproutChance = 100f, sproutSize = 0.05f };
+
+        for (int sample = 0; sample < 100; sample++)
+        {
+            AnimalGenome child = CreateMidpointGenome().CreateMutatedCopy(0f, 0f, rules, out bool mutated);
+            Assert.IsTrue(mutated);
+            for (int index = 0; index < AnimalGenome.SiteCount; index++)
+            {
+                BodySite site = (BodySite)index;
+                BodyPartType type = child.GetPartType(site);
+                Assert.IsTrue(AnimalGenome.IsAllowed(site, type), $"{type} at {site}");
+                Assert.AreNotEqual(BodyPartType.Fins, type, "fins are not allowed yet");
+                Assert.AreEqual(0.05f, child.GetPartSize(site), Tolerance);
+            }
+        }
+    }
+
+    [Test]
+    public void FinsSproutOnlyWhenAllowed()
+    {
+        BodyPlanMutation rules = new BodyPlanMutation { sproutChance = 100f, sproutSize = 0.05f, allowFins = true };
+        bool sawFins = false;
+        for (int sample = 0; sample < 200 && !sawFins; sample++)
+        {
+            AnimalGenome child = CreateMidpointGenome().CreateMutatedCopy(0f, 0f, rules, out _);
+            sawFins = child.GetPartType(BodySite.Tail) == BodyPartType.Fins;
+        }
+
+        Assert.IsTrue(sawFins);
+    }
+
+    [Test]
+    public void PartSizesStayBetweenZeroAndOneAndShrunkPartsDisappear()
+    {
+        BodyPlanMutation rules = new BodyPlanMutation { growthChance = 100f, growthStep = 0.3f, lossSize = 0.1f };
+        AnimalGenome genome = CreateMidpointGenome();
+        genome.SetPart(BodySite.MiddlePair, BodyPartType.Legs, 0.5f);
+
+        bool disappeared = false;
+        for (int generation = 0; generation < 500 && !disappeared; generation++)
+        {
+            genome = genome.CreateMutatedCopy(0f, 0f, rules, out _);
+            float size = genome.GetPartSize(BodySite.MiddlePair);
+            Assert.That(size, Is.InRange(0f, 1f));
+            disappeared = genome.GetPartType(BodySite.MiddlePair) == BodyPartType.None;
+            if (!disappeared) Assert.GreaterOrEqual(size, 0.1f);
+        }
+
+        Assert.IsTrue(disappeared, "a random walk with loss should eventually lose the part");
+    }
+
+    [Test]
+    public void RepurposingChangesThePartButKeepsItsSize()
+    {
+        BodyPlanMutation rules = new BodyPlanMutation { repurposeChance = 100f };
+        AnimalGenome parent = CreateMidpointGenome();
+        parent.SetPart(BodySite.Head, BodyPartType.Neck, 0.6f);
+
+        AnimalGenome child = parent.CreateMutatedCopy(0f, 0f, rules, out bool mutated);
+
+        Assert.IsTrue(mutated);
+        Assert.AreNotEqual(BodyPartType.Neck, child.GetPartType(BodySite.Head));
+        Assert.IsTrue(AnimalGenome.IsAllowed(BodySite.Head, child.GetPartType(BodySite.Head)));
+        Assert.AreEqual(0.6f, child.GetPartSize(BodySite.Head));
+    }
+
+    [Test]
+    public void BodyDifferencesCountBySizeAndMoreForDifferentParts()
+    {
+        AnimalGenome plain = CreateMidpointGenome();
+        AnimalGenome stub = plain.Clone();
+        stub.SetPart(BodySite.Head, BodyPartType.Neck, 0.05f);
+        AnimalGenome fullNeck = plain.Clone();
+        fullNeck.SetPart(BodySite.Head, BodyPartType.Neck, 1f);
+        AnimalGenome fullHorn = plain.Clone();
+        fullHorn.SetPart(BodySite.Head, BodyPartType.Horn, 1f);
+        AnimalGenome halfNeck = plain.Clone();
+        halfNeck.SetPart(BodySite.Head, BodyPartType.Neck, 0.5f);
+        AnimalGenome halfHorn = plain.Clone();
+        halfHorn.SetPart(BodySite.Head, BodyPartType.Horn, 0.5f);
+
+        float wholePart = AnimalGenome.Distance(plain, fullNeck);
+        Assert.That(AnimalGenome.Distance(plain, stub), Is.EqualTo(0.05f * wholePart).Within(Tolerance));
+        Assert.That(AnimalGenome.Distance(fullNeck, halfNeck), Is.EqualTo(0.5f * wholePart).Within(Tolerance));
+        Assert.That(AnimalGenome.Distance(halfNeck, halfHorn), Is.EqualTo(wholePart).Within(Tolerance));
+        Assert.That(AnimalGenome.Distance(fullNeck, fullHorn), Is.EqualTo(wholePart).Within(Tolerance));
     }
 
     [Test]

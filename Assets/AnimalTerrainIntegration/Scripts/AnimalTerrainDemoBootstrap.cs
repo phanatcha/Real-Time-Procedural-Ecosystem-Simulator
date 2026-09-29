@@ -80,7 +80,7 @@ public sealed class AnimalTerrainDemoBootstrap : MonoBehaviour
         animalParent = GetOrCreateChild("Placeholder Animals", true);
         foodParent = GetOrCreateChild("Placeholder Food", true);
         templateParent = GetOrCreateChild("Runtime Templates", false);
-        animalMaterial = CreatePlaceholderMaterial("Cylinder Animal Material", Color.white, 0.28f);
+        animalMaterial = CreatePlaceholderMaterial("Animal Material", Color.white, 0.28f);
         foodMaterial = CreatePlaceholderMaterial(
             "Plant Food Material", new Color(0.35f, 0.8f, 0.24f), 0.12f);
 
@@ -234,34 +234,37 @@ public sealed class AnimalTerrainDemoBootstrap : MonoBehaviour
 
         if (created < founderAnimalCount)
         {
-            Debug.LogWarning($"Placed {created} of {founderAnimalCount} requested cylinder founders. " +
+            Debug.LogWarning($"Placed {created} of {founderAnimalCount} requested founders. " +
                              habitatNavigation.DescribeArea(simulationFocus.position, fallbackRadius), this);
         }
         return created;
     }
 
+    // The founder is a plain "cell": a capsule lying on the ground with no body parts. Legs, necks, horns
+    // and other parts grow on its descendants through mutation.
     void CreateFounder(int index, string speciesName, Vector3 position, Color color, float dietAffinity)
     {
-        GameObject animal = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+        GameObject animal = GameObject.CreatePrimitive(PrimitiveType.Capsule);
         animal.SetActive(false);
-        animal.name = $"Cylinder_Founder_{index + 1}";
+        animal.name = $"Capsule_Founder_{index + 1}";
         animal.transform.SetParent(animalParent, true);
         animal.transform.position = position;
         animal.transform.rotation = Quaternion.Euler(0f, Random.Range(0f, 360f), 0f);
-        animal.transform.localScale = new Vector3(2.2f, 2.5f, 2.2f);
-        ShiftPrimitiveMeshToGround(animal);
+        animal.transform.localScale = new Vector3(2.2f, 2f, 2.2f);
+        LayCapsuleOnGround(animal);
         animal.GetComponent<MeshRenderer>().sharedMaterial = animalMaterial;
 
         Collider bodyCollider = animal.GetComponent<Collider>();
         if (bodyCollider is CapsuleCollider capsuleCollider)
         {
-            capsuleCollider.center = Vector3.up;
+            capsuleCollider.direction = 2;
+            capsuleCollider.center = new Vector3(0f, 0.5f, 0f);
         }
 
         NavMeshAgent agent = animal.AddComponent<NavMeshAgent>();
         agent.agentTypeID = habitatNavigation.AgentTypeId;
         agent.radius = 1.1f;
-        agent.height = 5f;
+        agent.height = 2f;
         agent.baseOffset = 0f;
         agent.angularSpeed = 240f;
         agent.acceleration = 36f;
@@ -279,7 +282,8 @@ public sealed class AnimalTerrainDemoBootstrap : MonoBehaviour
         behavior.speciesColor = color;
         behavior.dietAffinity = dietAffinity;
         behavior.currentEnergy = 105f;
-        behavior.moveSpeed = 12f;
+        // A legless capsule crawls: two full-size leg pairs double this.
+        behavior.moveSpeed = 6f;
         behavior.visionRadius = 110f;
         behavior.wanderRadius = 75f;
         behavior.foodInteractionRange = 5f;
@@ -345,16 +349,33 @@ public sealed class AnimalTerrainDemoBootstrap : MonoBehaviour
         return material;
     }
 
-    void ShiftPrimitiveMeshToGround(GameObject animal)
+    // Turns the capsule primitive to lie along the forward axis, with its underside at the pivot.
+    void LayCapsuleOnGround(GameObject animal)
     {
         MeshFilter filter = animal.GetComponent<MeshFilter>();
-        Mesh shiftedMesh = Instantiate(filter.sharedMesh);
-        shiftedMesh.name = "Grounded Cylinder Placeholder";
-        Vector3[] vertices = shiftedMesh.vertices;
-        for (int index = 0; index < vertices.Length; index++) vertices[index].y += 1f;
-        shiftedMesh.vertices = vertices;
-        shiftedMesh.RecalculateBounds();
-        filter.sharedMesh = shiftedMesh;
+        Mesh lyingMesh = Instantiate(filter.sharedMesh);
+        lyingMesh.name = "Lying Capsule Body";
+        Quaternion layDown = Quaternion.Euler(90f, 0f, 0f);
+        Vector3 raise = new Vector3(0f, 0.5f, 0f);
+        Vector3[] vertices = lyingMesh.vertices;
+        Vector3[] normals = lyingMesh.normals;
+        Vector4[] tangents = lyingMesh.tangents;
+        for (int index = 0; index < vertices.Length; index++)
+        {
+            vertices[index] = layDown * vertices[index] + raise;
+            if (index < normals.Length) normals[index] = layDown * normals[index];
+            if (index < tangents.Length)
+            {
+                Vector3 tangent = layDown * (Vector3)tangents[index];
+                tangents[index] = new Vector4(tangent.x, tangent.y, tangent.z, tangents[index].w);
+            }
+        }
+
+        lyingMesh.vertices = vertices;
+        lyingMesh.normals = normals;
+        if (tangents.Length > 0) lyingMesh.tangents = tangents;
+        lyingMesh.RecalculateBounds();
+        filter.sharedMesh = lyingMesh;
     }
 
     Transform GetOrCreateChild(string childName, bool active)
