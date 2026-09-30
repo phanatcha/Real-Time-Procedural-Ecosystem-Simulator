@@ -18,9 +18,16 @@ public class SeedManager : MonoBehaviour
 
     public string SeedString => seedString;
 
+    // Raised whenever the seed changes, so the seed panel can show it.
+    public event System.Action SeedChanged;
+
 
 
     [Header("UI")]
+    [Tooltip("Show the collapsible seed panel in the top-right corner instead of the older seed box assigned below.")]
+    [SerializeField]
+    private bool useSeedPanel = true;
+
     [SerializeField]
     private TMP_Text seedText;
 
@@ -53,6 +60,28 @@ public class SeedManager : MonoBehaviour
         DontDestroyOnLoad(gameObject);
 
         GenerateSeed();
+
+        if (useSeedPanel)
+        {
+            ShowSeedPanel();
+        }
+    }
+
+
+
+    // The older seed box (seed text, input field and Generate button) is only hidden, so turning
+    // useSeedPanel off brings it back.
+    private void ShowSeedPanel()
+    {
+        WorldSeedPanel.Create(this, seedText != null ? seedText.font : null);
+
+        Transform oldSeedBox = seedInputField != null ? seedInputField.transform.parent
+            : seedText != null ? seedText.transform.parent : null;
+
+        if (oldSeedBox != null && oldSeedBox.GetComponent<Canvas>() == null)
+        {
+            oldSeedBox.gameObject.SetActive(false);
+        }
     }
 
 
@@ -70,6 +99,8 @@ public class SeedManager : MonoBehaviour
         Seed = StringToSeed(seedString);
 
         UpdateUI();
+
+        SeedChanged?.Invoke();
 
         Debug.Log($"Seed String: {seedString}");
         Debug.Log($"World Seed: {Seed}");
@@ -112,6 +143,20 @@ public class SeedManager : MonoBehaviour
         seedString = newSeed.Trim();
 
         GenerateSeed();
+    }
+
+
+
+
+    // Switches to the given seed, or keeps the current one when it is empty, and rebuilds the world.
+    public void GenerateWorld(string newSeed)
+    {
+        if (!string.IsNullOrWhiteSpace(newSeed))
+        {
+            SetSeed(newSeed);
+        }
+
+        GenerateWorld();
     }
 
 
