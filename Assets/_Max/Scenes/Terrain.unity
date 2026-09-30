@@ -817,6 +817,7 @@ MonoBehaviour:
   createWorldBorders: 1
   singleFounderSpecies: 1
   founderDietAffinity: 0.15
+  keepDistantAnimalsAsNumbers: 0
 --- !u!4 &804511669
 Transform:
   m_ObjectHideFlags: 0

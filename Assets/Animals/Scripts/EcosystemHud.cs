@@ -124,7 +124,8 @@ public class EcosystemHud : MonoBehaviour
         string atCeiling = manager.IsAtPopulationCeiling ? " <color=#ffd060>(births paused)</color>" : "";
         string plants = foodSpawner != null ? $"    <b>Plants</b> {foodSpawner.ShownPlantCount} shown" : "";
         string tiles = habitatNavigation != null ? $"    <b>Walkable tiles</b> {habitatNavigation.NavigableTileCount}" : "";
-        text.Append($"<b>Animals</b> {manager.TotalPopulation}{ceiling}{atCeiling}{plants}{tiles}\n");
+        string offscreen = manager.OffscreenPopulation != null ? $"    <b>Off-screen</b> {manager.OffscreenTotal}" : "";
+        text.Append($"<b>Animals</b> {manager.TotalPopulation}{ceiling}{atCeiling}{offscreen}{plants}{tiles}\n");
 
         int speciesEver = 0;
         int extinct = 0;
@@ -141,7 +142,7 @@ public class EcosystemHud : MonoBehaviour
         string mutationShare = births > 0 ? $" ({100f * mutatedBirths / births:0}% carried mutations)" : "";
         text.Append($"<b>Births</b> {births}{mutationShare}    <b>Generation</b> " +
                     $"{manager.AverageGeneration:0.0} on average, newest {manager.HighestGeneration}\n");
-        text.Append($"<b>Species</b> {manager.SpeciesPopulation.Count} alive, {speciesEver} ever, {extinct} extinct    " +
+        text.Append($"<b>Species</b> {manager.SpeciesAliveCount} alive, {speciesEver} ever, {extinct} extinct    " +
                     $"(a group splits off once it is {manager.speciationThreshold:0.###} apart genetically, " +
                     "typically after 40-50 generations)\n");
 

@@ -2,7 +2,7 @@
 
 `EcosystemSimulationController` keeps distant animals as numbers instead of GameObjects. The island is divided into 250 m cells (`EcosystemSimulationSettings.cellSize`), and each cell stores a count per species. Near the camera, counts become animals (within 400 m); far away, animals return to counts (beyond 550 m).
 
-The model is standalone for now: it uses fixed species from `EcosystemSpeciesDefinition` assets, not the evolving animals.
+This model uses fixed species from `EcosystemSpeciesDefinition` assets. For the evolving animals, see `OffscreenPopulationBridge` and `AnimalTerrainIntegration/Documentation/OFFSCREEN_EVOLVING_ANIMALS.md`, which reuse its growth formula.
 
 ## Each cell update
 

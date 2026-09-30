@@ -24,7 +24,13 @@ public sealed class AnimalTerrainDemoBootstrap : MonoBehaviour
     [Tooltip("0 = herbivore, 1 = carnivore. Meat-eating has to evolve from this starting diet.")]
     [Range(0f, 1f)] public float founderDietAffinity = 0.15f;
 
+    [Header("Off-screen Population")]
+    [Tooltip("Animals far from the camera become numbers per 250 m cell that grow and spread by the food " +
+             "their cells grow, and become animals again near the camera. Read when Play starts.")]
+    public bool keepDistantAnimalsAsNumbers;
+
     AnimalTerrainWorld terrainWorld;
+    OffscreenPopulationBridge offscreenPopulation;
     HabitatNavigation habitatNavigation;
     FoodSpawner foodSpawner;
     Transform animalParent;
@@ -92,6 +98,16 @@ public sealed class AnimalTerrainDemoBootstrap : MonoBehaviour
         foodSpawner.terrainWorld = terrainWorld;
         foodSpawner.foodPrefab = CreateFoodTemplate();
 
+        if (keepDistantAnimalsAsNumbers)
+        {
+            offscreenPopulation = GetOrAddComponent<OffscreenPopulationBridge>();
+            offscreenPopulation.terrainWorld = terrainWorld;
+            offscreenPopulation.habitatNavigation = habitatNavigation;
+            offscreenPopulation.foodSpawner = foodSpawner;
+            offscreenPopulation.templateParent = templateParent;
+            offscreenPopulation.animalParent = animalParent;
+        }
+
         GetOrAddComponent<EcosystemHud>();
 
         terrainGenerator.onTerrainGenerated += HandleTerrainGenerated;
@@ -139,6 +155,7 @@ public sealed class AnimalTerrainDemoBootstrap : MonoBehaviour
         habitatNavigation.ResetWorld();
         // The terrain seed also seeds the plant layout, so a world seed always grows the same plants.
         foodSpawner.ResetWorld(terrainGenerator.heightMapSettings.noiseSettings.seed);
+        if (offscreenPopulation != null) offscreenPopulation.ResetWorld();
         yield return null;
 
         // Only the founders' area is built up front; afterwards navigation grows with the animals.
