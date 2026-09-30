@@ -281,6 +281,7 @@ public class FoodItem : MonoBehaviour
 
         GameObject carcass = GameObject.CreatePrimitive(PrimitiveType.Sphere);
         carcass.name = $"Carcass_{sourceSpecies}";
+        WildlifeLayer.Apply(carcass);
         carcass.tag = "Food";
         carcass.transform.position = position;
         carcass.transform.localScale = Vector3.one * Mathf.Max(0.1f, scale);

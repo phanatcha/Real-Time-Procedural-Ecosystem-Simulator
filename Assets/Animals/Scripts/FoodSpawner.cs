@@ -342,6 +342,7 @@ public class FoodSpawner : MonoBehaviour
 
         GameObject trunk = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
         trunk.name = "Trunk";
+        trunk.layer = leaves.layer;
         DestroyImmediate(trunk.GetComponent<Collider>());
         trunk.transform.SetParent(leaves.transform, false);
 

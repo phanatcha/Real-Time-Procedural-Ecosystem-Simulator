@@ -115,6 +115,8 @@ public sealed class AnimalTerrainDemoBootstrap : MonoBehaviour
 
     void Start()
     {
+        LimitWildlifeDrawDistance();
+
         // A SeedManager may already have generated terrain; if not, generate it here. Either way,
         // HandleTerrainGenerated builds the ecosystem for it.
         if (!terrainGenerator.IsGenerated)
@@ -125,6 +127,23 @@ public sealed class AnimalTerrainDemoBootstrap : MonoBehaviour
         {
             HandleTerrainGenerated();
         }
+    }
+
+    // Animals and plants can live beyond the terrain's view distance, where they would float over ground
+    // that is not drawn. The camera stops drawing them at the same distance as the terrain. Drawing only:
+    // they keep living there.
+    void LimitWildlifeDrawDistance()
+    {
+        Camera camera = Camera.main;
+        int layer = WildlifeLayer.Index;
+        LODInfo[] detailLevels = terrainGenerator.detailLevels;
+        if (camera == null || layer < 0 || detailLevels == null || detailLevels.Length == 0) return;
+
+        float[] distances = camera.layerCullDistances;
+        distances[layer] = detailLevels[detailLevels.Length - 1].visibleDstThreshold;
+        camera.layerCullDistances = distances;
+        // Measure as a sphere, so turning the camera does not change what is drawn.
+        camera.layerCullSpherical = true;
     }
 
     // Terrain is only drawn once something calls GenerateTerrain. SeedManager does that from its
@@ -264,6 +283,8 @@ public sealed class AnimalTerrainDemoBootstrap : MonoBehaviour
         GameObject animal = GameObject.CreatePrimitive(PrimitiveType.Capsule);
         animal.SetActive(false);
         animal.name = $"Capsule_Founder_{index + 1}";
+        // Newborns and animals from off-screen populations are copies, so they inherit the layer.
+        WildlifeLayer.Apply(animal);
         animal.transform.SetParent(animalParent, true);
         animal.transform.position = position;
         animal.transform.rotation = Quaternion.Euler(0f, Random.Range(0f, 360f), 0f);
@@ -322,6 +343,7 @@ public sealed class AnimalTerrainDemoBootstrap : MonoBehaviour
 
         GameObject food = GameObject.CreatePrimitive(PrimitiveType.Cube);
         food.name = "Cube_PlantFood_Template";
+        WildlifeLayer.Apply(food);
         food.transform.SetParent(templateParent, false);
         food.transform.localScale = Vector3.one * 2f;
         food.tag = "Food";

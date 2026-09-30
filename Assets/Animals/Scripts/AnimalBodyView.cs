@@ -103,6 +103,8 @@ public class AnimalBodyView : MonoBehaviour
         {
             parts = new GameObject(PartsObjectName).transform;
             parts.SetParent(transform, false);
+            // Drawn with the body, so camera settings for the animal's layer apply to its parts too.
+            parts.gameObject.layer = gameObject.layer;
         }
 
         // Undo the body's uneven scale, so parts are laid out in metres and never skew.

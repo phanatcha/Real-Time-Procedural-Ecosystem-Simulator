@@ -14,19 +14,19 @@ OcclusionCullingSettings:
 RenderSettings:
   m_ObjectHideFlags: 0
   serializedVersion: 10
-  m_Fog: 0
-  m_FogColor: {r: 0.5, g: 0.5, b: 0.5, a: 1}
-  m_FogMode: 3
+  m_Fog: 1
+  m_FogColor: {r: 0.72, g: 0.78, b: 0.84, a: 1}
+  m_FogMode: 1
   m_FogDensity: 0.01
-  m_LinearFogStart: 0
-  m_LinearFogEnd: 300
+  m_LinearFogStart: 550
+  m_LinearFogEnd: 780
   m_AmbientSkyColor: {r: 0.212, g: 0.227, b: 0.259, a: 1}
   m_AmbientEquatorColor: {r: 0.114, g: 0.125, b: 0.133, a: 1}
   m_AmbientGroundColor: {r: 0.047, g: 0.043, b: 0.035, a: 1}
   m_AmbientIntensity: 1
   m_AmbientMode: 0
   m_SubtractiveShadowColor: {r: 0.42, g: 0.478, b: 0.627, a: 1}
-  m_SkyboxMaterial: {fileID: 10304, guid: 0000000000000000f000000000000000, type: 0}
+  m_SkyboxMaterial: {fileID: 2100000, guid: 35e93fbc7f9fe4a8c8da1cc2cc89a418, type: 2}
   m_HaloStrength: 0.5
   m_FlareStrength: 1
   m_FlareFadeSpeed: 3
@@ -1839,8 +1839,10 @@ MonoBehaviour:
     visibleDstThreshold: 100
   - lod: 1
     visibleDstThreshold: 200
-  - lod: 4
+  - lod: 2
     visibleDstThreshold: 400
+  - lod: 4
+    visibleDstThreshold: 800
   meshSettings: {fileID: 11400000, guid: d65bc8cf7fadf452f8815ad13fcece91, type: 2}
   heightMapSettings: {fileID: 11400000, guid: 69cf20e49a84943789e05dcda475b7b6, type: 2}
   textureSettings: {fileID: 11400000, guid: 9788febb4f39748eb946379fe773cf85, type: 2}
