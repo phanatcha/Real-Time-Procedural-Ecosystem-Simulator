@@ -498,6 +498,28 @@ public class FoodSpawner : MonoBehaviour
         return Mathf.Abs(position.x) <= extent && Mathf.Abs(position.y) <= extent;
     }
 
+    // Expected nutrition regrowing per simulated minute on one plant cell (siteSpacing across) with this
+    // environment and temperature, by the same rules that place and regrow plants. The survivability
+    // heatmap uses it to judge how much food an area supplies.
+    public float EstimateNutritionPerMinute(EnvironmentSample environment, float celsius)
+    {
+        FoodItem growthProfile = foodPrefab != null ? foodPrefab.GetComponent<FoodItem>() : null;
+        float growthRate = growthProfile != null ? growthProfile.EvaluateGrowthMultiplier(celsius) : 1f;
+        if (growthRate < minimumGrowthRate)
+        {
+            return 0f;
+        }
+
+        // The chance of a ground plant and, in woods, of leaves up a tree, weighted by their nutrition.
+        float ground = environment.grassBiomass >= minimumGrassBiomass ? Mathf.Clamp01(environment.grassBiomass) : 0f;
+        float tall = growTallFood && environment.treeCover >= minimumTreeCover
+            ? tallFoodChance * Mathf.Clamp01(environment.treeCover) * tallFoodNutritionMultiplier
+            : 0f;
+        float nutrition = baseNutrition * Mathf.Lerp(moistureNutritionMultiplier.x, moistureNutritionMultiplier.y,
+                                                     environment.moisture);
+        return (ground + tall) * nutrition * growthRate * 60f / baseRegrowSeconds;
+    }
+
     // Fraction of the ideal regrowth rate at this position, from the food's growth temperature range.
     static float GetGrowthRate(FoodItem growthProfile, Vector3 position)
     {

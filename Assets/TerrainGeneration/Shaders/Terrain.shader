@@ -62,6 +62,13 @@ Shader "Custom/Terrain"
             float _TerrainCaustics;
             float _TerrainWetShore;
 
+            // Set globally by SurvivabilityHeatmap: colours over the habitable square, whose world-space minimum
+            // corner is in xy and inverse size in zw. Opacity 0 hides it.
+            TEXTURE2D(_SurvivalHeatmap);
+            SAMPLER(sampler_SurvivalHeatmap);
+            float4 _SurvivalHeatmapRect;
+            float _SurvivalHeatmapOpacity;
+
             struct Attributes
             {
                 float4 positionOS : POSITION;
@@ -217,6 +224,17 @@ Shader "Custom/Terrain"
 
                 float variation = ValueNoise(IN.positionWS.xz * 0.07) * 2.0 - 1.0;
                 albedo *= 1.0 + variation * 0.06;
+
+                // The survivability heatmap replaces the ground colour before lighting, so hills still read.
+                if (_SurvivalHeatmapOpacity > 0.0)
+                {
+                    float2 heatmapUV = (IN.positionWS.xz - _SurvivalHeatmapRect.xy) * _SurvivalHeatmapRect.zw;
+                    if (all(heatmapUV >= 0.0) && all(heatmapUV <= 1.0))
+                    {
+                        float4 heat = SAMPLE_TEXTURE2D_LOD(_SurvivalHeatmap, sampler_SurvivalHeatmap, heatmapUV, 0);
+                        albedo = lerp(albedo, heat.rgb, heat.a * _SurvivalHeatmapOpacity);
+                    }
+                }
 
                 Light mainLight = GetMainLight(IN.shadowCoord);
                 float NdotL = saturate(dot(normalWS, mainLight.direction));
