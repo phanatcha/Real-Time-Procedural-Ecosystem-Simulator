@@ -249,6 +249,8 @@ public class SeekFood : MonoBehaviour, IEcosystemMaterializationLifecycle
     private AgentDeathCause deathCause = AgentDeathCause.Other;
     private SeekFood firstParent;
     private SeekFood secondParent;
+    // Set when this animal comes from an off-screen population instead of being born.
+    private bool fromOffscreenPopulation;
     private readonly List<ThreatMemory> rememberedThreats = new List<ThreatMemory>();
     // Food this animal recently failed to get to, ignored until the simulated time stored with it.
     private readonly List<UnreachableFood> unreachableFood = new List<UnreachableFood>();
@@ -321,9 +323,27 @@ public class SeekFood : MonoBehaviour, IEcosystemMaterializationLifecycle
 
         if (SpeciesManager.Instance != null)
         {
-            SpeciesManager.Instance.RegisterAgent(this);
+            SpeciesManager.Instance.RegisterAgent(this, countAsBirth: !fromOffscreenPopulation);
             registeredWithSpeciesManager = true;
         }
+    }
+
+    // Turns a copy of an animal into a member of an off-screen population that has come near the camera.
+    // Call it straight after Instantiate, before the animal's first frame, as Reproduce does for newborns.
+    // The animal keeps the copy's metabolic reference (the founders') but takes this genome, age and energy.
+    public void PrepareFromOffscreenPopulation(AnimalGenome inheritedGenome, string species, Color color,
+                                               int animalGeneration, float age, float energyFraction)
+    {
+        genome = inheritedGenome.Clone();
+        speciesName = species;
+        speciesColor = color;
+        generation = animalGeneration;
+        currentAge = Mathf.Max(0f, age);
+        currentEnergy = Mathf.Clamp01(energyFraction) * inheritedGenome[AnimalGene.MaxEnergy];
+        firstParent = null;
+        secondParent = null;
+        fromOffscreenPopulation = true;
+        gameObject.name = $"Capsule_Species_{speciesName}";
     }
 
     void OnDestroy()

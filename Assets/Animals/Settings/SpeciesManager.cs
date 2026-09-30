@@ -12,6 +12,15 @@ public enum AgentDeathCause
     HeatExposure
 }
 
+// Animals kept as numbers away from the camera (see OffscreenPopulationBridge). They keep their species
+// alive, so a species with no animals on screen is not extinct.
+public interface IOffscreenPopulation
+{
+    int TotalOffscreen { get; }
+    int CountOffscreen(string speciesName);
+    IEnumerable<string> OffscreenSpecies { get; }
+}
+
 // One species' history. Trait values are the living members' averages, refreshed at every species
 // census; after extinction they keep the last averages.
 [System.Serializable]
@@ -154,7 +163,27 @@ public class SpeciesManager : MonoBehaviour
     public IReadOnlyDictionary<string, int> SpeciesPopulation => speciesPopulation;
     public IReadOnlyDictionary<string, SpeciesTelemetryRecord> Telemetry => telemetry;
     public IEnumerable<SeekFood> ActiveAgents => activeAgents;
+    // Animals on screen. Off-screen animals are in OffscreenPopulation.
     public int TotalPopulation { get; private set; }
+    public IOffscreenPopulation OffscreenPopulation { get; set; }
+    public int OffscreenTotal => OffscreenPopulation == null ? 0 : OffscreenPopulation.TotalOffscreen;
+
+    // Species with animals on screen or off it.
+    public int SpeciesAliveCount
+    {
+        get
+        {
+            if (OffscreenPopulation == null) return speciesPopulation.Count;
+
+            int count = speciesPopulation.Count;
+            foreach (string speciesName in OffscreenPopulation.OffscreenSpecies)
+            {
+                if (!speciesPopulation.ContainsKey(speciesName)) count++;
+            }
+
+            return count;
+        }
+    }
     public bool IsAtPopulationCeiling =>
         populationCeiling > 0 && TotalPopulation + pendingBirths >= populationCeiling;
     // Simulated time (Time.time) when the current world's history began.
@@ -402,7 +431,8 @@ public class SpeciesManager : MonoBehaviour
             Mathf.Clamp(brightness + Random.Range(-0.15f, 0.15f), 0.45f, 1f));
     }
 
-    public void RegisterAgent(SeekFood agent)
+    // countAsBirth is false for animals arriving from an off-screen population, which were counted already.
+    public void RegisterAgent(SeekFood agent, bool countAsBirth = true)
     {
         if (agent == null || !activeAgents.Add(agent))
         {
@@ -431,7 +461,7 @@ public class SpeciesManager : MonoBehaviour
             BlendTraits(telemetryRecord, agent, 1f);
             WidenTraitRanges(telemetryRecord, agent, true);
         }
-        telemetryRecord.births++;
+        if (countAsBirth) telemetryRecord.births++;
     }
 
     public void DeregisterAgent(SeekFood agent, AgentDeathCause deathCause)
@@ -457,11 +487,34 @@ public class SpeciesManager : MonoBehaviour
             if (speciesPopulation[speciesName] <= 0)
             {
                 speciesPopulation.Remove(speciesName);
-                speciesColors.Remove(speciesName);
-                record.extinctionTime = Time.time;
-                Debug.Log($"Extinction: species {speciesName} died out at {Time.time:F0} simulated seconds.");
+                bool livesOffscreen = OffscreenPopulation != null && OffscreenPopulation.CountOffscreen(speciesName) > 0;
+                if (!livesOffscreen)
+                {
+                    speciesColors.Remove(speciesName);
+                    MarkExtinct(record);
+                }
             }
         }
+    }
+
+    // Called when a species' last off-screen animals die out while none of it is on screen.
+    public void RecordOffscreenExtinction(string speciesName)
+    {
+        if (speciesPopulation.ContainsKey(speciesName) || !telemetry.TryGetValue(speciesName, out SpeciesTelemetryRecord record))
+        {
+            return;
+        }
+
+        speciesColors.Remove(speciesName);
+        MarkExtinct(record);
+    }
+
+    void MarkExtinct(SpeciesTelemetryRecord record)
+    {
+        if (record.extinctionTime >= 0f) return;
+
+        record.extinctionTime = Time.time;
+        Debug.Log($"Extinction: species {record.speciesName} died out at {Time.time:F0} simulated seconds.");
     }
 
     public void UnregisterAgentWithoutDeath(SeekFood agent)
