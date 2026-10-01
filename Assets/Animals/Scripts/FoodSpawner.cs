@@ -7,8 +7,8 @@ using UnityEngine;
 // - Nutrition follows moisture, so wetter ground grows richer (and larger) plants.
 // - Regrowth speed follows temperature, so an eaten plant comes back fastest where it is warm.
 // - Well-wooded ground also grows richer leaves high up, which only animals that reach high enough can eat.
-// - The sea grows its own plants, one kind per sea biome (see SeaFood), floating at the water surface. Those in
-//   water too deep to wade are for swimmers only.
+// - The sea grows its own plants, one kind per sea biome (see SeaFood), floating at the water surface and drawn
+//   as seagrass, kelp, coral or plankton (see SeaPlantLooks). Those in water too deep to wade are for swimmers only.
 // Plant positions come from a hash of the world seed and fixed world cells, so a seed always gives the
 // same layout. Tiles that nothing needs are unloaded but remember what was eaten, and keep regrowing.
 public class FoodSpawner : MonoBehaviour
@@ -150,14 +150,6 @@ public class FoodSpawner : MonoBehaviour
     private static readonly int ColorId = Shader.PropertyToID("_Color");
     private static readonly Color TallFoodColor = new Color(0.16f, 0.5f, 0.2f);
     private static readonly Color TrunkColor = new Color(0.36f, 0.25f, 0.16f);
-    // Sea plants by biome: the floating part, then the stem down to the bed.
-    private static readonly Color SeagrassColor = new Color(0.42f, 0.72f, 0.36f);
-    private static readonly Color SeagrassStemColor = new Color(0.28f, 0.52f, 0.24f);
-    private static readonly Color KelpColor = new Color(0.55f, 0.45f, 0.18f);
-    private static readonly Color KelpStemColor = new Color(0.4f, 0.31f, 0.13f);
-    private static readonly Color ReefColor = new Color(0.93f, 0.44f, 0.52f);
-    private static readonly Color ReefStemColor = new Color(0.86f, 0.56f, 0.44f);
-    private static readonly Color PlanktonColor = new Color(0.72f, 0.92f, 0.82f);
 
     private readonly Dictionary<Vector2Int, FoodTile> tiles = new Dictionary<Vector2Int, FoodTile>();
     private readonly HashSet<Vector2Int> neededTiles = new HashSet<Vector2Int>();
@@ -397,8 +389,8 @@ public class FoodSpawner : MonoBehaviour
     {
         GameObject plantObject = Instantiate(foodPrefab, site.position, Quaternion.identity, spawnedFoodParent);
         Vector3 scale = foodPrefab.transform.localScale * site.sizeMultiplier;
-        // Tall food is a wide, flat clump of leaves; sea plants are flatter still, floating at the surface, and
-        // plankton is a small drifting patch.
+        // Tall food is a wide, flat clump of leaves. Sea food is a flatter box floating at the surface, smaller for
+        // plankton; animals eat by touching it, and SeaPlantLooks draws it as its biome's plant.
         Vector3 shape = site.isTall ? new Vector3(1.5f, 0.7f, 1.5f)
             : site.seaBiome == SeaBiome.OpenSea ? new Vector3(0.7f, 0.25f, 0.7f)
             : site.seaBiome != SeaBiome.None ? new Vector3(1.4f, 0.4f, 1.4f)
@@ -422,33 +414,12 @@ public class FoodSpawner : MonoBehaviour
         }
         else if (site.seaBiome != SeaBiome.None)
         {
-            DressAsSeaPlant(plantObject, site);
-        }
-    }
-
-    // Each sea plant in its biome's colour. Rooted plants reach down to the bed on a stem; plankton just drifts.
-    static void DressAsSeaPlant(GameObject plant, PlantSite site)
-    {
-        float toBed = site.heightAboveGround + site.waterDepth;
-        switch (site.seaBiome)
-        {
-            case SeaBiome.SeagrassMeadow:
-                DressWithStem(plant, SeagrassColor, toBed, 0.2f, SeagrassStemColor);
-                break;
-            case SeaBiome.KelpForest:
-                DressWithStem(plant, KelpColor, toBed, 0.3f, KelpStemColor);
-                break;
-            case SeaBiome.ColdWaterReef:
-                DressWithStem(plant, ReefColor, toBed, 0.8f, ReefStemColor);
-                break;
-            default:
-                if (plant.TryGetComponent(out MeshRenderer renderer)) SetColor(renderer, PlanktonColor);
-                break;
+            SeaPlantLooks.Dress(plantObject, site.seaBiome, site.waterDepth, site.heightAboveGround);
         }
     }
 
     // Colours the food and hangs a stem of the given width beneath it, reaching the given distance down from the
-    // food's centre: a trunk for tall food, a stalk to the sea bed for sea plants.
+    // food's centre: a trunk for tall food.
     static void DressWithStem(GameObject food, Color foodColor, float distanceDown, float width, Color stemColor)
     {
         if (!food.TryGetComponent(out MeshRenderer foodRenderer))

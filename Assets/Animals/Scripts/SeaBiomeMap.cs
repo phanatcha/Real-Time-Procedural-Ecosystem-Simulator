@@ -74,9 +74,9 @@ public readonly struct SeaBiomeClassifier
 }
 
 // The sea's biomes across the whole habitable square, drawn in the Sea map panel (the checkbox above the heatmap's,
-// bottom left) and saved as a top-down picture with statistics, next to the survivability heatmap. The map is drawn
-// while the panel is open, once per world and again whenever the rules change. Its rules are the ones navigation
-// uses, so the map shows the sea the animals live with.
+// bottom left), painted onto the sea bed (seen through the water), and saved as a top-down picture with statistics,
+// next to the survivability heatmap. The map is worked out once per world and again whenever the rules change. Its
+// rules are the ones navigation uses, so the map shows the sea the animals live with.
 [DisallowMultipleComponent]
 public class SeaBiomeMap : MonoBehaviour
 {
@@ -122,6 +122,16 @@ public class SeaBiomeMap : MonoBehaviour
     static readonly Color32 Unpainted = new Color32(0, 0, 0, 0);
     static readonly Color32 SavedOutsideColour = new Color32(255, 255, 255, 255);
 
+    // Read by Terrain.shader.
+    static readonly int SeaBedMapId = Shader.PropertyToID("_SeaBedMap");
+    static readonly int SeaBedMapRectId = Shader.PropertyToID("_SeaBedMapRect");
+    static readonly int SeaBedStrengthId = Shader.PropertyToID("_SeaBedStrength");
+    static readonly int SeaBedSeagrassId = Shader.PropertyToID("_SeaBedSeagrass");
+    static readonly int SeaBedKelpId = Shader.PropertyToID("_SeaBedKelp");
+    static readonly int SeaBedCoralId = Shader.PropertyToID("_SeaBedCoral");
+    static readonly int SeaBedCoralSecondId = Shader.PropertyToID("_SeaBedCoralSecond");
+    static readonly int SeaBedDeadZoneId = Shader.PropertyToID("_SeaBedDeadZone");
+
     [Tooltip("How the sea divides into biomes. Changes apply to areas and maps built afterwards.")]
     public SeaBiomeRules rules = SeaBiomeRules.Default;
 
@@ -134,8 +144,21 @@ public class SeaBiomeMap : MonoBehaviour
              "with statistics, in the Heatmaps folder under Application.persistentDataPath.")]
     public bool saveMaps = true;
 
+    [Header("Sea Bed")]
+    [Tooltip("Paint the sea bed in its biome's colours, seen through the water. Open sea keeps the plain bed.")]
+    public bool paintSeaBed = true;
+    [Range(0f, 1f)] public float seaBedStrength = 0.85f;
+    [Tooltip("Seagrass grows in patches on the sand.")]
+    public Color seagrassBed = new Color32(82, 124, 54, 255);
+    public Color kelpBed = new Color32(104, 84, 44, 255);
+    [Tooltip("Reefs mix this colour with the next one.")]
+    public Color coralBed = new Color32(212, 102, 120, 255);
+    public Color coralBedSecond = new Color32(226, 140, 82, 255);
+    public Color deadZoneBed = new Color32(34, 30, 40, 255);
+
     AnimalTerrainWorld terrainWorld;
     Texture2D texture;
+    Texture2D bedTexture;
     byte[] cells;
     SeaBiomeStatistics statistics;
     SeaBiomeRules mappedRules;
@@ -208,19 +231,26 @@ public class SeaBiomeMap : MonoBehaviour
     void OnDestroy()
     {
         if (Active == this) Active = null;
+        Shader.SetGlobalFloat(SeaBedStrengthId, 0f);
         if (texture != null) Destroy(texture);
+        if (bedTexture != null) Destroy(bedTexture);
     }
 
     void Update()
     {
+        // The sea bed needs the map as much as the panel does.
+        if (shown || paintSeaBed)
+        {
+            // A new world has a new terrain seed, and makes the old map wrong.
+            if ((hasMap || stripsPending > 0) && TerrainSeed() != mappedSeed) ForgetMap();
+
+            bool mapping = stripsPending > 0;
+            bool stale = hasMap && !mappedRules.Equals(rules);
+            if (!mapping && (!hasMap || stale) && Time.unscaledTime >= nextAttemptTime) BeginMapping();
+        }
+
+        UpdateSeaBed();
         if (!shown) return;
-
-        // A new world has a new terrain seed, and makes the old map wrong.
-        if ((hasMap || stripsPending > 0) && TerrainSeed() != mappedSeed) ForgetMap();
-
-        bool mapping = stripsPending > 0;
-        bool stale = hasMap && !mappedRules.Equals(rules);
-        if (!mapping && (!hasMap || stale) && Time.unscaledTime >= nextAttemptTime) BeginMapping();
 
         UpdateCameraMarker();
         if (Time.unscaledTime >= nextReadoutTime)
@@ -388,8 +418,61 @@ public class SeaBiomeMap : MonoBehaviour
         texture.SetPixels32(pixels);
         texture.Apply(false);
         hasMap = true;
+        PaintSeaBed();
         UpdateLegend();
         if (!mappingFailed && saveMaps) SaveMap(pixels);
+    }
+
+    // Hands Terrain.shader the map as one channel per painted biome (seagrass, kelp, reef and dead zone), so
+    // neighbouring biomes blend smoothly and the shader adds the fine detail. Open sea and land keep the plain bed.
+    void PaintSeaBed()
+    {
+        if (bedTexture == null || bedTexture.width != mapResolution)
+        {
+            if (bedTexture != null) Destroy(bedTexture);
+            // Linear: the channels are amounts, not colours.
+            bedTexture = new Texture2D(mapResolution, mapResolution, TextureFormat.RGBA32, false, true)
+            {
+                name = "Sea Bed Map",
+                wrapMode = TextureWrapMode.Clamp,
+                filterMode = FilterMode.Bilinear
+            };
+        }
+
+        Color32[] cover = new Color32[cells.Length];
+        for (int index = 0; index < cells.Length; index++) cover[index] = BedCover((SeaBiome)cells[index]);
+        bedTexture.SetPixels32(cover);
+        bedTexture.Apply(false);
+
+        // Cells are judged at their centres, which line up with the texel centres.
+        Shader.SetGlobalTexture(SeaBedMapId, bedTexture);
+        Shader.SetGlobalVector(SeaBedMapRectId, new Vector4(-mapExtent, -mapExtent, 0.5f / mapExtent, 0.5f / mapExtent));
+    }
+
+    static Color32 BedCover(SeaBiome biome)
+    {
+        return biome switch
+        {
+            SeaBiome.SeagrassMeadow => new Color32(255, 0, 0, 0),
+            SeaBiome.KelpForest => new Color32(0, 255, 0, 0),
+            SeaBiome.ColdWaterReef => new Color32(0, 0, 255, 0),
+            SeaBiome.DeadZone => new Color32(0, 0, 0, 255),
+            _ => new Color32(0, 0, 0, 0)
+        };
+    }
+
+    // Every frame, so colour changes in the Inspector show at once; off until this world's map is done.
+    void UpdateSeaBed()
+    {
+        bool painting = paintSeaBed && hasMap && bedTexture != null;
+        Shader.SetGlobalFloat(SeaBedStrengthId, painting ? seaBedStrength : 0f);
+        if (!painting) return;
+
+        Shader.SetGlobalColor(SeaBedSeagrassId, seagrassBed);
+        Shader.SetGlobalColor(SeaBedKelpId, kelpBed);
+        Shader.SetGlobalColor(SeaBedCoralId, coralBed);
+        Shader.SetGlobalColor(SeaBedCoralSecondId, coralBedSecond);
+        Shader.SetGlobalColor(SeaBedDeadZoneId, deadZoneBed);
     }
 
     void UpdateLegend()

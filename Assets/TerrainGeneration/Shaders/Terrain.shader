@@ -69,6 +69,19 @@ Shader "Custom/Terrain"
             float4 _SurvivalHeatmapRect;
             float _SurvivalHeatmapOpacity;
 
+            // Set globally by SeaBiomeMap: how much of the bed each painted sea biome covers (seagrass, kelp, reef and
+            // dead zone in r, g, b and a) over the habitable square, laid out like the heatmap, and the biomes' colours.
+            // Strength 0 leaves the plain bed.
+            TEXTURE2D(_SeaBedMap);
+            SAMPLER(sampler_SeaBedMap);
+            float4 _SeaBedMapRect;
+            float _SeaBedStrength;
+            float4 _SeaBedSeagrass;
+            float4 _SeaBedKelp;
+            float4 _SeaBedCoral;
+            float4 _SeaBedCoralSecond;
+            float4 _SeaBedDeadZone;
+
             struct Attributes
             {
                 float4 positionOS : POSITION;
@@ -146,6 +159,28 @@ Shader "Custom/Terrain"
                 return 1.0 - smoothstep(0.0, 0.16, min(a, b));
             }
 
+            // The bed in its sea biome's colours: seagrass in patches on the sand, mottled kelp rock, corals mixing
+            // two colours, and dark dead-zone silt. Neighbouring biomes blend through the map's filtering.
+            float3 PaintSeaBed(float3 bed, float2 positionXZ)
+            {
+                float2 uv = (positionXZ - _SeaBedMapRect.xy) * _SeaBedMapRect.zw;
+                if (any(uv < 0.0) || any(uv > 1.0)) return bed;
+
+                float4 cover = SAMPLE_TEXTURE2D_LOD(_SeaBedMap, sampler_SeaBedMap, uv, 0);
+                float total = saturate(cover.r + cover.g + cover.b + cover.a);
+                if (total <= 0.001) return bed;
+
+                float patches = ValueNoise(positionXZ * 0.3);
+                float grain = ValueNoise(positionXZ * 1.4 + 31.7);
+                float3 seagrass = lerp(bed, _SeaBedSeagrass.rgb, smoothstep(0.3, 0.55, patches));
+                float3 kelp = _SeaBedKelp.rgb * (0.75 + 0.5 * grain);
+                float3 coral = lerp(_SeaBedCoral.rgb, _SeaBedCoralSecond.rgb, smoothstep(0.35, 0.65, grain))
+                             * (0.8 + 0.4 * patches);
+                float3 dead = _SeaBedDeadZone.rgb * (0.85 + 0.3 * grain);
+                float3 painted = (seagrass * cover.r + kelp * cover.g + coral * cover.b + dead * cover.a) / total;
+                return lerp(bed, painted, total * _SeaBedStrength);
+            }
+
             Varyings vert(Attributes IN)
             {
                 Varyings OUT;
@@ -188,6 +223,7 @@ Shader "Custom/Terrain"
                     float underwater = smoothstep(-0.1, 0.2, waterDepth);
                     float3 bed = lerp(_TerrainLakebedShallow.rgb, _TerrainLakebedDeep.rgb,
                                       saturate(waterDepth / max(_TerrainLakebedDeepDepth, 0.01)));
+                    if (_SeaBedStrength > 0.0) bed = PaintSeaBed(bed, IN.positionWS.xz);
                     albedo = lerp(albedo, bed, underwater);
 
                     // Damp, darker ground in a thin band just above the water line.
