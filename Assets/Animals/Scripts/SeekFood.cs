@@ -157,6 +157,10 @@ public class SeekFood : MonoBehaviour, IEcosystemMaterializationLifecycle
     [Tooltip("Prevents predation between parents, children, and siblings, including mutated offspring assigned to a new species.")]
     public bool avoidCloseKinPredation = true;
     [Range(0f, 1f)] public float carcassEnergyTransferEfficiency = 0.75f;
+    [Tooltip("Meat in the body itself, as energy per unit of body mass, on top of whatever energy the animal had " +
+             "stored. Without it a starved animal would leave no carcass, which makes meat scarce and meat-eating " +
+             "hard to evolve.")]
+    [Min(0f)] public float carcassBodyEnergy = 50f;
     [Min(1f)] public float carcassLifetime = 120f;
     [Min(0.1f)] public float carcassScale = 6f;
 
@@ -221,7 +225,9 @@ public class SeekFood : MonoBehaviour, IEcosystemMaterializationLifecycle
     public float BodyPartsMass => bodyEffects.partsMass;
     // How far the longest legs lift the body off the ground, in world units.
     public float LegLift => Mathf.Max(0f, fullLegLength) * bodyEffects.longestLegs * Mathf.Max(0.01f, bodyHeight);
-    public float EstimatedCarcassRawEnergy => Mathf.Max(0f, currentEnergy) *
+    // A carcass holds the body's own meat plus the energy the animal had stored, scaled by its mass. Hunters
+    // weigh prey by the same amount, so even a starving animal is worth its meat.
+    public float EstimatedCarcassRawEnergy => (Mathf.Max(0f, carcassBodyEnergy) + Mathf.Max(0f, currentEnergy)) *
                                                carcassEnergyTransferEfficiency *
                                                BodyMassFactor;
     public bool IsAlive => !isDying && currentHealth > 0f && isActiveAndEnabled;

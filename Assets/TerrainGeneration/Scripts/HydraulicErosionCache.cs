@@ -61,7 +61,12 @@ public static class HydraulicErosionCache
             }
         }
         int seed = unchecked(settings.noiseSettings.seed * 397 ^ erosion.seed);
-        HydraulicErosionMap map = HydraulicErosion.Simulate(heights, erosion, seed, radius, settings.minHeight, settings.maxHeight,
+        // The bake runs on whichever terrain worker needs it first, and settings.minHeight/maxHeight evaluate the
+        // shared height curve, which gives wrong values when several threads evaluate it at once. The bake's own
+        // copy holds the same keys, so it gives the same range safely.
+        float minHeight = settings.heightMultiplier * curve.Evaluate(0f);
+        float maxHeight = settings.heightMultiplier * curve.Evaluate(1f);
+        HydraulicErosionMap map = HydraulicErosion.Simulate(heights, erosion, seed, radius, minHeight, maxHeight,
             cancel == null ? null : new Func<float, bool>(progress => cancel(0.15f + 0.85f * progress)));
         timer.Stop();
         map.BakeMilliseconds = timer.Elapsed.TotalMilliseconds;

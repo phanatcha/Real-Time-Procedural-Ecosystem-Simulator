@@ -139,5 +139,96 @@ Shader "Custom/Vegetation"
             }
             ENDHLSL
         }
+
+        // These two passes put trees and plants in the camera depth texture, so ambient occlusion and the water's
+        // depth effects (shore foam, how far you can see into the water) take them into account. Cull Off above
+        // applies here too, so both sides of the foliage are written, as they are drawn.
+        Pass
+        {
+            Name "DepthOnly"
+            Tags { "LightMode" = "DepthOnly" }
+
+            ZWrite On
+            ColorMask R
+
+            HLSLPROGRAM
+            #pragma vertex DepthVert
+            #pragma fragment DepthFrag
+
+            #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
+
+            struct Attributes
+            {
+                float4 positionOS : POSITION;
+            };
+
+            struct Varyings
+            {
+                float4 positionCS : SV_POSITION;
+            };
+
+            Varyings DepthVert(Attributes IN)
+            {
+                Varyings OUT;
+                OUT.positionCS = TransformObjectToHClip(IN.positionOS.xyz);
+                return OUT;
+            }
+
+            half DepthFrag(Varyings IN) : SV_Target
+            {
+                return IN.positionCS.z;
+            }
+            ENDHLSL
+        }
+
+        Pass
+        {
+            Name "DepthNormals"
+            Tags { "LightMode" = "DepthNormals" }
+
+            ZWrite On
+
+            HLSLPROGRAM
+            #pragma vertex DepthNormalsVert
+            #pragma fragment DepthNormalsFrag
+
+            #include_with_pragmas "Packages/com.unity.render-pipelines.universal/ShaderLibrary/RenderingLayers.hlsl"
+            #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
+
+            struct Attributes
+            {
+                float4 positionOS : POSITION;
+                float3 normalOS : NORMAL;
+            };
+
+            struct Varyings
+            {
+                float4 positionCS : SV_POSITION;
+                float3 normalWS : TEXCOORD0;
+            };
+
+            Varyings DepthNormalsVert(Attributes IN)
+            {
+                Varyings OUT;
+                OUT.positionCS = TransformObjectToHClip(IN.positionOS.xyz);
+                OUT.normalWS = TransformObjectToWorldNormal(IN.normalOS);
+                return OUT;
+            }
+
+            // Back faces get the flipped normal, as in the lit pass, so occlusion treats both sides of a leaf alike.
+            void DepthNormalsFrag(Varyings IN, bool frontFace : SV_IsFrontFace, out half4 outNormalWS : SV_Target0
+            #ifdef _WRITE_RENDERING_LAYERS
+                , out uint outRenderingLayers : SV_Target1
+            #endif
+            )
+            {
+                float3 normalWS = frontFace ? IN.normalWS : -IN.normalWS;
+                outNormalWS = half4(NormalizeNormalPerPixel(normalWS), 0.0);
+            #ifdef _WRITE_RENDERING_LAYERS
+                outRenderingLayers = EncodeMeshRenderingLayer();
+            #endif
+            }
+            ENDHLSL
+        }
     }
 }

@@ -61,9 +61,6 @@ public sealed class AnimalTerrainDemoBootstrap : MonoBehaviour
         habitatNavigation = GetOrAddComponent<HabitatNavigation>();
         habitatNavigation.terrainWorld = terrainWorld;
 
-        // The older single-area NavMesh would overlap the streamed one.
-        if (TryGetComponent(out ProceduralTerrainNavMesh legacyNavigation)) legacyNavigation.enabled = false;
-
         ProceduralTerrainTemperatureProvider temperatureProvider =
             GetOrAddComponent<ProceduralTerrainTemperatureProvider>();
         temperatureProvider.terrainWorld = terrainWorld;
