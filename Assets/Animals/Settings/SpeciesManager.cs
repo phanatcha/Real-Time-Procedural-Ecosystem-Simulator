@@ -136,8 +136,12 @@ public class SpeciesManager : MonoBehaviour
 
     [Header("Population Ceiling")]
     [Tooltip("Animals stop giving birth while the population is this large, so an open world stays " +
-             "affordable to simulate. Set to 0 to disable.")]
+             "affordable to simulate. Set to 0 to disable. With a sea ceiling it counts animals on land only.")]
     [Min(0)] public int populationCeiling = 400;
+    [Tooltip("A separate ceiling for animals in the water, so a crowded sea cannot stop births on land, or the " +
+             "other way round. Animals at sea are never kept as off-screen numbers, so without this they could " +
+             "fill the whole ceiling. 0 counts animals in water toward the ceiling above, as before.")]
+    [Min(0)] public int seaPopulationCeiling = 200;
 
     private int currentSpeciesIndex;
     private float telemetryTimer;
@@ -146,6 +150,8 @@ public class SpeciesManager : MonoBehaviour
     // Newborns register on their first frame, so births are counted here until then. Otherwise every
     // parent in a busy frame sees room under the ceiling and the population overshoots it.
     private int pendingBirths;
+    private int seaPopulation;
+    private int seaPopulationFrame = -1;
     private float baseFixedDeltaTime;
     private float baseMaximumDeltaTime;
     private float performanceMeasurementRealTime;
@@ -184,8 +190,35 @@ public class SpeciesManager : MonoBehaviour
             return count;
         }
     }
+    // Animals in the water right now, counted at most once a frame.
+    public int SeaPopulation
+    {
+        get
+        {
+            if (seaPopulationFrame != Time.frameCount)
+            {
+                seaPopulationFrame = Time.frameCount;
+                seaPopulation = 0;
+                foreach (SeekFood agent in activeAgents)
+                {
+                    if (agent != null && agent.IsInWater) seaPopulation++;
+                }
+            }
+
+            return seaPopulation;
+        }
+    }
+    // The animals populationCeiling counts: those on land while the sea has its own ceiling, otherwise all.
+    public int LandPopulation => seaPopulationCeiling > 0 ? TotalPopulation - SeaPopulation : TotalPopulation;
     public bool IsAtPopulationCeiling =>
-        populationCeiling > 0 && TotalPopulation + pendingBirths >= populationCeiling;
+        populationCeiling > 0 && LandPopulation + pendingBirths >= populationCeiling;
+    public bool IsAtSeaPopulationCeiling => seaPopulationCeiling > 0
+        ? SeaPopulation + pendingBirths >= seaPopulationCeiling
+        : IsAtPopulationCeiling;
+
+    // Whether a parent here must wait to give birth: one in the water answers to the sea's ceiling, others to the
+    // land's.
+    public bool IsAtPopulationCeilingFor(bool inWater) => inWater ? IsAtSeaPopulationCeiling : IsAtPopulationCeiling;
     // Simulated time (Time.time) when the current world's history began.
     public float WorldStartTime { get; private set; }
     // Refreshed at every species census. Founders are generation 0.

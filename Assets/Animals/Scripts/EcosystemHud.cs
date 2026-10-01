@@ -121,8 +121,16 @@ public class EcosystemHud : MonoBehaviour
 
         text.Append($"<b>Simulated time</b> {FormatDuration(simulatedSeconds)}\n");
 
-        string ceiling = manager.populationCeiling > 0 ? $" / {manager.populationCeiling} ceiling" : "";
-        string atCeiling = manager.IsAtPopulationCeiling ? " <color=#ffd060>(births paused)</color>" : "";
+        bool seaCeiling = manager.seaPopulationCeiling > 0;
+        string ceiling = manager.populationCeiling <= 0 ? ""
+            : seaCeiling ? $" / ceilings {manager.populationCeiling} on land, {manager.seaPopulationCeiling} in water"
+            : $" / {manager.populationCeiling} ceiling";
+        bool landPaused = manager.IsAtPopulationCeiling;
+        bool seaPaused = seaCeiling && manager.IsAtSeaPopulationCeiling;
+        string paused = landPaused && (seaPaused || !seaCeiling) ? "births paused"
+            : landPaused ? "births paused on land"
+            : seaPaused ? "births paused in water" : null;
+        string atCeiling = paused != null ? $" <color=#ffd060>({paused})</color>" : "";
         string plants = foodSpawner != null ? $"    <b>Plants</b> {foodSpawner.ShownPlantCount} shown{DescribeSeaPlants()}" : "";
         string tiles = habitatNavigation != null ? $"    <b>Walkable tiles</b> {habitatNavigation.NavigableTileCount}" : "";
         string offscreen = manager.OffscreenPopulation != null ? $"    <b>Off-screen</b> {manager.OffscreenTotal}" : "";
@@ -146,7 +154,7 @@ public class EcosystemHud : MonoBehaviour
                     $"{manager.AverageGeneration:0.0} on average, newest {manager.HighestGeneration}\n");
         text.Append($"<b>Species</b> {manager.SpeciesAliveCount} alive, {speciesEver} ever, {extinct} extinct    " +
                     $"(a group splits off once it is {manager.speciationThreshold:0.###} apart genetically, " +
-                    "typically after 40-50 generations)\n");
+                    "typically after 50-60 generations)\n");
 
         AppendLargestSpecies(manager);
         return text.ToString().TrimEnd();

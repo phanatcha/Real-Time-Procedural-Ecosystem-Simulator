@@ -25,6 +25,10 @@ public sealed class HabitatNavigation : MonoBehaviour
     [Min(0.1f)] public float refreshInterval = 0.5f;
     [Tooltip("Real seconds before a tile whose terrain sampling never finished is requested again.")]
     [Min(1f)] public float retryAfterSeconds = 15f;
+    [Tooltip("Real seconds before a tile no animal has needed is taken out of the NavMesh, so it doesn't keep " +
+             "growing as animals roam (swimmers cross a lot of sea). Animals that come back get it rebuilt. " +
+             "0 keeps every tile.")]
+    [Min(0f)] public float unloadDelay = 60f;
     public int agentTypeId;
 
     [Header("Water")]
@@ -42,6 +46,8 @@ public sealed class HabitatNavigation : MonoBehaviour
     private sealed class NavigationTile
     {
         public float requestTime;
+        // Last time an animal (or anything else asking for an area) was near enough to need the tile.
+        public float lastNeededTime;
         public bool geometryReady;
         public bool hasGround;
         public bool navigable;
@@ -68,6 +74,9 @@ public sealed class HabitatNavigation : MonoBehaviour
     private readonly List<Vector2Int> tilesAwaitingUpdate = new List<Vector2Int>();
     private readonly List<Vector2Int> tilesInRunningUpdate = new List<Vector2Int>();
     private readonly List<Vector2Int> expiredRequests = new List<Vector2Int>();
+    private readonly List<Vector2Int> tilesToUnload = new List<Vector2Int>();
+    private readonly HashSet<Object> meshesToUnload = new HashSet<Object>();
+    private bool sourcesRemoved;
     private NavMeshData navMeshData;
     private NavMeshDataInstance navMeshInstance;
     private NavMeshBuildSettings buildSettings;
@@ -100,12 +109,15 @@ public sealed class HabitatNavigation : MonoBehaviour
 
     public void RequestArea(Vector3 center, float radius)
     {
+        float now = Time.unscaledTime;
         GetTileRange(center, radius, out Vector2Int minimum, out Vector2Int maximum);
         for (int tileZ = minimum.y; tileZ <= maximum.y; tileZ++)
         {
             for (int tileX = minimum.x; tileX <= maximum.x; tileX++)
             {
-                RequestTile(new Vector2Int(tileX, tileZ));
+                Vector2Int coordinate = new Vector2Int(tileX, tileZ);
+                if (tiles.TryGetValue(coordinate, out NavigationTile tile)) tile.lastNeededTime = now;
+                else RequestTile(coordinate);
             }
         }
     }
@@ -187,10 +199,11 @@ public sealed class HabitatNavigation : MonoBehaviour
             runningUpdate = null;
         }
 
-        if (runningUpdate == null && tilesAwaitingUpdate.Count > 0)
+        if (runningUpdate == null && (tilesAwaitingUpdate.Count > 0 || sourcesRemoved))
         {
             tilesInRunningUpdate.AddRange(tilesAwaitingUpdate);
             tilesAwaitingUpdate.Clear();
+            sourcesRemoved = false;
 
             // Each update gets its own copy of the sources, since new tiles arrive while it runs. The
             // bounds cover every tile built so far, padded vertically so agents fit above the ground.
@@ -206,6 +219,7 @@ public sealed class HabitatNavigation : MonoBehaviour
             refreshTimer = refreshInterval;
             RetryExpiredRequests();
             RequestTilesAroundAnimals();
+            UnloadUnneededTiles();
         }
 
         tilesInProgress = tiles.Count - navigableTileCount;
@@ -235,7 +249,7 @@ public sealed class HabitatNavigation : MonoBehaviour
         if (sampler == null || !sampler.IsConfigured) return;
         if (includeWater && !WaterAccess.HasWater) RefreshWaterLevel();
 
-        tiles.Add(coordinate, new NavigationTile { requestTime = Time.unscaledTime });
+        tiles.Add(coordinate, new NavigationTile { requestTime = Time.unscaledTime, lastNeededTime = Time.unscaledTime });
 
         // Copy everything the background thread needs; it must not touch Unity objects.
         int version = worldVersion;
@@ -312,6 +326,46 @@ public sealed class HabitatNavigation : MonoBehaviour
 
         tile.navigable = true;
         navigableTileCount++;
+    }
+
+    // Takes tiles no animal has needed for unloadDelay out of the NavMesh. A running update still reads the tiles'
+    // meshes, so this waits until none is running.
+    void UnloadUnneededTiles()
+    {
+        if (unloadDelay <= 0f || runningUpdate != null) return;
+
+        float now = Time.unscaledTime;
+        tilesToUnload.Clear();
+        foreach (KeyValuePair<Vector2Int, NavigationTile> entry in tiles)
+        {
+            if (entry.Value.geometryReady && now - entry.Value.lastNeededTime > unloadDelay) tilesToUnload.Add(entry.Key);
+        }
+
+        if (tilesToUnload.Count == 0) return;
+
+        meshesToUnload.Clear();
+        foreach (Vector2Int coordinate in tilesToUnload)
+        {
+            NavigationTile tile = tiles[coordinate];
+            foreach (Mesh mesh in tile.meshes) meshesToUnload.Add(mesh);
+            if (tile.navigable) navigableTileCount--;
+            tiles.Remove(coordinate);
+            tilesAwaitingUpdate.Remove(coordinate);
+        }
+
+        sources.RemoveAll(source => meshesToUnload.Contains(source.sourceObject));
+        foreach (Object mesh in meshesToUnload) Destroy(mesh);
+        meshesToUnload.Clear();
+
+        // The next update covers only the remaining tiles, which clears the NavMesh where the unloaded ones were.
+        for (int index = 0; index < sources.Count; index++)
+        {
+            Bounds bounds = ((Mesh)sources[index].sourceObject).bounds;
+            if (index == 0) sourceBounds = bounds;
+            else sourceBounds.Encapsulate(bounds);
+        }
+
+        sourcesRemoved = true;
     }
 
     // A failed background job never calls back, so forget stale requests and let them be made again.

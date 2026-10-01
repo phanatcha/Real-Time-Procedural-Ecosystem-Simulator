@@ -631,6 +631,20 @@ public class FoodSpawner : MonoBehaviour
         return (ground + tall) * nutrition * growthRate * 60f / baseRegrowSeconds;
     }
 
+    // The same for a water cell in the given sea biome, by the rules that place and regrow sea plants. The
+    // temperature is the water surface's, which is what sea plants grow in.
+    public float EstimateSeaNutritionPerMinute(SeaBiome biome, float surfaceCelsius)
+    {
+        if (!growSeaFood || biome == SeaBiome.None) return 0f;
+
+        float growthRate = seaFood.GrowthRate(surfaceCelsius);
+        if (growthRate < minimumGrowthRate) return 0f;
+
+        SeaFoodYield yield = seaFood.Yield(biome);
+        return yield.chance * baseNutrition * yield.nutrition * growthRate * 60f /
+               (baseRegrowSeconds * Mathf.Max(0.1f, yield.regrowth));
+    }
+
     // Fraction of the ideal regrowth rate at this position, from the food's growth temperature range.
     static float GetGrowthRate(FoodItem growthProfile, Vector3 position)
     {

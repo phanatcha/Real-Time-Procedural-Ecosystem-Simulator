@@ -444,7 +444,8 @@ public class SeekFood : MonoBehaviour, IEcosystemMaterializationLifecycle
             }
         }
 
-        bool atPopulationCeiling = SpeciesManager.Instance != null && SpeciesManager.Instance.IsAtPopulationCeiling;
+        bool atPopulationCeiling = SpeciesManager.Instance != null &&
+                                   SpeciesManager.Instance.IsAtPopulationCeilingFor(inWater);
         if (IsMature && maxEnergy > 0f && currentEnergy >= maxEnergy * reproductionThreshold &&
             reproductionCooldownTimer <= 0f && !atPopulationCeiling)
         {

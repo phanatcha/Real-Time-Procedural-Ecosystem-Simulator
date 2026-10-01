@@ -92,6 +92,14 @@ Shader "Custom/Water"
                 float _WetShoreHeight;
             CBUFFER_END
 
+            // Set globally by SurvivabilityHeatmap (the same map Terrain.shader paints on land). While it scores the
+            // sea, _SurvivalHeatmapWater is 1 and the map is painted on the water, so it reads at any depth.
+            TEXTURE2D(_SurvivalHeatmap);
+            SAMPLER(sampler_SurvivalHeatmap);
+            float4 _SurvivalHeatmapRect;
+            float _SurvivalHeatmapOpacity;
+            float _SurvivalHeatmapWater;
+
             struct Attributes
             {
                 float4 positionOS : POSITION;
@@ -215,6 +223,19 @@ Shader "Custom/Water"
                 half3 foamColour = _FoamColor.rgb * (ambient + sunLight * (0.4 + 0.6 * NdotL));
                 colour = lerp(colour, foamColour, foam);
                 alpha = lerp(alpha, 1.0, foam);
+
+                // The survivability heatmap's sea, lit like the foam so the facets still show.
+                if (_SurvivalHeatmapWater > 0.5 && _SurvivalHeatmapOpacity > 0.0)
+                {
+                    float2 heatmapUV = (positionWS.xz - _SurvivalHeatmapRect.xy) * _SurvivalHeatmapRect.zw;
+                    if (all(heatmapUV >= 0.0) && all(heatmapUV <= 1.0))
+                    {
+                        float4 heat = SAMPLE_TEXTURE2D_LOD(_SurvivalHeatmap, sampler_SurvivalHeatmap, heatmapUV, 0);
+                        half cover = heat.a * _SurvivalHeatmapOpacity;
+                        colour = lerp(colour, heat.rgb * (ambient + sunLight * (0.4 + 0.6 * NdotL)), cover);
+                        alpha = lerp(alpha, 1.0, cover);
+                    }
+                }
 
                 colour = MixFogColor(colour, unity_FogColor.rgb * alpha, input.fogFactor);
                 return half4(colour, alpha);

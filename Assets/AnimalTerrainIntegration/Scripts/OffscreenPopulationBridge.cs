@@ -155,6 +155,9 @@ public sealed class OffscreenPopulationBridge : MonoBehaviour, IOffscreenPopulat
         foreach (SeekFood animal in agents)
         {
             if (animal == null || !animal.IsAlive || animal.Genome == null || !animal.Genome.IsValid) continue;
+            // The populations live on land, so an animal at sea stays a real animal rather than reappearing on
+            // an island later.
+            if (animal.IsInWater) continue;
 
             Vector2 position = new Vector2(animal.transform.position.x, animal.transform.position.z);
             if ((position - focus).sqrMagnitude <= radiusSquared) continue;
@@ -191,10 +194,11 @@ public sealed class OffscreenPopulationBridge : MonoBehaviour, IOffscreenPopulat
                 OffscreenPopulation population = cell.populations[index];
                 (Vector2Int, string) key = (cell.coordinate, population.speciesName);
                 liveByCellAndSpecies.TryGetValue(key, out int live);
-                // New animals only count toward the ceiling from their first frame, so count them here too.
+                // New animals only count toward the ceiling from their first frame, so count them here too. They
+                // appear on land, so the land's ceiling is the one that matters.
                 while (population.count >= 1f && live < maximumLivePerCellAndSpecies &&
                        created < maximumAnimalsCreatedPerRefresh && !manager.IsAtPopulationCeiling &&
-                       (manager.populationCeiling <= 0 || manager.TotalPopulation + created < manager.populationCeiling))
+                       (manager.populationCeiling <= 0 || manager.LandPopulation + created < manager.populationCeiling))
                 {
                     if (!TryFindSpawnPoint(cell, focus, out Vector3 position))
                     {

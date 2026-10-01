@@ -7,11 +7,21 @@ using UnityEngine;
 using UnityEngine.EventSystems;
 using UnityEngine.UI;
 
-// What a survivability factor knows about one spot on the map.
+// What a survivability factor knows about one spot on the map. For water, scored for swimmers, the temperature is
+// the surface's and seaBiome says which sea biome it is; on land seaBiome is None.
 public struct SurvivabilityCell
 {
     public EnvironmentSample environment;
     public float celsius;
+    public SeaBiome seaBiome;
+}
+
+// Which parts of the world the heatmap scores.
+public enum HeatmapCoverage
+{
+    Land, // usable land, for animals on foot
+    Sea,  // water, for swimmers
+    Both
 }
 
 // One thing that makes a place easier or harder to live in. To add a variable to the heatmap, write another
@@ -103,7 +113,8 @@ public class TemperatureSurvivability : ISurvivabilityFactor
     }
 }
 
-// Food supply: the nutrition plants regrow here each minute, by FoodSpawner's own placement and regrowth rules.
+// Food supply: the nutrition plants regrow here each minute, by FoodSpawner's own placement and regrowth rules
+// (land plants on land, the sea biome's plants in water).
 [Serializable]
 public class FoodSurvivability : ISurvivabilityFactor
 {
@@ -125,21 +136,26 @@ public class FoodSurvivability : ISurvivabilityFactor
 
     public float Score(in SurvivabilityCell cell)
     {
-        float nutrition = foodSpawner.EstimateNutritionPerMinute(cell.environment, cell.celsius);
+        float nutrition = cell.seaBiome != SeaBiome.None
+            ? foodSpawner.EstimateSeaNutritionPerMinute(cell.seaBiome, cell.celsius)
+            : foodSpawner.EstimateNutritionPerMinute(cell.environment, cell.celsius);
         return Mathf.Clamp01(nutrition / plentifulNutritionPerMinute);
     }
 }
 
-// How easy it is to survive across the island, painted over the terrain from red (harsh) to green (lenient)
-// and switched on with the Heatmap checkbox in the bottom-left corner. Each factor scores a spot from 0 to 1,
-// and the scores are combined as a weighted geometric mean, so one hopeless factor makes a place harsh
-// however good the others are. Water, shore and cliffs that animals cannot use are left unpainted.
+// How easy it is to survive across the island, painted from red (harsh) to green (lenient) and switched on with
+// the Heatmap checkbox in the bottom-left corner. The Land, Sea and Both buttons beside its key choose what is
+// scored: usable land for animals on foot, or the water for swimmers, painted on the water surface. Each factor
+// scores a spot from 0 to 1, and the scores are combined as a weighted geometric mean, so one hopeless factor
+// makes a place harsh however good the others are. Shore and cliffs that animals cannot use are left unpainted.
 [DisallowMultipleComponent]
 public class SurvivabilityHeatmap : MonoBehaviour
 {
     static readonly int HeatmapId = Shader.PropertyToID("_SurvivalHeatmap");
     static readonly int RectId = Shader.PropertyToID("_SurvivalHeatmapRect");
     static readonly int OpacityId = Shader.PropertyToID("_SurvivalHeatmapOpacity");
+    // 1 while the sea is scored, so Water.shader paints it; otherwise land colours would bleed onto the coast.
+    static readonly int WaterId = Shader.PropertyToID("_SurvivalHeatmapWater");
 
     // Harsh to lenient.
     static readonly Color[] Ramp =
@@ -154,13 +170,17 @@ public class SurvivabilityHeatmap : MonoBehaviour
 
     // What each map cell holds, for the saved map and statistics.
     const byte OutsideCell = 0;
-    const byte HabitableCell = 1;
-    const byte WaterCell = 2;
+    const byte HabitableCell = 1; // scored land
+    const byte WaterCell = 2;     // water, not scored
     const byte BlockedCell = 3;
+    const byte SeaCell = 4;       // scored water
+    const byte LandCell = 5;      // usable land, not scored (sea only)
     const byte NoLimit = 255;
     static readonly Color32 SavedWaterColour = new Color32(170, 198, 214, 255);
     static readonly Color32 SavedBlockedColour = new Color32(190, 192, 184, 255);
+    static readonly Color32 SavedLandColour = new Color32(214, 206, 178, 255);
     static readonly Color32 SavedOutsideColour = new Color32(255, 255, 255, 255);
+    static readonly HeatmapCoverage[] CoverageChoices = { HeatmapCoverage.Land, HeatmapCoverage.Sea, HeatmapCoverage.Both };
 
     // Shared with the other small panels in the bottom-left corner (SeaBiomeMap).
     internal static readonly Color PillColor = new Color32(14, 22, 24, 235);
@@ -177,6 +197,9 @@ public class SurvivabilityHeatmap : MonoBehaviour
     [Tooltip("Show the heatmap as soon as the scene starts.")]
     public bool showOnStart;
     [Range(0f, 1f)] public float opacity = 0.75f;
+    [Tooltip("Score usable land (for animals on foot), the water (for swimmers), or both. The buttons beside the " +
+             "key switch it.")]
+    public HeatmapCoverage coverage = HeatmapCoverage.Land;
 
     [Header("Map")]
     [Tooltip("Cells along each side of the map, which spans the whole habitable area.")]
@@ -203,12 +226,16 @@ public class SurvivabilityHeatmap : MonoBehaviour
     float[] scores;
     byte[] cellKinds;
     byte[] limitingFactors;
-    double[] factorScoreTotals;
-    float coldestHabitable;
-    float warmestHabitable;
+    byte[] seaBiomes;
+    // Per group, land (0) and sea (1): each factor's score summed over the group's cells, and its temperatures.
+    double[,] factorScoreTotals;
+    readonly float[] coldest = new float[2];
+    readonly float[] warmest = new float[2];
     bool saveWhenFinished = true;
     int mapResolution;
     float mapExtent;
+    HeatmapCoverage mappedCoverage;
+    SeaBiomeClassifier seaClassifier;
     int nextCell = -1;
     bool hasMap;
     bool shown;
@@ -218,6 +245,9 @@ public class SurvivabilityHeatmap : MonoBehaviour
     Toggle toggle;
     GameObject checkmark;
     GameObject legend;
+    GameObject coverageCard;
+    readonly Image[] coverageButtons = new Image[3];
+    readonly TextMeshProUGUI[] coverageLabels = new TextMeshProUGUI[3];
 
     // Added to any scene with terrain, so it needs no scene setup.
     [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
@@ -240,6 +270,7 @@ public class SurvivabilityHeatmap : MonoBehaviour
     {
         if (SeedManager.Instance != null) SeedManager.Instance.SeedChanged -= ForgetMap;
         Shader.SetGlobalFloat(OpacityId, 0f);
+        Shader.SetGlobalFloat(WaterId, 0f);
         if (texture != null) Destroy(texture);
     }
 
@@ -249,6 +280,13 @@ public class SurvivabilityHeatmap : MonoBehaviour
         // Until the map texture exists the shader would read Unity's default texture, so it stays hidden.
         Shader.SetGlobalFloat(OpacityId, texture != null ? shownOpacity : 0f);
         if (!shown) return;
+
+        // Coverage changed in the Inspector: the map is drawn again for the new choice.
+        if ((hasMap || nextCell >= 0) && coverage != mappedCoverage)
+        {
+            RefreshCoverageButtons();
+            ForgetMap();
+        }
 
         if (nextCell < 0 && Time.unscaledTime >= nextRefreshTime) BeginRecalculation();
         if (nextCell >= 0) ContinueRecalculation();
@@ -260,7 +298,23 @@ public class SurvivabilityHeatmap : MonoBehaviour
         if (toggle != null) toggle.SetIsOnWithoutNotify(value);
         if (checkmark != null) checkmark.SetActive(value);
         if (legend != null) legend.SetActive(value);
-        // Nothing stays selected, so Enter cannot flip the checkbox again and the camera keys stay free.
+        if (coverageCard != null) coverageCard.SetActive(value);
+        ClearSelection();
+    }
+
+    void SetCoverage(HeatmapCoverage value)
+    {
+        ClearSelection();
+        if (coverage == value) return;
+
+        coverage = value;
+        RefreshCoverageButtons();
+        ForgetMap();
+    }
+
+    // Nothing stays selected, so Enter cannot press a control again and the camera keys stay free.
+    static void ClearSelection()
+    {
         if (EventSystem.current != null) EventSystem.current.SetSelectedGameObject(null);
     }
 
@@ -287,9 +341,10 @@ public class SurvivabilityHeatmap : MonoBehaviour
         }
 
         float extent = terrainWorld != null ? terrainWorld.HabitableExtent : 0f;
-        if (extent <= 0f)
+        bool scoresSea = coverage != HeatmapCoverage.Land;
+        if (extent <= 0f || (scoresSea && !SeaBiomeMap.TryCreateClassifier(terrainWorld, out seaClassifier)))
         {
-            // The terrain is not ready yet.
+            // The terrain, or the water the sea is scored by, is not ready yet.
             nextRefreshTime = Time.unscaledTime + 1f;
             return;
         }
@@ -307,6 +362,7 @@ public class SurvivabilityHeatmap : MonoBehaviour
             scores = new float[pixels.Length];
             cellKinds = new byte[pixels.Length];
             limitingFactors = new byte[pixels.Length];
+            seaBiomes = new byte[pixels.Length];
             hasMap = false;
             texture.SetPixels32(pixels);
             texture.Apply(false);
@@ -314,15 +370,20 @@ public class SurvivabilityHeatmap : MonoBehaviour
 
         mapResolution = resolution;
         mapExtent = extent;
+        mappedCoverage = coverage;
         factors = Factors;
         foreach (ISurvivabilityFactor factor in factors) factor.Prepare();
-        factorScoreTotals = new double[factors.Length];
-        coldestHabitable = float.PositiveInfinity;
-        warmestHabitable = float.NegativeInfinity;
+        factorScoreTotals = new double[2, factors.Length];
+        for (int group = 0; group < 2; group++)
+        {
+            coldest[group] = float.PositiveInfinity;
+            warmest[group] = float.NegativeInfinity;
+        }
 
         // The map spans the habitable square, centred on the world origin.
         Shader.SetGlobalTexture(HeatmapId, texture);
         Shader.SetGlobalVector(RectId, new Vector4(-extent, -extent, 0.5f / extent, 0.5f / extent));
+        Shader.SetGlobalFloat(WaterId, scoresSea ? 1f : 0f);
         nextCell = 0;
     }
 
@@ -367,25 +428,52 @@ public class SurvivabilityHeatmap : MonoBehaviour
             return;
         }
 
-        if (!terrainWorld.IsWalkable(environment))
+        SurvivabilityCell cell = new SurvivabilityCell { environment = environment };
+        if (!environment.isLand || environment.isWater)
         {
-            cellKinds[index] = !environment.isLand || environment.isWater ? WaterCell : BlockedCell;
+            // Water is scored for swimmers, by its sea biome and the temperature at the surface.
+            if (mappedCoverage != HeatmapCoverage.Land)
+            {
+                cell.seaBiome = seaClassifier.Classify(environment, out _, out cell.celsius);
+            }
+
+            if (cell.seaBiome == SeaBiome.None) cellKinds[index] = WaterCell;
+            else Score(index, cell, SeaCell);
             return;
         }
 
-        SurvivabilityCell cell = new SurvivabilityCell { environment = environment, celsius = Celsius(environment) };
-        float score = Combine(cell, out int limiting);
-        cellKinds[index] = HabitableCell;
+        if (!terrainWorld.IsWalkable(environment))
+        {
+            cellKinds[index] = BlockedCell;
+            return;
+        }
+
+        if (mappedCoverage == HeatmapCoverage.Sea)
+        {
+            cellKinds[index] = LandCell;
+            return;
+        }
+
+        cell.celsius = Celsius(environment);
+        Score(index, cell, HabitableCell);
+    }
+
+    void Score(int index, in SurvivabilityCell cell, byte kind)
+    {
+        int group = kind == SeaCell ? 1 : 0;
+        float score = Combine(cell, group, out int limiting);
+        cellKinds[index] = kind;
         scores[index] = score;
         limitingFactors[index] = limiting < 0 ? NoLimit : (byte)limiting;
+        seaBiomes[index] = (byte)cell.seaBiome;
         pixels[index] = ColourFor(score);
-        coldestHabitable = Mathf.Min(coldestHabitable, cell.celsius);
-        warmestHabitable = Mathf.Max(warmestHabitable, cell.celsius);
+        coldest[group] = Mathf.Min(coldest[group], cell.celsius);
+        warmest[group] = Mathf.Max(warmest[group], cell.celsius);
     }
 
     // Weighted geometric mean of the factor scores. The limiting factor is the one scoring lowest, or -1 when
     // every factor gives full marks.
-    float Combine(in SurvivabilityCell cell, out int limiting)
+    float Combine(in SurvivabilityCell cell, int group, out int limiting)
     {
         float logSum = 0f;
         float weightSum = 0f;
@@ -397,7 +485,7 @@ public class SurvivabilityHeatmap : MonoBehaviour
             if (weight <= 0f) continue;
 
             float score = factors[index].Score(cell);
-            factorScoreTotals[index] += score;
+            factorScoreTotals[group, index] += score;
             if (score < lowest)
             {
                 lowest = score;
@@ -411,8 +499,9 @@ public class SurvivabilityHeatmap : MonoBehaviour
         return weightSum > 0f ? Mathf.Exp(logSum / weightSum) : 1f;
     }
 
-    // Writes the map as a top-down picture (north up, four pixels per cell; water blue, unusable shore and
-    // cliffs grey) and a text summary, for reports.
+    // Writes the map as a top-down picture (north up, four pixels per cell; unscored water blue, unscored land sand,
+    // unusable shore and cliffs grey) and a text summary, for reports. Land-only maps keep their original file
+    // names; sea and combined maps get their own.
     void SaveMap()
     {
         try
@@ -429,19 +518,22 @@ public class SurvivabilityHeatmap : MonoBehaviour
                 {
                     int cell = y / scale * mapResolution + x / scale;
                     byte kind = cellKinds[cell];
-                    picture[y * size + x] = kind == HabitableCell ? pixels[cell]
+                    picture[y * size + x] = kind == HabitableCell || kind == SeaCell ? pixels[cell]
                         : kind == WaterCell ? SavedWaterColour
-                        : kind == BlockedCell ? SavedBlockedColour : SavedOutsideColour;
+                        : kind == BlockedCell ? SavedBlockedColour
+                        : kind == LandCell ? SavedLandColour : SavedOutsideColour;
                 }
             }
 
+            string suffix = mappedCoverage == HeatmapCoverage.Sea ? "-sea"
+                : mappedCoverage == HeatmapCoverage.Both ? "-both" : "";
             Texture2D image = new Texture2D(size, size, TextureFormat.RGBA32, false);
             image.SetPixels32(picture);
             image.Apply(false);
-            File.WriteAllBytes(Path.Combine(folder, "survivability-map.png"), image.EncodeToPNG());
+            File.WriteAllBytes(Path.Combine(folder, $"survivability-map{suffix}.png"), image.EncodeToPNG());
             Destroy(image);
 
-            File.WriteAllText(Path.Combine(folder, "survivability-stats.txt"), DescribeMap());
+            File.WriteAllText(Path.Combine(folder, $"survivability-stats{suffix}.txt"), DescribeMap());
             Debug.Log($"Saved the survivability map and its statistics to {folder}");
         }
         catch (Exception exception)
@@ -452,58 +544,105 @@ public class SurvivabilityHeatmap : MonoBehaviour
 
     string DescribeMap()
     {
-        int habitable = 0, water = 0, blocked = 0, unlimited = 0;
-        int[] bands = new int[5];
-        int[] limitedBy = new int[factors.Length];
-        double scoreTotal = 0.0;
+        int habitable = 0, sea = 0, water = 0, blocked = 0;
         for (int index = 0; index < cellKinds.Length; index++)
         {
             byte kind = cellKinds[index];
-            if (kind == WaterCell) water++;
+            if (kind == HabitableCell) habitable++;
+            else if (kind == SeaCell) sea++;
+            else if (kind == WaterCell) water++;
             else if (kind == BlockedCell) blocked++;
-            if (kind != HabitableCell) continue;
-
-            habitable++;
-            scoreTotal += scores[index];
-            bands[Mathf.Min(4, (int)(scores[index] * 5f))]++;
-            if (limitingFactors[index] == NoLimit) unlimited++;
-            else limitedBy[limitingFactors[index]]++;
         }
 
         float cellSize = 2f * mapExtent / mapResolution;
         float cellSquareKilometres = cellSize * cellSize / 1e6f;
         string seed = SeedManager.Instance != null ? SeedManager.Instance.SeedString : "unknown";
         StringBuilder text = new StringBuilder();
-        text.AppendLine($"Survivability map, world seed {seed}, saved {DateTime.Now:yyyy-MM-dd HH:mm}");
+        text.AppendLine($"Survivability map ({mappedCoverage.ToString().ToLowerInvariant()}), world seed {seed}, " +
+                        $"saved {DateTime.Now:yyyy-MM-dd HH:mm}");
         text.AppendLine($"{mapResolution} x {mapResolution} cells of {cellSize:0.#} m over the {2f * mapExtent / 1000f:0.##} km " +
                         "habitable square; north (+Z) is up in the picture");
-        text.AppendLine($"Habitable land: {habitable} cells, {habitable * cellSquareKilometres:0.##} km2. Water: {water} cells. " +
-                        $"Shore and cliffs animals cannot use: {blocked} cells.");
-        if (habitable == 0) return text.ToString();
+        if (mappedCoverage != HeatmapCoverage.Sea)
+        {
+            text.AppendLine($"Habitable land: {habitable} cells, {habitable * cellSquareKilometres:0.##} km2. " +
+                            $"Water: {water + sea} cells. Shore and cliffs animals cannot use: {blocked} cells.");
+            DescribeGroup(text, HabitableCell, 0, habitable, "habitable land");
+        }
+
+        if (mappedCoverage != HeatmapCoverage.Land)
+        {
+            text.AppendLine($"Sea, scored for swimmers: {sea} cells, {sea * cellSquareKilometres:0.##} km2.");
+            DescribeGroup(text, SeaCell, 1, sea, "the sea");
+            DescribeSeaBiomes(text);
+        }
+
+        text.AppendLine(temperature.Describe());
+        text.AppendLine($"Food counts as plentiful at {food.plentifulNutritionPerMinute:0.#} nutrition per minute per plant cell");
+        return text.ToString();
+    }
+
+    // Score bands, average and limiting factors for the land (group 0) or the sea (group 1).
+    void DescribeGroup(StringBuilder text, byte kind, int group, int cells, string area)
+    {
+        if (cells == 0) return;
+
+        int unlimited = 0;
+        int[] bands = new int[5];
+        int[] limitedBy = new int[factors.Length];
+        double scoreTotal = 0.0;
+        for (int index = 0; index < cellKinds.Length; index++)
+        {
+            if (cellKinds[index] != kind) continue;
+
+            scoreTotal += scores[index];
+            bands[Mathf.Min(4, (int)(scores[index] * 5f))]++;
+            if (limitingFactors[index] == NoLimit) unlimited++;
+            else limitedBy[limitingFactors[index]]++;
+        }
 
         string[] bandNames =
         {
             "0.0-0.2 harsh (red)", "0.2-0.4 (orange)", "0.4-0.6 (yellow)", "0.6-0.8 (light green)", "0.8-1.0 lenient (green)"
         };
-        text.AppendLine("Share of habitable land by score:");
+        text.AppendLine($"Share of {area} by score:");
         for (int band = 0; band < bands.Length; band++)
         {
-            text.AppendLine($"  {bandNames[band]}: {100.0 * bands[band] / habitable:0.0}%");
+            text.AppendLine($"  {bandNames[band]}: {100.0 * bands[band] / cells:0.0}%");
         }
 
-        text.AppendLine($"Average score: {scoreTotal / habitable:0.00}");
+        text.AppendLine($"Average score: {scoreTotal / cells:0.00}");
         for (int index = 0; index < factors.Length; index++)
         {
             if (factors[index].Weight <= 0f) continue;
-            text.AppendLine($"{factors[index].Name}: average score {factorScoreTotals[index] / habitable:0.00}, " +
-                            $"the limiting factor on {100.0 * limitedBy[index] / habitable:0.0}% of habitable land");
+            text.AppendLine($"{factors[index].Name}: average score {factorScoreTotals[group, index] / cells:0.00}, " +
+                            $"the limiting factor on {100.0 * limitedBy[index] / cells:0.0}% of {area}");
         }
 
-        text.AppendLine($"No limiting factor (every score full): {100.0 * unlimited / habitable:0.0}% of habitable land");
-        text.AppendLine($"Temperature on habitable land: {coldestHabitable:0.#} to {warmestHabitable:0.#} C");
-        text.AppendLine(temperature.Describe());
-        text.AppendLine($"Food counts as plentiful at {food.plentifulNutritionPerMinute:0.#} nutrition per minute per plant cell");
-        return text.ToString();
+        text.AppendLine($"No limiting factor (every score full): {100.0 * unlimited / cells:0.0}% of {area}");
+        text.AppendLine($"Temperature on {area}: {coldest[group]:0.#} to {warmest[group]:0.#} C");
+    }
+
+    // The sea's average score in each of its biomes.
+    void DescribeSeaBiomes(StringBuilder text)
+    {
+        int[] cells = new int[6];
+        double[] totals = new double[6];
+        for (int index = 0; index < cellKinds.Length; index++)
+        {
+            if (cellKinds[index] != SeaCell) continue;
+
+            int biome = Mathf.Min(seaBiomes[index], 5);
+            cells[biome]++;
+            totals[biome] += scores[index];
+        }
+
+        text.AppendLine("Average score by sea biome:");
+        for (int biome = 1; biome < cells.Length; biome++)
+        {
+            if (cells[biome] == 0) continue;
+            text.AppendLine($"  {SeaBiomeRules.Name((SeaBiome)biome)}: {totals[biome] / cells[biome]:0.00} " +
+                            $"over {cells[biome]} cells");
+        }
     }
 
     // The temperature an animal would feel here. The terrain provider only answers for loaded terrain, so its
@@ -585,6 +724,42 @@ public class SurvivabilityHeatmap : MonoBehaviour
         TextMeshProUGUI lenient = CreateLabel("Lenient", key.rectTransform, 12f, MutedTextColor, false, TextAlignmentOptions.Left);
         WorldSeedPanel.PlaceLeft(lenient.rectTransform, 160f, 48f, 20f);
         legend = key.gameObject;
+
+        // Land, Sea or Both: what the map scores.
+        Image choices = CreateCard("Coverage", root, 20f + 116f + 8f + 214f + 8f, 164f);
+        for (int index = 0; index < CoverageChoices.Length; index++)
+        {
+            HeatmapCoverage choice = CoverageChoices[index];
+            Image button = WorldSeedPanel.CreateImage(choice.ToString(), choices.rectTransform,
+                                                      WorldSeedPanel.RoundedSprite(7f), Color.clear);
+            button.raycastTarget = true;
+            WorldSeedPanel.PlaceLeft(button.rectTransform, 6f + index * 52f, 48f, 26f);
+            Button press = button.gameObject.AddComponent<Button>();
+            press.transition = Selectable.Transition.None;
+            press.navigation = new Navigation { mode = Navigation.Mode.None };
+            press.onClick.AddListener(() => SetCoverage(choice));
+
+            coverageButtons[index] = button;
+            coverageLabels[index] = CreateLabel(choice.ToString(), button.rectTransform, 12f, MutedTextColor, true,
+                                                TextAlignmentOptions.Center);
+            WorldSeedPanel.Stretch(coverageLabels[index].rectTransform, 0f, 0f, 0f, 0f);
+        }
+
+        coverageCard = choices.gameObject;
+        RefreshCoverageButtons();
+    }
+
+    // The chosen coverage is filled with the accent colour.
+    void RefreshCoverageButtons()
+    {
+        for (int index = 0; index < CoverageChoices.Length; index++)
+        {
+            if (coverageButtons[index] == null) continue;
+
+            bool chosen = CoverageChoices[index] == coverage;
+            coverageButtons[index].color = chosen ? AccentColor : Color.clear;
+            coverageLabels[index].color = chosen ? OnAccentColor : MutedTextColor;
+        }
     }
 
     // A dark rounded card with a faint outline, pinned a distance from the bottom-left corner.
