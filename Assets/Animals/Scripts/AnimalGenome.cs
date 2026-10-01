@@ -58,7 +58,7 @@ public struct BodyPlanMutation
     [Tooltip("Percent chance per birth that a part becomes another part allowed at its site, keeping its size " +
              "(as fins became legs in real evolution).")]
     public float repurposeChance;
-    [Tooltip("Fins only help once animals can swim, so they cannot appear until swimming is added.")]
+    [Tooltip("Lets fins sprout. Fins give swimming ability, which opens deep water and speeds the animal up in water.")]
     public bool allowFins;
 
     public static BodyPlanMutation Default => new BodyPlanMutation
@@ -69,7 +69,7 @@ public struct BodyPlanMutation
         growthStep = 0.08f,
         lossSize = 0.02f,
         repurposeChance = 0.2f,
-        allowFins = false
+        allowFins = true
     };
 }
 

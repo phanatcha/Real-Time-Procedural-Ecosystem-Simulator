@@ -177,10 +177,23 @@ public class SeekFood : MonoBehaviour, IEcosystemMaterializationLifecycle
     [SerializeField, Tooltip("This animal's body parts and their sizes (0-1), for reference.")]
     private string bodyPlan;
 
+    [Header("Water")]
+    [Tooltip("How fast the animal moves and how much energy it uses in water. Its swimming ability comes from " +
+             "its body: mostly fins, a little from long legs.")]
+    public WaterMovement waterMovement = WaterMovement.Default;
+    [SerializeField, Tooltip("This animal's swimming ability (0-1), for reference.")]
+    private float swimmingAbility;
+
     public AnimalTemperature ThermalResponse => thermalResponse;
     public AnimalGenome Genome => genome;
     public float CurrentEnergyDrainPerSecond => currentEnergyDrainPerSecond *
-        (thermalResponse != null ? thermalResponse.EnergyDrainMultiplier : 1f);
+        (thermalResponse != null ? thermalResponse.EnergyDrainMultiplier : 1f) *
+        (inWater ? waterMovement.EnergyMultiplier(bodyEffects.swimmingAbility) : 1f) *
+        (inDeadZone ? SeaBiomeMap.CurrentRules.deadZoneEnergyCost : 1f);
+    public float SwimmingAbility => bodyEffects.swimmingAbility;
+    public bool CanSwimDeepWater => waterMovement.CanSwimDeepWater(bodyEffects.swimmingAbility);
+    public bool IsInWater => inWater;
+    public bool IsInDeadZone => inDeadZone;
     public float CurrentAge => currentAge;
     public int Generation => generation;
     public float RemainingLifespan => Mathf.Max(0f, maxLifespan - currentAge);
@@ -224,6 +237,15 @@ public class SeekFood : MonoBehaviour, IEcosystemMaterializationLifecycle
                affinity > 2f / 3f ? "Carnivore" : "Omnivore";
     }
 
+    // Simulated seconds for the body to settle into the water or rise out of it.
+    private const float FloatTransitionSeconds = 0.5f;
+    // How near a dead zone's NavMesh a swimmer must be to count as in it, in world units.
+    private const float DeadZoneProbeRadius = 1f;
+    // A child that can't swim, born to a parent out in deep water, is placed on the nearest ground or shallow
+    // water within this distance. With none that close, the birth waits this many simulated seconds.
+    private const float NonSwimmerBirthSearchRadius = 60f;
+    private const float PostponedBirthDelay = 5f;
+
     private static readonly int BaseColorId = Shader.PropertyToID("_BaseColor");
     private static readonly int ColorId = Shader.PropertyToID("_Color");
 
@@ -244,6 +266,16 @@ public class SeekFood : MonoBehaviour, IEcosystemMaterializationLifecycle
     private float foodChaseTimer;
     private BodyPlanEffects bodyEffects = BodyPlanEffects.None;
     private AnimalBodyView bodyView;
+    // Speed from the genes alone, before body parts adjust it. Speed in water is based on it, since legs and
+    // fins work differently there.
+    private float geneMoveSpeed;
+    private bool inWater;
+    private bool inDeadZone;
+    // The agent's offset standing on land and floating with the body half under water, and how far between
+    // the two the body is (0 = standing, 1 = floating).
+    private float standingBaseOffset;
+    private float floatingBaseOffset;
+    private float floatAmount;
     private bool registeredWithSpeciesManager;
     private bool isDying;
     private AgentDeathCause deathCause = AgentDeathCause.Other;
@@ -286,6 +318,7 @@ public class SeekFood : MonoBehaviour, IEcosystemMaterializationLifecycle
         bodyHeight = Mathf.Clamp(bodyHeight, minimumBodyHeight, maximumBodyHeight);
         InitializeBodyProportionReferences();
         ApplyBodyProportions();
+        ConfigureWaterAccess();
         agent.speed = moveSpeed;
 
         decisionPolicy = GetComponent<AnimalDecisionPolicy>();
@@ -395,6 +428,7 @@ public class SeekFood : MonoBehaviour, IEcosystemMaterializationLifecycle
             }
         }
         UpdateStamina(deltaTime);
+        UpdateWater(deltaTime);
         RefreshMovementSpeed();
 
         if (currentEnergy > 0f)
@@ -908,7 +942,52 @@ public class SeekFood : MonoBehaviour, IEcosystemMaterializationLifecycle
         }
 
         float temperatureMultiplier = thermalResponse != null ? thermalResponse.MovementMultiplier : 1f;
-        agent.speed = Mathf.Max(0.01f, moveSpeed * multiplier * temperatureMultiplier);
+        float baseSpeed = inWater
+            ? (geneMoveSpeed > 0f ? geneMoveSpeed : moveSpeed) * waterMovement.SpeedMultiplier(bodyEffects.swimmingAbility)
+            : moveSpeed;
+        agent.speed = Mathf.Max(0.01f, baseSpeed * multiplier * temperatureMultiplier);
+    }
+
+    // The animal is in water when its NavMesh position is down on the flat water surface. Water changes its
+    // speed (RefreshMovementSpeed) and energy use (CurrentEnergyDrainPerSecond), and the body settles half under.
+    // Only swimmers reach dead zones, which are deep, so only they look for one under them.
+    void UpdateWater(float deltaTime)
+    {
+        inWater = agent != null && agent.isOnNavMesh && WaterAccess.IsInWater(agent.nextPosition.y);
+        inDeadZone = inWater && CanSwimDeepWater &&
+                     NavMesh.SamplePosition(agent.nextPosition, out _, DeadZoneProbeRadius,
+                                            1 << WaterAccess.DeadZoneArea);
+
+        float target = inWater ? 1f : 0f;
+        // The legs measure their height in the first frames, so the body only moves once they have.
+        if (floatAmount == target || agent == null || (bodyView != null && !bodyView.HasMeasuredLift))
+        {
+            return;
+        }
+
+        floatAmount = Mathf.MoveTowards(floatAmount, target, deltaTime / FloatTransitionSeconds);
+        agent.baseOffset = Mathf.Lerp(standingBaseOffset, floatingBaseOffset, floatAmount);
+    }
+
+    // Deep water is closed to animals that can't swim in it, and water costs each animal's route planning what it
+    // really costs that animal in time and energy, so routes only cross water when it is worth it.
+    void ConfigureWaterAccess()
+    {
+        float ability = bodyEffects.swimmingAbility;
+        swimmingAbility = ability;
+        agent.areaMask = WaterAccess.AreaMask(CanSwimDeepWater);
+        float waterCost = waterMovement.PathCost(ability, bodyEffects.speedMultiplier);
+        agent.SetAreaCost(WaterAccess.ShallowWaterArea, waterCost);
+        agent.SetAreaCost(WaterAccess.DeepWaterArea, waterCost);
+        agent.SetAreaCost(WaterAccess.DeadZoneArea, waterCost * SeaBiomeMap.CurrentRules.deadZoneEnergyCost);
+
+        // Floating puts the middle of the body at the waterline; legs and the lower half are under water.
+        standingBaseOffset = agent.baseOffset;
+        MeshFilter bodyFilter = GetComponent<MeshFilter>();
+        floatingBaseOffset = bodyFilter != null && bodyFilter.sharedMesh != null
+            ? -bodyFilter.sharedMesh.bounds.center.y
+            : standingBaseOffset;
+        floatAmount = 0f;
     }
 
     public float GetCurrentMovementSpeed()
@@ -960,9 +1039,9 @@ public class SeekFood : MonoBehaviour, IEcosystemMaterializationLifecycle
         }
 
         Vector3 candidate = transform.position + away.normalized * fleeDistance;
-        ClampCandidateToTerrain(ref candidate);
+        ClampDestinationCandidate(ref candidate);
 
-        if (NavMesh.SamplePosition(candidate, out NavMeshHit hit, 25f, NavMesh.AllAreas))
+        if (NavMesh.SamplePosition(candidate, out NavMeshHit hit, 25f, DestinationAreas))
         {
             TrySetDestination(hit.position);
         }
@@ -1001,7 +1080,9 @@ public class SeekFood : MonoBehaviour, IEcosystemMaterializationLifecycle
 
     void PickNextAction()
     {
-        if (Random.value <= 0.5f)
+        // An animal wading where it can't swim doesn't stop to rest: every moment in the water is costly.
+        bool wading = inWater && !CanSwimDeepWater;
+        if (!wading && Random.value <= 0.5f)
         {
             currentState = State.Idling;
             TryResetPath();
@@ -1011,10 +1092,13 @@ public class SeekFood : MonoBehaviour, IEcosystemMaterializationLifecycle
         currentState = State.Wandering;
         Vector2 offset = Random.insideUnitCircle * wanderRadius;
         Vector3 candidate = transform.position + new Vector3(offset.x, 0f, offset.y);
-        ClampCandidateToTerrain(ref candidate);
+        ClampDestinationCandidate(ref candidate);
 
         float sampleDistance = Mathf.Clamp(wanderRadius, 1f, 25f);
-        if (NavMesh.SamplePosition(candidate, out NavMeshHit hit, sampleDistance, NavMesh.AllAreas))
+        // A wader with no land near its random spot heads for the nearest land instead.
+        if (NavMesh.SamplePosition(candidate, out NavMeshHit hit, sampleDistance, DestinationAreas) ||
+            (wading && NavMesh.SamplePosition(transform.position, out hit, Mathf.Max(wanderRadius, 25f),
+                                              DestinationAreas)))
         {
             TrySetDestination(hit.position);
         }
@@ -1022,6 +1106,30 @@ public class SeekFood : MonoBehaviour, IEcosystemMaterializationLifecycle
         {
             currentState = State.Idling;
             TryResetPath();
+        }
+    }
+
+    // Where the animal may choose to wander or flee to: swimmers anywhere they can swim except dead zones, everyone
+    // else only onto land. Routes there can still cross water when that is worth it.
+    int DestinationAreas => CanSwimDeepWater && agent != null
+        ? agent.areaMask & ~(1 << WaterAccess.DeadZoneArea)
+        : WaterAccess.LandAreas;
+
+    void ClampDestinationCandidate(ref Vector3 candidate)
+    {
+        AnimalTerrainWorld terrainWorld = AnimalTerrainWorld.Active;
+        if (!CanSwimDeepWater || terrainWorld == null || !WaterAccess.HasWater)
+        {
+            ClampCandidateToTerrain(ref candidate);
+            return;
+        }
+
+        // A swimmer may head out over the water, so it only needs to stay in the habitat, at the height of the
+        // ground or the water surface there.
+        candidate = terrainWorld.ClampToHabitableBounds(candidate);
+        if (terrainWorld.TryGetSample(candidate, out EnvironmentSample sample) && sample.isValid)
+        {
+            candidate.y = Mathf.Max(sample.position.y, WaterAccess.SurfaceHeight);
         }
     }
 
@@ -1204,7 +1312,8 @@ public class SeekFood : MonoBehaviour, IEcosystemMaterializationLifecycle
 
     public bool CanReachFood(FoodItem food)
     {
-        if (food == null)
+        // Food out in deep water is only for animals that can swim there.
+        if (food == null || (food.inDeepWater && !CanSwimDeepWater))
         {
             return false;
         }
@@ -1376,26 +1485,20 @@ public class SeekFood : MonoBehaviour, IEcosystemMaterializationLifecycle
 
     void Reproduce()
     {
+        // The child's genome comes first, because whether it can swim decides where it can be born.
+        AnimalGenome childGenome = genome.CreateMutatedCopy(mutationChance, mutationMagnitude, bodyPlanMutation,
+                                                            out bool mutated);
+        bool childSwims = waterMovement.CanSwimDeepWater(AnimalBodyPlan.Evaluate(childGenome).swimmingAbility);
+        if (!TryFindBirthPosition(childSwims, out Vector3 spawnPosition))
+        {
+            // Out in deep water a child that can't swim would have nowhere to be: try again a little later.
+            reproductionCooldownTimer = PostponedBirthDelay;
+            return;
+        }
+
         float childEnergy = currentEnergy * 0.5f;
         currentEnergy -= childEnergy;
         reproductionCooldownTimer = reproductionCooldown;
-
-        Vector2 offset = Random.insideUnitCircle * 3f;
-        Vector3 spawnPosition = transform.position + new Vector3(offset.x, 0f, offset.y);
-        AnimalTerrainWorld terrainWorld = AnimalTerrainWorld.Active;
-        if (terrainWorld != null &&
-            terrainWorld.TryFindWalkableGround(spawnPosition, 12f, out Vector3 groundPosition))
-        {
-            spawnPosition = groundPosition;
-        }
-        if (NavMesh.SamplePosition(spawnPosition, out NavMeshHit hit, 6f, NavMesh.AllAreas))
-        {
-            spawnPosition = hit.position;
-        }
-        else
-        {
-            spawnPosition = transform.position;
-        }
 
         GameObject child = Instantiate(gameObject, spawnPosition, transform.rotation);
         SeekFood childScript = child.GetComponent<SeekFood>();
@@ -1410,8 +1513,7 @@ public class SeekFood : MonoBehaviour, IEcosystemMaterializationLifecycle
         childScript.firstParent = this;
         childScript.secondParent = null;
         // The child copies this genome into its traits when it starts.
-        childScript.genome = genome.CreateMutatedCopy(mutationChance, mutationMagnitude, bodyPlanMutation,
-                                                      out bool mutated);
+        childScript.genome = childGenome;
 
         // Offspring start in their parent's species. SpeciesManager splits species whose members drift
         // genetically apart.
@@ -1423,6 +1525,41 @@ public class SeekFood : MonoBehaviour, IEcosystemMaterializationLifecycle
         {
             SpeciesManager.Instance.RecordReproduction(this, mutated);
         }
+    }
+
+    // Beside the parent, on firm ground nearby if there is any, in a part of the NavMesh the child can use.
+    bool TryFindBirthPosition(bool childSwims, out Vector3 position)
+    {
+        Vector2 offset = Random.insideUnitCircle * 3f;
+        position = transform.position + new Vector3(offset.x, 0f, offset.y);
+        AnimalTerrainWorld terrainWorld = AnimalTerrainWorld.Active;
+        if (terrainWorld != null &&
+            terrainWorld.TryFindWalkableGround(position, 12f, out Vector3 groundPosition))
+        {
+            position = groundPosition;
+        }
+
+        int childAreas = WaterAccess.AreaMask(childSwims);
+        if (NavMesh.SamplePosition(position, out NavMeshHit hit, 6f, childAreas))
+        {
+            position = hit.position;
+            return true;
+        }
+
+        if (childSwims || !inWater)
+        {
+            position = transform.position;
+            return true;
+        }
+
+        // The parent is swimming and the child can't: the nearest ground or shallow water, if it's close enough.
+        if (NavMesh.SamplePosition(transform.position, out hit, NonSwimmerBirthSearchRadius, childAreas))
+        {
+            position = hit.position;
+            return true;
+        }
+
+        return false;
     }
 
     void InitializeGenome()
@@ -1443,6 +1580,7 @@ public class SeekFood : MonoBehaviour, IEcosystemMaterializationLifecycle
     void ApplyBodyPlan()
     {
         bodyEffects = AnimalBodyPlan.Evaluate(genome);
+        geneMoveSpeed = moveSpeed;
         moveSpeed *= bodyEffects.speedMultiplier;
         strength *= bodyEffects.strengthMultiplier;
         visionRadius *= bodyEffects.visionMultiplier;

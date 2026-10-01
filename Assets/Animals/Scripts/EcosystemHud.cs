@@ -37,6 +37,7 @@ public class EcosystemHud : MonoBehaviour
     private readonly int[] animalsWithPart = new int[ShownParts.Length];
     private readonly float[] partSizeTotals = new float[ShownParts.Length];
     private string bodySummary = "";
+    private string swimmingSummary = "";
     private string bodySummarySpecies;
     private float nextBodySummaryTime;
 
@@ -122,10 +123,11 @@ public class EcosystemHud : MonoBehaviour
 
         string ceiling = manager.populationCeiling > 0 ? $" / {manager.populationCeiling} ceiling" : "";
         string atCeiling = manager.IsAtPopulationCeiling ? " <color=#ffd060>(births paused)</color>" : "";
-        string plants = foodSpawner != null ? $"    <b>Plants</b> {foodSpawner.ShownPlantCount} shown" : "";
+        string plants = foodSpawner != null ? $"    <b>Plants</b> {foodSpawner.ShownPlantCount} shown{DescribeSeaPlants()}" : "";
         string tiles = habitatNavigation != null ? $"    <b>Walkable tiles</b> {habitatNavigation.NavigableTileCount}" : "";
         string offscreen = manager.OffscreenPopulation != null ? $"    <b>Off-screen</b> {manager.OffscreenTotal}" : "";
-        text.Append($"<b>Animals</b> {manager.TotalPopulation}{ceiling}{atCeiling}{offscreen}{plants}{tiles}\n");
+        string water = WaterAccess.HasWater ? $"    <b>In water</b> {DescribeAnimalsInWater(manager)}" : "";
+        text.Append($"<b>Animals</b> {manager.TotalPopulation}{ceiling}{atCeiling}{offscreen}{water}{plants}{tiles}\n");
 
         int speciesEver = 0;
         int extinct = 0;
@@ -185,9 +187,34 @@ public class EcosystemHud : MonoBehaviour
                     $"height {Describe(now.height, record.bodyHeightRange, now.height - first.height)}   " +
                     $"lifespan {now.lifespan:0}s {Signed(now.lifespan - first.lifespan, "0")}");
         text.Append($"\n   body parts: {DescribeBodyParts(manager, largest)}");
+        text.Append($"\n   swimming ability: {swimmingSummary}");
     }
 
-    // Share of the species' animals carrying each part, with the average size of those parts (0-1).
+    // How many of the shown plants are in the sea, and how many sea plants have been eaten in this world.
+    string DescribeSeaPlants()
+    {
+        if (!foodSpawner.growSeaFood || !WaterAccess.HasWater) return "";
+
+        return $" ({foodSpawner.ShownSeaPlantCount} in the sea, {foodSpawner.SeaPlantsEaten} sea plants eaten)";
+    }
+
+    static string DescribeAnimalsInWater(SpeciesManager manager)
+    {
+        int inWater = 0;
+        int inDeadZones = 0;
+        foreach (SeekFood animal in manager.ActiveAgents)
+        {
+            if (animal == null || !animal.IsInWater) continue;
+
+            inWater++;
+            if (animal.IsInDeadZone) inDeadZones++;
+        }
+
+        return inDeadZones > 0 ? $"{inWater} ({inDeadZones} in dead zones)" : inWater.ToString();
+    }
+
+    // Share of the species' animals carrying each part, with the average size of those parts (0-1). Also
+    // refreshes the species' swimming summary.
     string DescribeBodyParts(SpeciesManager manager, string species)
     {
         if (species == bodySummarySpecies && Time.unscaledTime < nextBodySummaryTime)
@@ -200,6 +227,8 @@ public class EcosystemHud : MonoBehaviour
         System.Array.Clear(animalsWithPart, 0, animalsWithPart.Length);
         System.Array.Clear(partSizeTotals, 0, partSizeTotals.Length);
         int members = 0;
+        int deepWaterSwimmers = 0;
+        float swimmingAbilityTotal = 0f;
         foreach (SeekFood animal in manager.ActiveAgents)
         {
             AnimalGenome genome = animal != null ? animal.Genome : null;
@@ -209,6 +238,8 @@ public class EcosystemHud : MonoBehaviour
             }
 
             members++;
+            swimmingAbilityTotal += animal.SwimmingAbility;
+            if (animal.CanSwimDeepWater) deepWaterSwimmers++;
             for (int part = 0; part < ShownParts.Length; part++)
             {
                 float largest = 0f;
@@ -238,6 +269,9 @@ public class EcosystemHud : MonoBehaviour
         }
 
         bodySummary = summary.Length > 0 ? summary.ToString() : "none yet, still a plain capsule";
+        swimmingSummary = members > 0
+            ? $"{swimmingAbilityTotal / members:0.00} on average, {100f * deepWaterSwimmers / members:0}% can swim in deep water"
+            : "";
         return bodySummary;
     }
 

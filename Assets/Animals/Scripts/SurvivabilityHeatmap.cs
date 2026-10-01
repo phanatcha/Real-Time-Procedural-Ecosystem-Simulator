@@ -162,14 +162,15 @@ public class SurvivabilityHeatmap : MonoBehaviour
     static readonly Color32 SavedBlockedColour = new Color32(190, 192, 184, 255);
     static readonly Color32 SavedOutsideColour = new Color32(255, 255, 255, 255);
 
-    static readonly Color PillColor = new Color32(14, 22, 24, 235);
-    static readonly Color PillHoverColor = new Color32(28, 39, 42, 240);
-    static readonly Color OutlineColor = new Color(1f, 1f, 1f, 0.09f);
-    static readonly Color BoxColor = new Color(1f, 1f, 1f, 0.4f);
-    static readonly Color AccentColor = new Color32(94, 214, 168, 255);
-    static readonly Color OnAccentColor = new Color32(9, 32, 25, 255);
-    static readonly Color TextColor = new Color32(236, 243, 240, 255);
-    static readonly Color MutedTextColor = new Color32(140, 160, 154, 255);
+    // Shared with the other small panels in the bottom-left corner (SeaBiomeMap).
+    internal static readonly Color PillColor = new Color32(14, 22, 24, 235);
+    internal static readonly Color PillHoverColor = new Color32(28, 39, 42, 240);
+    internal static readonly Color OutlineColor = new Color(1f, 1f, 1f, 0.09f);
+    internal static readonly Color BoxColor = new Color(1f, 1f, 1f, 0.4f);
+    internal static readonly Color AccentColor = new Color32(94, 214, 168, 255);
+    internal static readonly Color OnAccentColor = new Color32(9, 32, 25, 255);
+    internal static readonly Color TextColor = new Color32(236, 243, 240, 255);
+    internal static readonly Color MutedTextColor = new Color32(140, 160, 154, 255);
 
     static Sprite tickSprite;
 
@@ -587,21 +588,22 @@ public class SurvivabilityHeatmap : MonoBehaviour
     }
 
     // A dark rounded card with a faint outline, pinned a distance from the bottom-left corner.
-    static Image CreateCard(string objectName, RectTransform parent, float left, float width)
+    internal static Image CreateCard(string objectName, RectTransform parent, float left, float width,
+                                     float bottom = 20f, float height = 36f)
     {
         Image card = WorldSeedPanel.CreateImage(objectName, parent, WorldSeedPanel.RoundedSprite(10f), PillColor);
         RectTransform rect = card.rectTransform;
         rect.anchorMin = rect.anchorMax = rect.pivot = Vector2.zero;
-        rect.anchoredPosition = new Vector2(left, 20f);
-        rect.sizeDelta = new Vector2(width, 36f);
+        rect.anchoredPosition = new Vector2(left, bottom);
+        rect.sizeDelta = new Vector2(width, height);
 
         Image outline = WorldSeedPanel.CreateImage("Outline", rect, WorldSeedPanel.RoundedSprite(10f, 1f), OutlineColor);
         WorldSeedPanel.Stretch(outline.rectTransform, 0f, 0f, 0f, 0f);
         return card;
     }
 
-    static TextMeshProUGUI CreateLabel(string content, Transform parent, float size, Color color, bool strong,
-                                       TextAlignmentOptions alignment)
+    internal static TextMeshProUGUI CreateLabel(string content, Transform parent, float size, Color color, bool strong,
+                                                TextAlignmentOptions alignment)
     {
         TextMeshProUGUI label = WorldSeedPanel.CreateRect(content, parent).gameObject.AddComponent<TextMeshProUGUI>();
         label.font = WorldSeedPanel.UiFont(strong);
@@ -632,7 +634,7 @@ public class SurvivabilityHeatmap : MonoBehaviour
         return ramp;
     }
 
-    static Sprite TickSprite()
+    internal static Sprite TickSprite()
     {
         if (tickSprite != null) return tickSprite;
 

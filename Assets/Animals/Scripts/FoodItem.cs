@@ -32,6 +32,13 @@ public class FoodItem : MonoBehaviour
 
     public Vector3 GroundPosition => transform.position - Vector3.up * heightAboveGround;
 
+    [Header("Water")]
+    [Tooltip("The sea biome a sea plant grows in; None on land. Sea plants float at the water surface, so their " +
+             "ground position is on the water.")]
+    public SeaBiome seaBiome;
+    [Tooltip("Grows in water too deep to wade, so only animals that can swim in deep water can reach it.")]
+    public bool inDeepWater;
+
     [Header("Plant Growth Temperature")]
     public bool temperatureAffectsGrowth = true;
     [Tooltip("Test tuning in Celsius, not a biological profile. Growth rises from zero to the optimal range and falls to zero above it.")]

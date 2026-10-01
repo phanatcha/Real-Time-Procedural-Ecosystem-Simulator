@@ -231,7 +231,7 @@ public class AnimalGenomeTests
                 BodySite site = (BodySite)index;
                 BodyPartType type = child.GetPartType(site);
                 Assert.IsTrue(AnimalGenome.IsAllowed(site, type), $"{type} at {site}");
-                Assert.AreNotEqual(BodyPartType.Fins, type, "fins are not allowed yet");
+                Assert.AreNotEqual(BodyPartType.Fins, type, "these rules don't allow fins");
                 Assert.AreEqual(0.05f, child.GetPartSize(site), Tolerance);
             }
         }
