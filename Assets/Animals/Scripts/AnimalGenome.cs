@@ -16,7 +16,9 @@ public enum AnimalGene
     DietAffinity,
     PreferredTemperature,
     ColdTolerance,
-    HeatTolerance
+    HeatTolerance,
+    // 0 to 1: how much the animal looks for a mate instead of cloning itself (see MatingRules).
+    SexualDrive
 }
 
 // Where a body part can grow on the capsule body. Paired sites grow the same part mirrored left and right.
@@ -118,10 +120,11 @@ public sealed class AnimalGenome
     public static readonly int GeneCount = System.Enum.GetValues(typeof(AnimalGene)).Length;
     public static readonly int SiteCount = System.Enum.GetValues(typeof(BodySite)).Length;
 
-    // How much one body site counts towards genetic distance, next to the numeric genes' weights (16 in
+    // How much one body site counts towards genetic distance, next to the numeric genes' weights (17 in
     // total). At 0.5 a whole full-size part of difference is about one species threshold (0.03). In a
-    // neutral-drift simulation (250 animals, default mutation rates) the first split still came after
-    // about 45 generations, with about 10 species alive instead of 6 without body parts.
+    // neutral-drift simulation (250 animals, default mutation rates, cloning only and before the sexual drive
+    // gene) the first split still came after about 45 generations, with about 10 species alive instead of 6
+    // without body parts.
     public const float BodySiteDistanceWeight = 0.5f;
 
     // Per gene: distance weight divided by the gene's range, so Distance is one multiply per gene.
@@ -203,6 +206,7 @@ public sealed class AnimalGenome
         AnimalGene.PreferredTemperature => new AnimalGeneDefinition(-40f, 60f, GeneMutationStyle.Additive, 10f),
         AnimalGene.ColdTolerance => new AnimalGeneDefinition(0f, 40f, GeneMutationStyle.Proportional, 1f),
         AnimalGene.HeatTolerance => new AnimalGeneDefinition(0f, 40f, GeneMutationStyle.Proportional, 1f),
+        AnimalGene.SexualDrive => new AnimalGeneDefinition(0f, 1f, GeneMutationStyle.Additive, 1f),
         _ => throw new System.ArgumentOutOfRangeException(nameof(gene), gene, null)
     };
 
@@ -232,6 +236,28 @@ public sealed class AnimalGenome
             partTypes = (BodyPartType[])partTypes.Clone(),
             partSizes = (float[])partSizes.Clone()
         };
+    }
+
+    // A child of two parents, before mutation: each gene and each body site (its part and size together) comes
+    // from one parent or the other at random.
+    public static AnimalGenome Recombine(AnimalGenome first, AnimalGenome second)
+    {
+        AnimalGenome child = first.Clone();
+        for (int index = 0; index < GeneCount; index++)
+        {
+            if (Random.value < 0.5f) child.genes[index] = second.genes[index];
+        }
+
+        for (int site = 0; site < SiteCount; site++)
+        {
+            if (Random.value < 0.5f)
+            {
+                child.partTypes[site] = second.partTypes[site];
+                child.partSizes[site] = second.partSizes[site];
+            }
+        }
+
+        return child;
     }
 
     // Mutates the numeric genes only; the body plan is copied unchanged.

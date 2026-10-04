@@ -18,6 +18,7 @@ public class EcosystemHud : MonoBehaviour
         public float bulk;
         public float height;
         public float lifespan;
+        public float sexualDrive;
     }
 
     // Each species' average traits when it was first seen, to show how far it has drifted since.
@@ -141,16 +142,20 @@ public class EcosystemHud : MonoBehaviour
         int extinct = 0;
         int births = 0;
         int mutatedBirths = 0;
+        int sexualBirths = 0;
         foreach (SpeciesTelemetryRecord record in manager.Telemetry.Values)
         {
             speciesEver++;
             if (record.extinctionTime >= 0f) extinct++;
             births += record.reproductionEvents;
             mutatedBirths += record.mutatedOffspring;
+            sexualBirths += record.sexualOffspring;
         }
 
-        string mutationShare = births > 0 ? $" ({100f * mutatedBirths / births:0}% carried mutations)" : "";
-        text.Append($"<b>Births</b> {births}{mutationShare}    <b>Generation</b> " +
+        string birthShares = births > 0
+            ? $" ({100f * sexualBirths / births:0}% from two parents, {100f * mutatedBirths / births:0}% carried mutations)"
+            : "";
+        text.Append($"<b>Births</b> {births}{birthShares}    <b>Generation</b> " +
                     $"{manager.AverageGeneration:0.0} on average, newest {manager.HighestGeneration}\n");
         text.Append($"<b>Species</b> {manager.SpeciesAliveCount} alive, {speciesEver} ever, {extinct} extinct    " +
                     $"(a group splits off once it is {manager.speciationThreshold:0.###} apart genetically, " +
@@ -180,7 +185,8 @@ public class EcosystemHud : MonoBehaviour
             diet = record.dietAffinity,
             bulk = record.bodyBulk,
             height = record.bodyHeight,
-            lifespan = record.maxLifespan
+            lifespan = record.maxLifespan,
+            sexualDrive = record.sexualDrive
         };
         if (!traitsWhenFirstSeen.TryGetValue(largest, out Traits first))
         {
@@ -193,7 +199,8 @@ public class EcosystemHud : MonoBehaviour
         text.Append($"   diet {Describe(now.diet, record.dietRange, now.diet - first.diet)}   " +
                     $"bulk {Describe(now.bulk, record.bodyBulkRange, now.bulk - first.bulk)}   " +
                     $"height {Describe(now.height, record.bodyHeightRange, now.height - first.height)}   " +
-                    $"lifespan {now.lifespan:0}s {Signed(now.lifespan - first.lifespan, "0")}");
+                    $"lifespan {now.lifespan:0}s {Signed(now.lifespan - first.lifespan, "0")}   " +
+                    $"sexual drive {now.sexualDrive:0.00} {Signed(now.sexualDrive - first.sexualDrive, "0.00")}");
         text.Append($"\n   body parts: {DescribeBodyParts(manager, largest)}");
         text.Append($"\n   swimming ability: {swimmingSummary}");
     }

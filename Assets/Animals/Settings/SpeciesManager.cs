@@ -50,6 +50,7 @@ public sealed class SpeciesTelemetryRecord
     public float preferredTemperature;
     public float coldTolerance;
     public float heatTolerance;
+    public float sexualDrive;
     public int births;
     public int deaths;
     public int starvationDeaths;
@@ -61,6 +62,8 @@ public sealed class SpeciesTelemetryRecord
     public int fleeResponses;
     public int reproductionEvents;
     public int mutatedOffspring;
+    [Tooltip("Births with two parents. The rest are clones.")]
+    public int sexualOffspring;
     public int plantMeals;
     public int meatMeals;
     public float rawPlantEnergyConsumed;
@@ -592,7 +595,8 @@ public class SpeciesManager : MonoBehaviour
         }
     }
 
-    public void RecordReproduction(SeekFood parent, bool offspringMutated)
+    // sexual is true for a child of two parents, counted once, for the parent it was born beside.
+    public void RecordReproduction(SeekFood parent, bool offspringMutated, bool sexual = false)
     {
         if (parent == null)
         {
@@ -605,6 +609,11 @@ public class SpeciesManager : MonoBehaviour
         if (offspringMutated)
         {
             record.mutatedOffspring++;
+        }
+
+        if (sexual)
+        {
+            record.sexualOffspring++;
         }
     }
 
@@ -783,6 +792,7 @@ public class SpeciesManager : MonoBehaviour
         record.maxStamina = Mathf.Lerp(record.maxStamina, agent.maxStamina, weight);
         record.maturityTime = Mathf.Lerp(record.maturityTime, agent.maturityTime, weight);
         record.maxLifespan = Mathf.Lerp(record.maxLifespan, agent.maxLifespan, weight);
+        record.sexualDrive = Mathf.Lerp(record.sexualDrive, agent.sexualDrive, weight);
         if (agent.ThermalResponse != null)
         {
             record.preferredTemperature = Mathf.Lerp(record.preferredTemperature,
@@ -812,12 +822,13 @@ public class SpeciesManager : MonoBehaviour
             builder.Append($"reach={record.feedingReach:F1}, stamina={record.maxStamina:F1}, ");
             builder.Append($"maturity={record.maturityTime:F1}s, lifespan={record.maxLifespan:F1}s): ");
             builder.Append($"preferredC={record.preferredTemperature:F1}, coldTolerance={record.coldTolerance:F1}, ");
-            builder.Append($"heatTolerance={record.heatTolerance:F1}, ");
+            builder.Append($"heatTolerance={record.heatTolerance:F1}, sexualDrive={record.sexualDrive:F2}, ");
             builder.Append($"living={living}, births={record.births}, deaths={record.deaths}, ");
             builder.Append($"oldAge={record.oldAgeDeaths}, ");
             builder.Append($"coldExposure={record.coldExposureDeaths}, heatExposure={record.heatExposureDeaths}, ");
             builder.Append($"fight={record.fightResponses}, flee={record.fleeResponses}, ");
-            builder.Append($"offspring={record.reproductionEvents}, plants={record.plantMeals} ");
+            builder.Append($"offspring={record.reproductionEvents} ({record.sexualOffspring} with two parents), ");
+            builder.Append($"plants={record.plantMeals} ");
             builder.Append($"({record.digestiblePlantEnergyGained:F1} energy), meat={record.meatMeals} ");
             builder.Append($"({record.digestibleMeatEnergyGained:F1} energy), kills={record.successfulKills}");
         }

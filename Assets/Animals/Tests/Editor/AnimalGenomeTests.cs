@@ -325,6 +325,78 @@ public class AnimalGenomeTests
     }
 
     [Test]
+    public void RecombiningIdenticalParentsCopiesThem()
+    {
+        AnimalGenome parent = CreateMidpointGenome();
+        parent.SetPart(BodySite.Head, BodyPartType.Neck, 0.4f);
+
+        AnimalGenome child = AnimalGenome.Recombine(parent, parent.Clone());
+
+        Assert.AreEqual(0f, AnimalGenome.Distance(parent, child));
+    }
+
+    [Test]
+    public void RecombinationTakesEveryGeneAndSiteWholeFromOneParent()
+    {
+        AnimalGenome first = AnimalGenome.Create();
+        AnimalGenome second = AnimalGenome.Create();
+        for (int index = 0; index < AnimalGenome.GeneCount; index++)
+        {
+            AnimalGene gene = (AnimalGene)index;
+            second[gene] = AnimalGenome.GetDefinition(gene).maximum;
+        }
+
+        first.SetPart(BodySite.Head, BodyPartType.Neck, 0.3f);
+        second.SetPart(BodySite.Head, BodyPartType.Horn, 0.9f);
+        second.SetPart(BodySite.Tail, BodyPartType.Fins, 0.6f);
+
+        int[] genesFromSecond = new int[AnimalGenome.GeneCount];
+        int headsFromSecond = 0;
+        const int Samples = 400;
+        for (int sample = 0; sample < Samples; sample++)
+        {
+            AnimalGenome child = AnimalGenome.Recombine(first, second);
+            for (int index = 0; index < AnimalGenome.GeneCount; index++)
+            {
+                AnimalGene gene = (AnimalGene)index;
+                Assert.That(child[gene], Is.EqualTo(first[gene]).Or.EqualTo(second[gene]), gene.ToString());
+                if (child[gene] == second[gene]) genesFromSecond[index]++;
+            }
+
+            // A part never comes with the other parent's size.
+            BodyPartType head = child.GetPartType(BodySite.Head);
+            Assert.AreEqual(head == BodyPartType.Neck ? 0.3f : 0.9f, child.GetPartSize(BodySite.Head));
+            if (head == BodyPartType.Horn) headsFromSecond++;
+
+            BodyPartType tail = child.GetPartType(BodySite.Tail);
+            Assert.AreEqual(tail == BodyPartType.Fins ? 0.6f : 0f, child.GetPartSize(BodySite.Tail));
+        }
+
+        // Each parent gives about half of everything (400 samples: 200 expected, 6 standard deviations either way).
+        for (int index = 0; index < AnimalGenome.GeneCount; index++)
+        {
+            Assert.That(genesFromSecond[index], Is.InRange(140, 260), ((AnimalGene)index).ToString());
+        }
+
+        Assert.That(headsFromSecond, Is.InRange(140, 260));
+    }
+
+    [Test]
+    public void RecombiningLeavesTheParentsUnchanged()
+    {
+        AnimalGenome first = CreateMidpointGenome();
+        AnimalGenome second = first.CreateMutatedCopy(100f, 0.5f, BodyPlanMutation.Default, out _);
+        second.SetPart(BodySite.FrontPair, BodyPartType.Legs, 0.7f);
+        AnimalGenome firstSnapshot = first.Clone();
+        AnimalGenome secondSnapshot = second.Clone();
+
+        AnimalGenome.Recombine(first, second);
+
+        Assert.AreEqual(0f, AnimalGenome.Distance(first, firstSnapshot));
+        Assert.AreEqual(0f, AnimalGenome.Distance(second, secondSnapshot));
+    }
+
+    [Test]
     public void GroupingSeparatesGenomesFurtherApartThanTheThreshold()
     {
         AnimalGenome[] genomes =

@@ -45,6 +45,7 @@ N(t) = room / (1 + (room − N) / N · e^(−r·t))
 - **Off-screen evolution (step 3b):** off-screen genomes are copied, not mutated or selected. Evolution still happens only among live animals.
 - **Off-screen speciation (step 3c):** only live animals are checked for species splits.
 - **Hunting and tall forest food** are not modelled off-screen.
+- **Mating** is not modelled off-screen: populations grow at the same rate whatever their sexual drive, and genomes are not recombined.
 - **Harvest efficiency (0.5)** is an estimate. Compare the live density near the camera with the off-screen density to tune it.
 
 ## Tests

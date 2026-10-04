@@ -15,6 +15,8 @@ public class SeekFood : MonoBehaviour, IEcosystemMaterializationLifecycle
     private SeekFood currentPreyTarget;
     private SeekFood currentFleeThreat;
     private Vector3 currentFleeDirection;
+    // The partner this animal is heading for or courting.
+    private SeekFood currentMate;
 
     [Header("Species Identity")]
     public string speciesName = "A";
@@ -164,13 +166,32 @@ public class SeekFood : MonoBehaviour, IEcosystemMaterializationLifecycle
     [Min(1f)] public float carcassLifetime = 120f;
     [Min(0.1f)] public float carcassScale = 6f;
 
-    [Header("Reproduction (Mitosis)")]
+    [Header("Reproduction")]
     [Range(0f, 1f)] public float reproductionThreshold = 0.95f;
     [Tooltip("Simulated seconds after giving birth before this animal can reproduce again. Without it, " +
              "every meal can become a birth and populations explode.")]
     [Min(0f)] public float reproductionCooldown = 60f;
     [Range(0f, 100f)] public float mutationChance = 5f;
     [Min(0f)] public float mutationMagnitude = 0.1f;
+
+    [Header("Mating")]
+    [Tooltip("Inherited. Below 0.15 the animal only clones itself; above 0.85 it only mates; in between it looks " +
+             "for a mate for up to this many times Mate Search Seconds Per Drive, then clones if it finds nobody.")]
+    [Range(0f, 1f)] public float sexualDrive = 0.5f;
+    [Tooltip("Simulated seconds of looking for a mate per unit of sexual drive, before cloning instead.")]
+    [Min(0f)] public float mateSearchSecondsPerDrive = 20f;
+    [Tooltip("A partner must have at least this fraction of its maximum energy, and an animal looking for a mate " +
+             "gives up once it falls below it.")]
+    [Range(0f, 1f)] public float minimumMateEnergyFraction = 0.6f;
+    [Tooltip("Simulated seconds two animals court before a child can be born. Neither moves or reacts to " +
+             "threats meanwhile; an attack on either ends the courtship.")]
+    [Min(0f)] public float courtshipDuration = 2f;
+    [Tooltip("Fraction of its energy each parent gives a child of two parents. A clone gets half its one " +
+             "parent's energy.")]
+    [Range(0f, 1f)] public float matingEnergyShare = 0.25f;
+    [Tooltip("Fertility fades from this fraction of the species threshold (in genetic distance) to none at the " +
+             "threshold, so animals about to split into separate species rarely interbreed.")]
+    [Range(0f, 1f)] public float fertilityFadeStart = 0.5f;
 
     [Header("Body Plan")]
     [Tooltip("How body parts sprout, grow, shrink and turn into other parts at birth.")]
@@ -236,6 +257,13 @@ public class SeekFood : MonoBehaviour, IEcosystemMaterializationLifecycle
         ? 1f
         : Mathf.Clamp01(currentAge / maturityTime);
     public string DietClassification => ClassifyDiet(dietAffinity);
+    // Whether this animal would court a partner now: mature, fed enough, able to mate, rested since its last
+    // birth, and not fleeing, fighting or already courting.
+    public bool IsAvailableAsMate => IsAlive && IsMature && MatingRules.CanMate(sexualDrive) &&
+                                     reproductionCooldownTimer <= 0f &&
+                                     currentEnergy >= maxEnergy * minimumMateEnergyFraction &&
+                                     currentState != State.Fleeing && currentState != State.Fighting &&
+                                     currentState != State.Escaping && currentState != State.Courting;
 
     public static string ClassifyDiet(float affinity)
     {
@@ -251,6 +279,10 @@ public class SeekFood : MonoBehaviour, IEcosystemMaterializationLifecycle
     // water within this distance. With none that close, the birth waits this many simulated seconds.
     private const float NonSwimmerBirthSearchRadius = 60f;
     private const float PostponedBirthDelay = 5f;
+    // Simulated seconds a partner the animal couldn't reach, or courted without a child, is passed over.
+    private const float AvoidedMateMemory = 30f;
+    // SpeciesManager's default, for fertility when there is no SpeciesManager.
+    private const float DefaultSpeciationThreshold = 0.03f;
 
     private static readonly int BaseColorId = Shader.PropertyToID("_BaseColor");
     private static readonly int ColorId = Shader.PropertyToID("_Color");
@@ -289,9 +321,18 @@ public class SeekFood : MonoBehaviour, IEcosystemMaterializationLifecycle
     private SeekFood secondParent;
     // Set when this animal comes from an off-screen population instead of being born.
     private bool fromOffscreenPopulation;
+    // Ready to breed, the animal looks for a mate until it finds one, gives up or clones itself instead. The
+    // animal that reaches its partner leads the courtship and decides whether a child is born.
+    private bool seekingMate;
+    private float mateSearchTimer;
+    private float mateChaseTimer;
+    private float courtshipTimer;
+    private bool leadsCourtship;
     private readonly List<ThreatMemory> rememberedThreats = new List<ThreatMemory>();
     // Food this animal recently failed to get to, ignored until the simulated time stored with it.
     private readonly List<UnreachableFood> unreachableFood = new List<UnreachableFood>();
+    // Partners passed over until the simulated time stored with them.
+    private readonly List<AvoidedMate> avoidedMates = new List<AvoidedMate>();
     // Shared scratch list for perception; animals only update on the main thread.
     private static readonly List<FoodItem> nearbyFood = new List<FoodItem>();
 
@@ -307,7 +348,13 @@ public class SeekFood : MonoBehaviour, IEcosystemMaterializationLifecycle
         public float retryTime;
     }
 
-    private enum State { Idling, Wandering, Chasing, Hunting, Fighting, Fleeing, Escaping }
+    private struct AvoidedMate
+    {
+        public SeekFood mate;
+        public float retryTime;
+    }
+
+    private enum State { Idling, Wandering, Chasing, Hunting, Fighting, Fleeing, Escaping, SeekingMate, Courting }
     private State currentState = State.Wandering;
 
     void Start()
@@ -450,17 +497,14 @@ public class SeekFood : MonoBehaviour, IEcosystemMaterializationLifecycle
             }
         }
 
-        bool atPopulationCeiling = SpeciesManager.Instance != null &&
-                                   SpeciesManager.Instance.IsAtPopulationCeilingFor(inWater);
-        if (IsMature && maxEnergy > 0f && currentEnergy >= maxEnergy * reproductionThreshold &&
-            reproductionCooldownTimer <= 0f && !atPopulationCeiling)
+        // Courting animals stand still and don't react to threats until the courtship ends or one is attacked.
+        if (currentState == State.Courting)
         {
-            ClearTargets();
-            currentState = State.Idling;
-            timer = actionTimer;
-            Reproduce();
-            decisionTimer = 0f;
+            UpdateCourtship(deltaTime);
+            return;
         }
+
+        UpdateBreeding(deltaTime);
 
         if (currentState != State.Escaping && IsOutsideTerrainBounds())
         {
@@ -489,12 +533,85 @@ public class SeekFood : MonoBehaviour, IEcosystemMaterializationLifecycle
         ExecuteCurrentIntent(deltaTime);
 
         if (currentState == State.Chasing || currentState == State.Hunting ||
-            currentState == State.Fighting)
+            currentState == State.Fighting || currentState == State.SeekingMate)
         {
             return;
         }
 
         UpdateIdleAndWander(deltaTime);
+    }
+
+    // Ready to breed (mature, fed up to the reproduction threshold, rested since its last birth and below the
+    // population ceiling), the animal clones itself or starts looking for a mate, as its sexual drive decides.
+    void UpdateBreeding(float deltaTime)
+    {
+        bool atPopulationCeiling = SpeciesManager.Instance != null &&
+                                   SpeciesManager.Instance.IsAtPopulationCeilingFor(inWater);
+        if (seekingMate)
+        {
+            UpdateMateSearch(deltaTime, atPopulationCeiling);
+            return;
+        }
+
+        if (!IsMature || maxEnergy <= 0f || currentEnergy < maxEnergy * reproductionThreshold ||
+            reproductionCooldownTimer > 0f || atPopulationCeiling)
+        {
+            return;
+        }
+
+        if (MatingRules.CanMate(sexualDrive))
+        {
+            seekingMate = true;
+            mateSearchTimer = 0f;
+            decisionTimer = 0f;
+        }
+        else
+        {
+            ReproduceAlone();
+        }
+    }
+
+    // The search ends when the animal can no longer breed or falls below the energy a partner needs. Out of
+    // time, it clones itself instead; animals that only mate keep looking.
+    void UpdateMateSearch(float deltaTime, bool atPopulationCeiling)
+    {
+        mateSearchTimer += deltaTime;
+        if (atPopulationCeiling || reproductionCooldownTimer > 0f ||
+            currentEnergy < maxEnergy * minimumMateEnergyFraction)
+        {
+            StopMateSearch();
+            return;
+        }
+
+        if (mateSearchTimer >= MatingRules.MateSearchTime(sexualDrive, mateSearchSecondsPerDrive))
+        {
+            StopMateSearch();
+            ReproduceAlone();
+        }
+    }
+
+    void StopMateSearch()
+    {
+        seekingMate = false;
+        mateSearchTimer = 0f;
+        if (currentState == State.SeekingMate)
+        {
+            ClearTargets();
+            currentState = State.Idling;
+            timer = actionTimer;
+            decisionTimer = 0f;
+            TryResetPath();
+        }
+    }
+
+    // Clones itself, dropping whatever it was doing.
+    void ReproduceAlone()
+    {
+        ClearTargets();
+        currentState = State.Idling;
+        timer = actionTimer;
+        Reproduce();
+        decisionTimer = 0f;
     }
 
     void UpdateDecision(float deltaTime)
@@ -503,7 +620,8 @@ public class SeekFood : MonoBehaviour, IEcosystemMaterializationLifecycle
         bool hasPreyTarget = IsViablePrey(currentPreyTarget);
         bool targetBecameInvalid = (currentState == State.Chasing && !hasFoodTarget) ||
                                    ((currentState == State.Hunting || currentState == State.Fighting) &&
-                                    !hasPreyTarget);
+                                    !hasPreyTarget) ||
+                                   (currentState == State.SeekingMate && MateFertility(currentMate) <= 0f);
         if (targetBecameInvalid)
         {
             ClearTargets();
@@ -534,6 +652,7 @@ public class SeekFood : MonoBehaviour, IEcosystemMaterializationLifecycle
             nearestPlantDistance = Mathf.Infinity,
             nearestMeatDistance = Mathf.Infinity,
             nearestPreyDistance = Mathf.Infinity,
+            mateDistance = Mathf.Infinity,
             threats = new List<AnimalThreat>()
         };
 
@@ -572,29 +691,35 @@ public class SeekFood : MonoBehaviour, IEcosystemMaterializationLifecycle
 
         if (SpeciesManager.Instance != null)
         {
-            foreach (SeekFood possiblePrey in SpeciesManager.Instance.ActiveAgents)
+            float bestMateScore = 0f;
+            foreach (SeekFood other in SpeciesManager.Instance.ActiveAgents)
             {
-                if (!IsViablePrey(possiblePrey))
+                if (seekingMate)
+                {
+                    ConsiderMate(other, visionRadiusSquared, ref perception, ref bestMateScore);
+                }
+
+                if (!IsViablePrey(other))
                 {
                     continue;
                 }
 
-                float distanceSquared = (transform.position - possiblePrey.transform.position).sqrMagnitude;
+                float distanceSquared = (transform.position - other.transform.position).sqrMagnitude;
                 float distance = Mathf.Sqrt(distanceSquared);
-                if (!IsTemporarilyAvoidedPrey(possiblePrey) &&
+                if (!IsTemporarilyAvoidedPrey(other) &&
                     distanceSquared <= visionRadiusSquared &&
                     distanceSquared < perception.nearestPreyDistance * perception.nearestPreyDistance)
                 {
-                    perception.nearestPrey = possiblePrey;
+                    perception.nearestPrey = other;
                     perception.nearestPreyDistance = distance;
                 }
 
-                bool recentlyAttacked = IsRememberedThreat(possiblePrey);
+                bool recentlyAttacked = IsRememberedThreat(other);
                 bool isActivelyHunting = distanceSquared <= visionRadiusSquared &&
-                                         possiblePrey.IsTargetingAsPrey(this);
+                                         other.IsTargetingAsPrey(this);
                 if (recentlyAttacked || isActivelyHunting)
                 {
-                    perception.threats.Add(new AnimalThreat(possiblePrey, distance,
+                    perception.threats.Add(new AnimalThreat(other, distance,
                                                             isActivelyHunting, recentlyAttacked));
                 }
             }
@@ -603,11 +728,59 @@ public class SeekFood : MonoBehaviour, IEcosystemMaterializationLifecycle
         return perception;
     }
 
+    // Keeps the most promising partner in view, weighing fertility against distance.
+    void ConsiderMate(SeekFood other, float visionRadiusSquared, ref AnimalPerception perception, ref float bestScore)
+    {
+        if (other == null || other == this)
+        {
+            return;
+        }
+
+        float distanceSquared = (transform.position - other.transform.position).sqrMagnitude;
+        if (distanceSquared > visionRadiusSquared || IsAvoidedMate(other))
+        {
+            return;
+        }
+
+        float fertility = MateFertility(other);
+        float distance = Mathf.Sqrt(distanceSquared);
+        float score = fertility / (1f + distance / Mathf.Max(1f, visionRadius));
+        if (score > bestScore)
+        {
+            bestScore = score;
+            perception.mate = other;
+            perception.mateDistance = distance;
+            perception.mateFertility = fertility;
+        }
+    }
+
+    // The chance a courtship with this animal would end in a child, or 0 when it isn't available as a partner.
+    float MateFertility(SeekFood other)
+    {
+        return other == null || other == this || !other.IsAvailableAsMate ? 0f : GeneticFertility(other);
+    }
+
+    // Fertility from how far apart the two genomes are: full for close relatives, fading to none at the
+    // species threshold.
+    float GeneticFertility(SeekFood other)
+    {
+        if (genome == null || !genome.IsValid || other.genome == null || !other.genome.IsValid)
+        {
+            return 0f;
+        }
+
+        float threshold = SpeciesManager.Instance != null
+            ? SpeciesManager.Instance.speciationThreshold
+            : DefaultSpeciationThreshold;
+        return MatingRules.Fertility(AnimalGenome.Distance(genome, other.genome), threshold, fertilityFadeStart);
+    }
+
     void ApplyDecision(AnimalDecision decision)
     {
         State previousState = currentState;
         FoodItem previousFoodTarget = currentFoodTarget;
         SeekFood previousPreyTarget = currentPreyTarget;
+        SeekFood previousMate = currentMate;
         ClearTargets();
 
         switch (decision.intent)
@@ -676,6 +849,19 @@ public class SeekFood : MonoBehaviour, IEcosystemMaterializationLifecycle
                 }
                 break;
 
+            case AgentIntent.SeekMate:
+                if (seekingMate && MateFertility(decision.mateTarget) > 0f)
+                {
+                    currentMate = decision.mateTarget;
+                    currentState = State.SeekingMate;
+                    if (previousMate != currentMate)
+                    {
+                        ResetPreyPathTracking();
+                        mateChaseTimer = 0f;
+                    }
+                }
+                break;
+
             default:
                 if (currentState != State.Idling && currentState != State.Wandering)
                 {
@@ -728,25 +914,7 @@ public class SeekFood : MonoBehaviour, IEcosystemMaterializationLifecycle
                 return;
             }
 
-            Vector3 preyPosition = currentPreyTarget.transform.position;
-            float movementThreshold = Mathf.Max(0f, preyPathTargetMovementThreshold);
-            bool targetChanged = lastPreyPathTarget != currentPreyTarget;
-            bool targetMoved = !hasPreyPathDestination ||
-                               (preyPosition - lastPreyPathDestination).sqrMagnitude >=
-                               movementThreshold * movementThreshold;
-            bool pathMissing = !agent.pathPending && !agent.hasPath;
-
-            if (preyPathRefreshTimer <= 0f &&
-                (targetChanged || targetMoved || pathMissing))
-            {
-                if (TrySetPreyDestination(preyPosition))
-                {
-                    lastPreyPathTarget = currentPreyTarget;
-                    lastPreyPathDestination = preyPosition;
-                    hasPreyPathDestination = true;
-                }
-                preyPathRefreshTimer = CalculatePreyPathRefreshInterval();
-            }
+            UpdatePathToMovingTarget(currentPreyTarget);
 
             float attackRangeSquared = CurrentAttackRange * CurrentAttackRange;
             if ((transform.position - currentPreyTarget.transform.position).sqrMagnitude <= attackRangeSquared)
@@ -754,6 +922,199 @@ public class SeekFood : MonoBehaviour, IEcosystemMaterializationLifecycle
                 TryAttack(currentPreyTarget);
             }
         }
+        else if (currentState == State.SeekingMate)
+        {
+            if (MateFertility(currentMate) <= 0f)
+            {
+                ClearTargets();
+                currentState = State.Idling;
+                decisionTimer = 0f;
+                return;
+            }
+
+            mateChaseTimer += deltaTime;
+            UpdatePathToMovingTarget(currentMate);
+
+            // Close enough to court is the same distance as close enough to strike.
+            float courtshipRangeSquared = CurrentAttackRange * CurrentAttackRange;
+            if ((transform.position - currentMate.transform.position).sqrMagnitude <= courtshipRangeSquared)
+            {
+                BeginCourtship(currentMate);
+            }
+            else if (IsCurrentMateOutOfReach())
+            {
+                GiveUpOnCurrentMate();
+            }
+        }
+    }
+
+    // Follows prey or a partner, refreshing the route as the target moves, no more often than the refresh
+    // interval allows.
+    void UpdatePathToMovingTarget(SeekFood target)
+    {
+        Vector3 targetPosition = target.transform.position;
+        float movementThreshold = Mathf.Max(0f, preyPathTargetMovementThreshold);
+        bool targetChanged = lastPreyPathTarget != target;
+        bool targetMoved = !hasPreyPathDestination ||
+                           (targetPosition - lastPreyPathDestination).sqrMagnitude >=
+                           movementThreshold * movementThreshold;
+        bool pathMissing = !agent.pathPending && !agent.hasPath;
+
+        if (preyPathRefreshTimer <= 0f &&
+            (targetChanged || targetMoved || pathMissing))
+        {
+            if (TrySetPreyDestination(targetPosition))
+            {
+                lastPreyPathTarget = target;
+                lastPreyPathDestination = targetPosition;
+                hasPreyPathDestination = true;
+            }
+            preyPathRefreshTimer = CalculatePreyPathRefreshInterval();
+        }
+    }
+
+    // Like IsCurrentFoodOutOfReach, for a partner that moves: the chase is taking far longer than crossing the
+    // field of view would, or the route stops well short of where the partner was (across water the animal
+    // can't swim, or up a cliff).
+    bool IsCurrentMateOutOfReach()
+    {
+        float speed = Mathf.Max(0.1f, GetCurrentMovementSpeed());
+        if (mateChaseTimer >= Mathf.Max(maximumFoodChaseDuration, 3f * visionRadius / speed))
+        {
+            return true;
+        }
+
+        if (agent == null || !agent.enabled || !agent.isOnNavMesh || agent.pathPending || !agent.hasPath ||
+            agent.pathStatus == NavMeshPathStatus.PathComplete || !hasPreyPathDestination)
+        {
+            return false;
+        }
+
+        Vector3 shortfall = agent.pathEndPosition - lastPreyPathDestination;
+        shortfall.y = 0f;
+        float range = CurrentAttackRange;
+        return shortfall.sqrMagnitude > range * range;
+    }
+
+    void GiveUpOnCurrentMate()
+    {
+        AvoidMate(currentMate);
+        ClearTargets();
+        mateChaseTimer = 0f;
+        currentState = State.Idling;
+        timer = 0f;
+        decisionTimer = 0f;
+        TryResetPath();
+    }
+
+    void AvoidMate(SeekFood mate)
+    {
+        if (mate == null)
+        {
+            return;
+        }
+
+        // A short memory is enough; the oldest entry makes room.
+        if (avoidedMates.Count >= 4)
+        {
+            avoidedMates.RemoveAt(0);
+        }
+
+        avoidedMates.Add(new AvoidedMate { mate = mate, retryTime = Time.time + AvoidedMateMemory });
+    }
+
+    bool IsAvoidedMate(SeekFood mate)
+    {
+        float now = Time.time;
+        for (int index = avoidedMates.Count - 1; index >= 0; index--)
+        {
+            AvoidedMate entry = avoidedMates[index];
+            if (entry.mate == null || now >= entry.retryTime)
+            {
+                avoidedMates.RemoveAt(index);
+            }
+            else if (entry.mate == mate)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    // Both animals stop where they are for the courtship. The partner was checked to be available just before.
+    void BeginCourtship(SeekFood partner)
+    {
+        partner.EnterCourtship(this, leads: false);
+        EnterCourtship(partner, leads: true);
+    }
+
+    void EnterCourtship(SeekFood partner, bool leads)
+    {
+        ClearTargets();
+        currentMate = partner;
+        currentState = State.Courting;
+        leadsCourtship = leads;
+        courtshipTimer = 0f;
+        TryResetPath();
+    }
+
+    // Both animals count down the courtship; the one that led it then decides whether a child is born. Fertility
+    // fades with genetic distance, and after a courtship without a child each looks for someone else.
+    void UpdateCourtship(float deltaTime)
+    {
+        SeekFood partner = currentMate;
+        if (partner == null || !partner.IsAlive || partner.currentState != State.Courting ||
+            partner.currentMate != this)
+        {
+            EndCourtship();
+            return;
+        }
+
+        courtshipTimer += deltaTime;
+        if (!leadsCourtship || courtshipTimer < courtshipDuration)
+        {
+            return;
+        }
+
+        float fertility = GeneticFertility(partner);
+        EndCourtship();
+        if (fertility < 1f && Random.value >= fertility)
+        {
+            AvoidMate(partner);
+            partner.AvoidMate(this);
+            return;
+        }
+
+        bool atPopulationCeiling = SpeciesManager.Instance != null &&
+                                   SpeciesManager.Instance.IsAtPopulationCeilingFor(inWater);
+        // At the ceiling, or with nowhere for the child to be born, the mate search ends on the next frame.
+        if (!atPopulationCeiling && ReproduceWith(partner))
+        {
+            StopMateSearch();
+            partner.StopMateSearch();
+        }
+    }
+
+    // Ends a courtship, finished or interrupted, for both animals.
+    void EndCourtship()
+    {
+        SeekFood partner = currentMate;
+        LeaveCourtship();
+        if (partner != null && partner.currentState == State.Courting && partner.currentMate == this)
+        {
+            partner.LeaveCourtship();
+        }
+    }
+
+    void LeaveCourtship()
+    {
+        currentMate = null;
+        leadsCourtship = false;
+        courtshipTimer = 0f;
+        currentState = State.Idling;
+        timer = actionTimer;
+        decisionTimer = 0f;
     }
 
     void TryAttack(SeekFood prey)
@@ -1339,7 +1700,8 @@ public class SeekFood : MonoBehaviour, IEcosystemMaterializationLifecycle
 
     bool TryConsumeFood(FoodItem food)
     {
-        if (food == null || !CanReachFood(food) || currentEnergy >= maxEnergy ||
+        // Courting animals don't stop to eat food they happen to touch.
+        if (food == null || currentState == State.Courting || !CanReachFood(food) || currentEnergy >= maxEnergy ||
             !food.TryConsume(out float rawNutrition, out FoodType foodType))
         {
             return false;
@@ -1490,39 +1852,64 @@ public class SeekFood : MonoBehaviour, IEcosystemMaterializationLifecycle
         Destroy(gameObject);
     }
 
+    // Clones itself: the child gets a mutated copy of this genome and half this animal's energy.
     void Reproduce()
     {
-        // The child's genome comes first, because whether it can swim decides where it can be born.
         AnimalGenome childGenome = genome.CreateMutatedCopy(mutationChance, mutationMagnitude, bodyPlanMutation,
                                                             out bool mutated);
+        TryGiveBirth(childGenome, mutated, null);
+    }
+
+    // The child takes each gene and body site from a random parent, then mutates. Each parent gives it a share
+    // of its energy. Returns false when the child had nowhere to be born.
+    bool ReproduceWith(SeekFood partner)
+    {
+        AnimalGenome childGenome = AnimalGenome.Recombine(genome, partner.genome)
+                                               .CreateMutatedCopy(mutationChance, mutationMagnitude,
+                                                                  bodyPlanMutation, out bool mutated);
+        return TryGiveBirth(childGenome, mutated, partner);
+    }
+
+    // The child is born beside this animal, with a partner as its second parent or none for a clone.
+    bool TryGiveBirth(AnimalGenome childGenome, bool mutated, SeekFood partner)
+    {
+        // The child's genome comes first, because whether it can swim decides where it can be born.
         bool childSwims = waterMovement.CanSwimDeepWater(AnimalBodyPlan.Evaluate(childGenome).swimmingAbility);
         if (!TryFindBirthPosition(childSwims, out Vector3 spawnPosition))
         {
             // Out in deep water a child that can't swim would have nowhere to be: try again a little later.
             reproductionCooldownTimer = PostponedBirthDelay;
-            return;
+            return false;
         }
 
-        float childEnergy = currentEnergy * 0.5f;
-        currentEnergy -= childEnergy;
+        float childEnergy;
+        if (partner == null)
+        {
+            childEnergy = currentEnergy * 0.5f;
+            currentEnergy -= childEnergy;
+        }
+        else
+        {
+            childEnergy = PayForChild() + partner.PayForChild();
+        }
         reproductionCooldownTimer = reproductionCooldown;
 
         GameObject child = Instantiate(gameObject, spawnPosition, transform.rotation);
         SeekFood childScript = child.GetComponent<SeekFood>();
         if (childScript == null)
         {
-            return;
+            return true;
         }
 
         childScript.currentEnergy = childEnergy;
         childScript.currentAge = 0f;
-        childScript.generation = generation + 1;
+        childScript.generation = Mathf.Max(generation, partner != null ? partner.generation : 0) + 1;
         childScript.firstParent = this;
-        childScript.secondParent = null;
+        childScript.secondParent = partner;
         // The child copies this genome into its traits when it starts.
         childScript.genome = childGenome;
 
-        // Offspring start in their parent's species. SpeciesManager splits species whose members drift
+        // Offspring start in their (first) parent's species. SpeciesManager splits species whose members drift
         // genetically apart.
         childScript.speciesName = speciesName;
         childScript.speciesColor = speciesColor;
@@ -1530,8 +1917,19 @@ public class SeekFood : MonoBehaviour, IEcosystemMaterializationLifecycle
 
         if (SpeciesManager.Instance != null)
         {
-            SpeciesManager.Instance.RecordReproduction(this, mutated);
+            SpeciesManager.Instance.RecordReproduction(this, mutated, sexual: partner != null);
         }
+
+        return true;
+    }
+
+    // One parent's share of a child of two parents. Paying it also starts this parent's rest before breeding again.
+    float PayForChild()
+    {
+        float share = currentEnergy * Mathf.Clamp01(matingEnergyShare);
+        currentEnergy -= share;
+        reproductionCooldownTimer = reproductionCooldown;
+        return share;
     }
 
     // Beside the parent, on firm ground nearby if there is any, in a part of the NavMesh the child can use.
@@ -1613,6 +2011,7 @@ public class SeekFood : MonoBehaviour, IEcosystemMaterializationLifecycle
         captured[AnimalGene.PreferredTemperature] = thermalResponse.preferredTemperature;
         captured[AnimalGene.ColdTolerance] = thermalResponse.coldTolerance;
         captured[AnimalGene.HeatTolerance] = thermalResponse.heatTolerance;
+        captured[AnimalGene.SexualDrive] = sexualDrive;
         return captured;
     }
 
@@ -1632,6 +2031,7 @@ public class SeekFood : MonoBehaviour, IEcosystemMaterializationLifecycle
         thermalResponse.preferredTemperature = genome[AnimalGene.PreferredTemperature];
         thermalResponse.coldTolerance = genome[AnimalGene.ColdTolerance];
         thermalResponse.heatTolerance = genome[AnimalGene.HeatTolerance];
+        sexualDrive = genome[AnimalGene.SexualDrive];
     }
 
     void InitializeBodyProportionReferences()
@@ -1747,10 +2147,17 @@ public class SeekFood : MonoBehaviour, IEcosystemMaterializationLifecycle
         bodyView.Build(genome, Mathf.Max(0f, fullLegLength) * Mathf.Max(0.01f, bodyHeight), speciesColor);
     }
 
+    // Also ends a courtship, for both animals.
     void ClearTargets()
     {
+        if (currentState == State.Courting)
+        {
+            EndCourtship();
+        }
+
         currentFoodTarget = null;
         currentPreyTarget = null;
+        currentMate = null;
     }
 
     bool TrySetDestination(Vector3 destination)

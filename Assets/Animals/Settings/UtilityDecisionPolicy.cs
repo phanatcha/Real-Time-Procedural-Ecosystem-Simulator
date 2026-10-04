@@ -9,6 +9,9 @@ public class UtilityDecisionPolicy : AnimalDecisionPolicy
     [Min(0f)] public float staminaShortfallWeight = 0.25f;
     [Min(0f)] public float injuryRiskWeight = 0.1f;
     public float minimumFoodUtility = 0.1f;
+    [Tooltip("What reaching a fully fertile partner is worth to an animal looking for a mate, as a fraction of " +
+             "its maximum energy, weighed against the energy food would give it.")]
+    [Min(0f)] public float mateValue = 0.5f;
 
     [Header("Threat Response")]
     [FormerlySerializedAs("fleeAfterBeingAttacked")]
@@ -72,6 +75,13 @@ public class UtilityDecisionPolicy : AnimalDecisionPolicy
         {
             bestUtility = meatUtility;
             bestDecision = new AnimalDecision(AgentIntent.SeekMeat, perception.nearestMeat);
+        }
+
+        float mateUtility = ScoreMate(self, perception.mate, perception.mateDistance, perception.mateFertility);
+        if (mateUtility > bestUtility)
+        {
+            bestUtility = mateUtility;
+            bestDecision = new AnimalDecision(AgentIntent.SeekMate, mateTarget: perception.mate);
         }
 
         float huntUtility = ScoreHunt(self, perception.nearestPrey, perception.nearestPreyDistance);
@@ -206,6 +216,19 @@ public class UtilityDecisionPolicy : AnimalDecisionPolicy
     static float UsableEnergy(SeekFood self, float digestibleEnergy)
     {
         return Mathf.Min(digestibleEnergy, Mathf.Max(0f, self.maxEnergy - self.currentEnergy));
+    }
+
+    // An animal only sees a mate while it is ready to breed and looking for one.
+    float ScoreMate(SeekFood self, SeekFood mate, float distance, float fertility)
+    {
+        if (mate == null)
+        {
+            return float.NegativeInfinity;
+        }
+
+        float travelTime = distance / self.GetCurrentMovementSpeed();
+        float travelCost = travelTime * self.CurrentEnergyDrainPerSecond * travelEnergyWeight;
+        return mateValue * self.maxEnergy * fertility - travelCost;
     }
 
     float ScoreHunt(SeekFood self, SeekFood prey, float distance)
