@@ -42,7 +42,7 @@ N(t) = room / (1 + (room − N) / N · e^(−r·t))
 
 ## Not yet included
 
-- **Off-screen evolution (step 3b):** off-screen genomes are copied, not mutated or selected. Evolution still happens only among live animals.
+- **Off-screen evolution (step 3b):** off-screen genomes are copied, not mutated or selected. Evolution still happens only among live animals. Harmful mutations are neither gained nor shed off-screen, but those a genome already carries stay with it and raise its energy use, so a heavily loaded population has a lower carrying capacity.
 - **Off-screen speciation (step 3c):** only live animals are checked for species splits.
 - **Hunting and tall forest food** are not modelled off-screen.
 - **Mating** is not modelled off-screen: populations grow at the same rate whatever their sexual drive, and genomes are not recombined.

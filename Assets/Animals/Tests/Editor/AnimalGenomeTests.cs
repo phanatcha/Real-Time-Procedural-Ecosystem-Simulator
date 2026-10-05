@@ -397,6 +397,81 @@ public class AnimalGenomeTests
     }
 
     [Test]
+    public void ANewGenomeCarriesNoHarmfulMutations()
+    {
+        AnimalGenome genome = AnimalGenome.Create();
+
+        Assert.AreEqual(0, genome.HarmfulMutations);
+        Assert.AreEqual(1f, genome.EnergyUseMultiplier(0.02f));
+    }
+
+    [Test]
+    public void HarmfulMutationChanceIsAPercentagePerBirth()
+    {
+        AnimalGenome genome = AnimalGenome.Create();
+
+        Assert.IsFalse(genome.TryAddHarmfulMutation(0f));
+        Assert.IsTrue(genome.TryAddHarmfulMutation(100f));
+        Assert.AreEqual(1, genome.HarmfulMutations);
+
+        int added = 0;
+        for (int birth = 0; birth < 1000; birth++)
+        {
+            if (AnimalGenome.Create().TryAddHarmfulMutation(10f)) added++;
+        }
+
+        Assert.That(added, Is.InRange(70, 130));
+    }
+
+    [Test]
+    public void EachHarmfulMutationAddsItsCostToEnergyUse()
+    {
+        AnimalGenome genome = CreateGenomeWithHarmfulMutations(5);
+
+        Assert.AreEqual(1.1f, genome.EnergyUseMultiplier(0.02f), Tolerance);
+        Assert.AreEqual(1f, genome.EnergyUseMultiplier(-1f));
+    }
+
+    [Test]
+    public void ClonesKeepEveryHarmfulMutation()
+    {
+        AnimalGenome parent = CreateGenomeWithHarmfulMutations(4);
+
+        Assert.AreEqual(4, parent.Clone().HarmfulMutations);
+        Assert.AreEqual(4, parent.CreateMutatedCopy(100f, 0.5f, BodyPlanMutation.Default, out _).HarmfulMutations);
+    }
+
+    [Test]
+    public void AChildOfTwoParentsInheritsEachHarmfulMutationHalfTheTime()
+    {
+        AnimalGenome first = CreateGenomeWithHarmfulMutations(10);
+        AnimalGenome second = CreateGenomeWithHarmfulMutations(6);
+        const int Children = 400;
+
+        int total = 0;
+        int fewerThanEitherParent = 0;
+        for (int child = 0; child < Children; child++)
+        {
+            int inherited = AnimalGenome.Recombine(first, second).HarmfulMutations;
+            Assert.That(inherited, Is.InRange(0, 16));
+            total += inherited;
+            if (inherited < 6) fewerThanEitherParent++;
+        }
+
+        // 8 on average. Some children carry fewer than either parent, which a clone never can.
+        Assert.That((float)total / Children, Is.InRange(7.5f, 8.5f));
+        Assert.Greater(fewerThanEitherParent, 0);
+        Assert.AreEqual(10, first.HarmfulMutations);
+        Assert.AreEqual(6, second.HarmfulMutations);
+    }
+
+    [Test]
+    public void HarmfulMutationsDoNotCountTowardsGeneticDistance()
+    {
+        Assert.AreEqual(0f, AnimalGenome.Distance(CreateMidpointGenome(), CreateGenomeWithHarmfulMutations(20)));
+    }
+
+    [Test]
     public void GroupingSeparatesGenomesFurtherApartThanTheThreshold()
     {
         AnimalGenome[] genomes =
@@ -440,6 +515,17 @@ public class AnimalGenomeTests
     {
         AnimalGenome genome = CreateMidpointGenome();
         genome[AnimalGene.DietAffinity] = dietAffinity;
+        return genome;
+    }
+
+    static AnimalGenome CreateGenomeWithHarmfulMutations(int count)
+    {
+        AnimalGenome genome = CreateMidpointGenome();
+        for (int mutation = 0; mutation < count; mutation++)
+        {
+            genome.TryAddHarmfulMutation(100f);
+        }
+
         return genome;
     }
 

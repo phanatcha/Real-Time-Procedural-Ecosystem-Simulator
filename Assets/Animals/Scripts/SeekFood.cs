@@ -174,6 +174,16 @@ public class SeekFood : MonoBehaviour, IEcosystemMaterializationLifecycle
     [Range(0f, 100f)] public float mutationChance = 5f;
     [Min(0f)] public float mutationMagnitude = 0.1f;
 
+    [Header("Mutation Load")]
+    [Tooltip("Percent chance per birth that the child gains a harmful mutation. A clone keeps all of its " +
+             "parent's; a child of two parents inherits each of each parent's with a 50% chance, so sexual " +
+             "lineages can shed them while cloning lineages only gain them (Muller's ratchet).")]
+    [Range(0f, 100f)] public float harmfulMutationChance = 10f;
+    [Tooltip("How much each harmful mutation adds to energy use: 0.02 adds 2% per mutation.")]
+    [Min(0f)] public float harmfulMutationEnergyCost = 0.02f;
+    [SerializeField, Tooltip("Harmful mutations this animal carries, for reference.")]
+    private int harmfulMutations;
+
     [Header("Mating")]
     [Tooltip("Inherited. Below 0.15 the animal only clones itself; above 0.85 it only mates; in between it looks " +
              "for a mate for up to this many times Mate Search Seconds Per Drive, then clones if it finds nobody.")]
@@ -221,6 +231,7 @@ public class SeekFood : MonoBehaviour, IEcosystemMaterializationLifecycle
     public bool IsInDeadZone => inDeadZone;
     public float CurrentAge => currentAge;
     public int Generation => generation;
+    public int HarmfulMutations => harmfulMutations;
     public float RemainingLifespan => Mathf.Max(0f, maxLifespan - currentAge);
     public float AgeFraction => maxLifespan <= Mathf.Epsilon
         ? 1f
@@ -1852,21 +1863,25 @@ public class SeekFood : MonoBehaviour, IEcosystemMaterializationLifecycle
         Destroy(gameObject);
     }
 
-    // Clones itself: the child gets a mutated copy of this genome and half this animal's energy.
+    // Clones itself: the child gets a mutated copy of this genome, with all of its harmful mutations, and half
+    // this animal's energy.
     void Reproduce()
     {
         AnimalGenome childGenome = genome.CreateMutatedCopy(mutationChance, mutationMagnitude, bodyPlanMutation,
                                                             out bool mutated);
+        mutated |= childGenome.TryAddHarmfulMutation(harmfulMutationChance);
         TryGiveBirth(childGenome, mutated, null);
     }
 
-    // The child takes each gene and body site from a random parent, then mutates. Each parent gives it a share
-    // of its energy. Returns false when the child had nowhere to be born.
+    // The child takes each gene and body site from a random parent, and each parent's harmful mutations with a
+    // 50% chance each, then mutates. Each parent gives it a share of its energy. Returns false when the child
+    // had nowhere to be born.
     bool ReproduceWith(SeekFood partner)
     {
         AnimalGenome childGenome = AnimalGenome.Recombine(genome, partner.genome)
                                                .CreateMutatedCopy(mutationChance, mutationMagnitude,
                                                                   bodyPlanMutation, out bool mutated);
+        mutated |= childGenome.TryAddHarmfulMutation(harmfulMutationChance);
         return TryGiveBirth(childGenome, mutated, partner);
     }
 
@@ -2032,6 +2047,7 @@ public class SeekFood : MonoBehaviour, IEcosystemMaterializationLifecycle
         thermalResponse.coldTolerance = genome[AnimalGene.ColdTolerance];
         thermalResponse.heatTolerance = genome[AnimalGene.HeatTolerance];
         sexualDrive = genome[AnimalGene.SexualDrive];
+        harmfulMutations = genome.HarmfulMutations;
     }
 
     void InitializeBodyProportionReferences()
@@ -2075,16 +2091,20 @@ public class SeekFood : MonoBehaviour, IEcosystemMaterializationLifecycle
         if (referenceMaxHealth <= 0f) referenceMaxHealth = Mathf.Max(0.01f, maxHealth);
     }
 
+    // Harmful mutations add their cost on top of the traits' cost, outside its limits.
     public void RefreshMetabolicRate()
     {
         InitializeMetabolicReference();
 
+        float mutationLoad = genome != null && genome.IsValid
+            ? genome.EnergyUseMultiplier(harmfulMutationEnergyCost)
+            : 1f;
         float totalWeight = speedMetabolicWeight + strengthMetabolicWeight + bodyMassMetabolicWeight +
                             visionMetabolicWeight + energyCapacityMetabolicWeight +
                             staminaCapacityMetabolicWeight + healthMetabolicWeight;
         if (totalWeight <= Mathf.Epsilon)
         {
-            currentEnergyDrainPerSecond = Mathf.Max(0f, baseEnergyDrainPerSecond);
+            currentEnergyDrainPerSecond = Mathf.Max(0f, baseEnergyDrainPerSecond) * mutationLoad;
             return;
         }
 
@@ -2108,7 +2128,7 @@ public class SeekFood : MonoBehaviour, IEcosystemMaterializationLifecycle
         float minimum = Mathf.Max(0f, minimumMetabolicMultiplier);
         float maximum = Mathf.Max(minimum, maximumMetabolicMultiplier);
         float multiplier = Mathf.Clamp(weightedTraitCost / totalWeight, minimum, maximum);
-        currentEnergyDrainPerSecond = Mathf.Max(0f, baseEnergyDrainPerSecond) * multiplier;
+        currentEnergyDrainPerSecond = Mathf.Max(0f, baseEnergyDrainPerSecond) * multiplier * mutationLoad;
     }
 
     // Called by SpeciesManager when this animal's group splits off into a new species.

@@ -51,6 +51,8 @@ public sealed class SpeciesTelemetryRecord
     public float coldTolerance;
     public float heatTolerance;
     public float sexualDrive;
+    [Tooltip("Average number of harmful mutations carried, each adding to energy use.")]
+    public float harmfulMutations;
     public int births;
     public int deaths;
     public int starvationDeaths;
@@ -793,6 +795,7 @@ public class SpeciesManager : MonoBehaviour
         record.maturityTime = Mathf.Lerp(record.maturityTime, agent.maturityTime, weight);
         record.maxLifespan = Mathf.Lerp(record.maxLifespan, agent.maxLifespan, weight);
         record.sexualDrive = Mathf.Lerp(record.sexualDrive, agent.sexualDrive, weight);
+        record.harmfulMutations = Mathf.Lerp(record.harmfulMutations, agent.HarmfulMutations, weight);
         if (agent.ThermalResponse != null)
         {
             record.preferredTemperature = Mathf.Lerp(record.preferredTemperature,
@@ -823,6 +826,7 @@ public class SpeciesManager : MonoBehaviour
             builder.Append($"maturity={record.maturityTime:F1}s, lifespan={record.maxLifespan:F1}s): ");
             builder.Append($"preferredC={record.preferredTemperature:F1}, coldTolerance={record.coldTolerance:F1}, ");
             builder.Append($"heatTolerance={record.heatTolerance:F1}, sexualDrive={record.sexualDrive:F2}, ");
+            builder.Append($"harmfulMutations={record.harmfulMutations:F1}, ");
             builder.Append($"living={living}, births={record.births}, deaths={record.deaths}, ");
             builder.Append($"oldAge={record.oldAgeDeaths}, ");
             builder.Append($"coldExposure={record.coldExposureDeaths}, heatExposure={record.heatExposureDeaths}, ");

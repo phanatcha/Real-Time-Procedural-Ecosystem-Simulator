@@ -112,8 +112,9 @@ public readonly struct AnimalGeneDefinition
     }
 }
 
-// Everything an animal inherits: numeric trait genes plus a body plan of one part (type and size) per site.
-// SeekFood copies the genes into its trait fields at birth and lets the body parts adjust them.
+// Everything an animal inherits: numeric trait genes, a body plan of one part (type and size) per site, and the
+// harmful mutations it carries. SeekFood copies the genes into its trait fields at birth and lets the body parts
+// adjust them.
 [System.Serializable]
 public sealed class AnimalGenome
 {
@@ -146,6 +147,11 @@ public sealed class AnimalGenome
     [SerializeField] private float[] genes;
     [SerializeField] private BodyPartType[] partTypes;
     [SerializeField] private float[] partSizes;
+    // Harmful mutations carried, each adding the same small cost to energy use (Muller's ratchet). A clone
+    // keeps all of its parent's; a child of two parents inherits each of each parent's with a 50% chance, so
+    // sexual lineages can shed them while cloning lineages only gain them. They are not genes, so they don't
+    // count towards genetic distance.
+    [SerializeField] private int harmfulMutations;
 
     // An unset genome has no genes. SeekFood replaces it with one captured from the
     // animal's inspector values, which is how founders get their genome.
@@ -158,6 +164,12 @@ public sealed class AnimalGenome
         get => genes[(int)gene];
         set => genes[(int)gene] = GetDefinition(gene).Clamp(value);
     }
+
+    public int HarmfulMutations => harmfulMutations;
+
+    // How much the harmful mutations multiply energy use: 1 plus the cost of each, e.g. 1.1 for five at 0.02.
+    public float EnergyUseMultiplier(float costPerHarmfulMutation) =>
+        1f + harmfulMutations * Mathf.Max(0f, costPerHarmfulMutation);
 
     public static bool IsPaired(BodySite site) => site >= BodySite.FrontPair;
 
@@ -234,15 +246,18 @@ public sealed class AnimalGenome
         {
             genes = (float[])genes.Clone(),
             partTypes = (BodyPartType[])partTypes.Clone(),
-            partSizes = (float[])partSizes.Clone()
+            partSizes = (float[])partSizes.Clone(),
+            harmfulMutations = harmfulMutations
         };
     }
 
     // A child of two parents, before mutation: each gene and each body site (its part and size together) comes
-    // from one parent or the other at random.
+    // from one parent or the other at random, and each harmful mutation of either parent is passed on with a 50%
+    // chance.
     public static AnimalGenome Recombine(AnimalGenome first, AnimalGenome second)
     {
         AnimalGenome child = first.Clone();
+        child.harmfulMutations = InheritHalf(first.harmfulMutations) + InheritHalf(second.harmfulMutations);
         for (int index = 0; index < GeneCount; index++)
         {
             if (Random.value < 0.5f) child.genes[index] = second.genes[index];
@@ -258,6 +273,31 @@ public sealed class AnimalGenome
         }
 
         return child;
+    }
+
+    // How many of a parent's harmful mutations a child of two parents inherits: each one with a 50% chance.
+    static int InheritHalf(int count)
+    {
+        int inherited = 0;
+        for (int mutation = 0; mutation < count; mutation++)
+        {
+            if (Random.value < 0.5f) inherited++;
+        }
+
+        return inherited;
+    }
+
+    // chance is a percentage per birth. Call it once on each newborn's genome. Returns true when the genome
+    // gained a harmful mutation.
+    public bool TryAddHarmfulMutation(float chance)
+    {
+        if (chance <= 0f || (chance < 100f && Random.Range(0f, 100f) >= chance))
+        {
+            return false;
+        }
+
+        harmfulMutations++;
+        return true;
     }
 
     // Mutates the numeric genes only; the body plan is copied unchanged.

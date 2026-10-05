@@ -19,6 +19,7 @@ public class EcosystemHud : MonoBehaviour
         public float height;
         public float lifespan;
         public float sexualDrive;
+        public float harmfulMutations;
     }
 
     // Each species' average traits when it was first seen, to show how far it has drifted since.
@@ -186,7 +187,8 @@ public class EcosystemHud : MonoBehaviour
             bulk = record.bodyBulk,
             height = record.bodyHeight,
             lifespan = record.maxLifespan,
-            sexualDrive = record.sexualDrive
+            sexualDrive = record.sexualDrive,
+            harmfulMutations = record.harmfulMutations
         };
         if (!traitsWhenFirstSeen.TryGetValue(largest, out Traits first))
         {
@@ -201,6 +203,8 @@ public class EcosystemHud : MonoBehaviour
                     $"height {Describe(now.height, record.bodyHeightRange, now.height - first.height)}   " +
                     $"lifespan {now.lifespan:0}s {Signed(now.lifespan - first.lifespan, "0")}   " +
                     $"sexual drive {now.sexualDrive:0.00} {Signed(now.sexualDrive - first.sexualDrive, "0.00")}");
+        text.Append($"\n   harmful mutations: {now.harmfulMutations:0.0} " +
+                    $"{Signed(now.harmfulMutations - first.harmfulMutations, "0.0")}");
         text.Append($"\n   body parts: {DescribeBodyParts(manager, largest)}");
         text.Append($"\n   swimming ability: {swimmingSummary}");
     }
