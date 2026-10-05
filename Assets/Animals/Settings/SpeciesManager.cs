@@ -128,6 +128,11 @@ public class SpeciesManager : MonoBehaviour
     [SerializeField] private bool safetyPaused;
     [SerializeField, TextArea] private string lastSafetyPauseReason;
 
+    [Header("Perception")]
+    [Tooltip("Side of the square cells animals are filed into, in world units. An animal looking for prey, " +
+             "threats or mates only checks the animals in the cells its vision covers, not every animal.")]
+    [Min(8f)] public float perceptionCellSize = 64f;
+
     [Header("Telemetry")]
     [Tooltip("Enables individual birth and death messages. Leave off for large or fast simulations. " +
              "Speciation and extinction are always logged because they are rare.")]
@@ -174,11 +179,17 @@ public class SpeciesManager : MonoBehaviour
     private readonly Dictionary<string, Color> speciesColors = new Dictionary<string, Color>();
     private readonly HashSet<string> assignedSpeciesNames = new HashSet<string>();
     private readonly HashSet<SeekFood> activeAgents = new HashSet<SeekFood>();
+    // The active animals by position, for FindAgentsNear.
+    private SpatialGrid<SeekFood> agentGrid;
+    private int agentGridFrame = -1;
+    private bool agentGridStale = true;
+    private float agentGridMargin;
     private readonly Dictionary<string, SpeciesTelemetryRecord> telemetry = new Dictionary<string, SpeciesTelemetryRecord>();
 
     public IReadOnlyDictionary<string, int> SpeciesPopulation => speciesPopulation;
     public IReadOnlyDictionary<string, SpeciesTelemetryRecord> Telemetry => telemetry;
     public IEnumerable<SeekFood> ActiveAgents => activeAgents;
+    public bool IsActiveAgent(SeekFood agent) => agent != null && activeAgents.Contains(agent);
     // Animals on screen. Off-screen animals are in OffscreenPopulation.
     public int TotalPopulation { get; private set; }
     public IOffscreenPopulation OffscreenPopulation { get; set; }
@@ -421,6 +432,7 @@ public class SpeciesManager : MonoBehaviour
     public void ResetSimulation()
     {
         activeAgents.Clear();
+        agentGridStale = true;
         speciesPopulation.Clear();
         speciesColors.Clear();
         assignedSpeciesNames.Clear();
@@ -474,12 +486,60 @@ public class SpeciesManager : MonoBehaviour
             Mathf.Clamp(brightness + Random.Range(-0.15f, 0.15f), 0.45f, 1f));
     }
 
+    // Fills results with the active animals that may be within radius of position: every one in the grid cells
+    // the radius covers. Callers still check exact distances.
+    public void FindAgentsNear(Vector3 position, float radius, List<SeekFood> results)
+    {
+        if (agentGrid == null || agentGridStale || agentGridFrame != Time.frameCount)
+        {
+            RebuildAgentGrid();
+        }
+
+        agentGrid.Query(position, radius + agentGridMargin, results);
+    }
+
+    // Animals move every frame, so the grid is rebuilt the first time it is needed in a frame, and again after
+    // animals leave.
+    void RebuildAgentGrid()
+    {
+        if (agentGrid == null || agentGrid.CellSize != Mathf.Max(8f, perceptionCellSize))
+        {
+            agentGrid = new SpatialGrid<SeekFood>(Mathf.Max(8f, perceptionCellSize));
+        }
+        else
+        {
+            agentGrid.Clear();
+        }
+
+        float fastest = 0f;
+        foreach (SeekFood agent in activeAgents)
+        {
+            if (agent == null) continue;
+
+            agentGrid.Add(agent, agent.transform.position);
+            fastest = Mathf.Max(fastest, agent.GetCurrentMovementSpeed());
+        }
+
+        // An animal can still move after the grid is built this frame, by at most a frame's travel, so searches
+        // reach that much further.
+        agentGridMargin = fastest * Time.deltaTime;
+        agentGridFrame = Time.frameCount;
+        agentGridStale = false;
+    }
+
     // countAsBirth is false for animals arriving from an off-screen population, which were counted already.
     public void RegisterAgent(SeekFood agent, bool countAsBirth = true)
     {
         if (agent == null || !activeAgents.Add(agent))
         {
             return;
+        }
+
+        // A newcomer joins this frame's grid where it stands. Animals leaving have the grid rebuilt instead.
+        if (agentGrid != null && !agentGridStale && agentGridFrame == Time.frameCount)
+        {
+            agentGrid.Add(agent, agent.transform.position);
+            agentGridMargin = Mathf.Max(agentGridMargin, agent.GetCurrentMovementSpeed() * Time.deltaTime);
         }
 
         if (pendingBirths > 0) pendingBirths--;
@@ -513,6 +573,8 @@ public class SpeciesManager : MonoBehaviour
         {
             return;
         }
+
+        agentGridStale = true;
 
         string speciesName = agent.speciesName;
         if (speciesPopulation.ContainsKey(speciesName))
@@ -564,6 +626,8 @@ public class SpeciesManager : MonoBehaviour
     public void UnregisterAgentWithoutDeath(SeekFood agent)
     {
         if (agent == null || !activeAgents.Remove(agent)) return;
+
+        agentGridStale = true;
 
         string speciesName = agent.speciesName;
         if (speciesPopulation.TryGetValue(speciesName, out int population))

@@ -362,6 +362,7 @@ public class SeekFood : MonoBehaviour, IEcosystemMaterializationLifecycle
     private readonly List<AvoidedMate> avoidedMates = new List<AvoidedMate>();
     // Shared scratch list for perception; animals only update on the main thread.
     private static readonly List<FoodItem> nearbyFood = new List<FoodItem>();
+    private static readonly List<SeekFood> nearbyAnimals = new List<SeekFood>();
 
     private sealed class ThreatMemory
     {
@@ -723,10 +724,13 @@ public class SeekFood : MonoBehaviour, IEcosystemMaterializationLifecycle
             }
         }
 
-        if (SpeciesManager.Instance != null)
+        SpeciesManager manager = SpeciesManager.Instance;
+        if (manager != null)
         {
+            // Only animals in the grid cells this animal's vision covers can be seen, so the rest aren't checked.
+            manager.FindAgentsNear(transform.position, visionRadius, nearbyAnimals);
             float bestMateScore = 0f;
-            foreach (SeekFood other in SpeciesManager.Instance.ActiveAgents)
+            foreach (SeekFood other in nearbyAnimals)
             {
                 if (seekingMate)
                 {
@@ -759,9 +763,39 @@ public class SeekFood : MonoBehaviour, IEcosystemMaterializationLifecycle
                                                             isActivelyHunting, recentlyAttacked));
                 }
             }
+
+            AddRememberedThreatsOutOfView(manager, perception.threats);
         }
 
         return perception;
+    }
+
+    // An animal that attacked this one counts as a threat while it is remembered, however far away it is. Those
+    // near enough were added with the animals in view; this adds the rest.
+    void AddRememberedThreatsOutOfView(SpeciesManager manager, List<AnimalThreat> threats)
+    {
+        foreach (ThreatMemory memory in rememberedThreats)
+        {
+            SeekFood attacker = memory.attacker;
+            if (memory.timeRemaining <= 0f || !IsViablePrey(attacker) || !manager.IsActiveAgent(attacker) ||
+                ContainsThreat(threats, attacker))
+            {
+                continue;
+            }
+
+            float distance = Vector3.Distance(transform.position, attacker.transform.position);
+            threats.Add(new AnimalThreat(attacker, distance, false, true));
+        }
+    }
+
+    static bool ContainsThreat(List<AnimalThreat> threats, SeekFood attacker)
+    {
+        foreach (AnimalThreat threat in threats)
+        {
+            if (threat.attacker == attacker) return true;
+        }
+
+        return false;
     }
 
     // Keeps the most promising partner in view, weighing fertility against distance.
