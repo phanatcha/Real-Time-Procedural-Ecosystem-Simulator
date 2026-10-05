@@ -164,6 +164,9 @@ public class SeekFood : MonoBehaviour, IEcosystemMaterializationLifecycle
              "hard to evolve.")]
     [Min(0f)] public float carcassBodyEnergy = 50f;
     [Min(1f)] public float carcassLifetime = 120f;
+    [Tooltip("Simulated seconds a carcass stays as spoiled meat once it goes off. Only animals with a scavenger " +
+             "gut can eat it.")]
+    [Min(0f)] public float carcassSpoiledLifetime = 60f;
     [Min(0.1f)] public float carcassScale = 6f;
 
     [Header("Reproduction")]
@@ -183,6 +186,13 @@ public class SeekFood : MonoBehaviour, IEcosystemMaterializationLifecycle
     [Min(0f)] public float harmfulMutationEnergyCost = 0.02f;
     [SerializeField, Tooltip("Harmful mutations this animal carries, for reference.")]
     private int harmfulMutations;
+
+    [Header("Perks")]
+    [Tooltip("Percent chance per birth that each perk (thick fur, venom, camouflage, regeneration, scavenger gut) " +
+             "turns on or off. AnimalPerks describes what each does and costs.")]
+    [Range(0f, 100f)] public float perkFlipChance = 1f;
+    [SerializeField, Tooltip("This animal's perks, for reference.")]
+    private string perks;
 
     [Header("Mating")]
     [Tooltip("Inherited. Below 0.15 the animal only clones itself; above 0.85 it only mates; in between it looks " +
@@ -232,6 +242,11 @@ public class SeekFood : MonoBehaviour, IEcosystemMaterializationLifecycle
     public float CurrentAge => currentAge;
     public int Generation => generation;
     public int HarmfulMutations => harmfulMutations;
+    public bool HasPerk(AnimalPerk perk) => genome != null && genome.IsValid && genome.HasPerk(perk);
+    public bool CanEatSpoiledFood => perkEffects.canEatSpoiledFood;
+    // How far other animals can spot this one, as a fraction of their vision: camouflage hides it, except while
+    // it flees.
+    public float Visibility => currentState == State.Fleeing ? 1f : perkEffects.visibility;
     public float RemainingLifespan => Mathf.Max(0f, maxLifespan - currentAge);
     public float AgeFraction => maxLifespan <= Mathf.Epsilon
         ? 1f
@@ -314,6 +329,7 @@ public class SeekFood : MonoBehaviour, IEcosystemMaterializationLifecycle
     private float unproductiveHuntTimer;
     private float foodChaseTimer;
     private BodyPlanEffects bodyEffects = BodyPlanEffects.None;
+    private PerkEffects perkEffects = PerkEffects.None;
     private AnimalBodyView bodyView;
     // Speed from the genes alone, before body parts adjust it. Speed in water is based on it, since legs and
     // fins work differently there.
@@ -508,6 +524,13 @@ public class SeekFood : MonoBehaviour, IEcosystemMaterializationLifecycle
             }
         }
 
+        // Regeneration slowly heals the animal while it has energy.
+        if (perkEffects.regenerationPerSecond > 0f && currentEnergy > 0f && currentHealth < maxHealth)
+        {
+            currentHealth = Mathf.Min(maxHealth,
+                                      currentHealth + perkEffects.regenerationPerSecond * maxHealth * deltaTime);
+        }
+
         // Courting animals stand still and don't react to threats until the courtship ends or one is attacked.
         if (currentState == State.Courting)
         {
@@ -676,7 +699,7 @@ public class SeekFood : MonoBehaviour, IEcosystemMaterializationLifecycle
                 continue;
             }
 
-            if (!CanReachFood(food) || IsRememberedAsUnreachable(food))
+            if (!CanEat(food) || IsRememberedAsUnreachable(food))
             {
                 continue;
             }
@@ -717,8 +740,10 @@ public class SeekFood : MonoBehaviour, IEcosystemMaterializationLifecycle
 
                 float distanceSquared = (transform.position - other.transform.position).sqrMagnitude;
                 float distance = Mathf.Sqrt(distanceSquared);
+                // Camouflaged animals are only spotted, as prey or as hunters, within part of the vision radius.
+                float spottingRadiusSquared = visionRadiusSquared * other.Visibility * other.Visibility;
                 if (!IsTemporarilyAvoidedPrey(other) &&
-                    distanceSquared <= visionRadiusSquared &&
+                    distanceSquared <= spottingRadiusSquared &&
                     distanceSquared < perception.nearestPreyDistance * perception.nearestPreyDistance)
                 {
                     perception.nearestPrey = other;
@@ -726,7 +751,7 @@ public class SeekFood : MonoBehaviour, IEcosystemMaterializationLifecycle
                 }
 
                 bool recentlyAttacked = IsRememberedThreat(other);
-                bool isActivelyHunting = distanceSquared <= visionRadiusSquared &&
+                bool isActivelyHunting = distanceSquared <= spottingRadiusSquared &&
                                          other.IsTargetingAsPrey(this);
                 if (recentlyAttacked || isActivelyHunting)
                 {
@@ -1140,7 +1165,7 @@ public class SeekFood : MonoBehaviour, IEcosystemMaterializationLifecycle
         int catchUpLimit = Mathf.Max(1, maximumCatchUpAttacksPerFrame);
         int attacksResolved = 0;
 
-        while (attackCooldownTimer <= 0f && attacksResolved < catchUpLimit &&
+        while (!isDying && attackCooldownTimer <= 0f && attacksResolved < catchUpLimit &&
                IsViablePrey(prey) && currentEnergy >= attackEnergyCost &&
                currentStamina >= attackStaminaCost)
         {
@@ -1541,7 +1566,8 @@ public class SeekFood : MonoBehaviour, IEcosystemMaterializationLifecycle
 
     bool IsCurrentFoodTargetAvailable()
     {
-        return currentFoodTarget != null && currentFoodTarget.IsAvailable;
+        return currentFoodTarget != null && currentFoodTarget.IsAvailable &&
+               (!currentFoodTarget.IsSpoiled || CanEatSpoiledFood);
     }
 
     // True once chasing the current food can't work: its route stops short of it (across water or up a cliff),
@@ -1680,12 +1706,13 @@ public class SeekFood : MonoBehaviour, IEcosystemMaterializationLifecycle
         return sharesFirstParent || sharesSecondParent;
     }
 
+    // A scavenger gut digests plants worse.
     public float GetDigestionEfficiency(FoodType foodType)
     {
         float affinity = Mathf.Clamp01(dietAffinity);
         float minimum = Mathf.Clamp01(minimumDietEfficiency);
         return foodType == FoodType.Plant
-            ? minimum + (1f - minimum) * (1f - affinity)
+            ? (minimum + (1f - minimum) * (1f - affinity)) * perkEffects.plantDigestionMultiplier
             : minimum + (1f - minimum) * affinity;
     }
 
@@ -1702,9 +1729,15 @@ public class SeekFood : MonoBehaviour, IEcosystemMaterializationLifecycle
         return FeedingReach >= requiredReach;
     }
 
+    // Spoiled food is only for animals with a scavenger gut.
+    public bool CanEat(FoodItem food)
+    {
+        return food != null && (!food.IsSpoiled || CanEatSpoiledFood) && CanReachFood(food);
+    }
+
     public float EstimateDigestibleEnergy(FoodItem food)
     {
-        return !CanReachFood(food)
+        return !CanEat(food)
             ? 0f
             : food.nutritionValue * GetDigestionEfficiency(food.foodType);
     }
@@ -1712,7 +1745,7 @@ public class SeekFood : MonoBehaviour, IEcosystemMaterializationLifecycle
     bool TryConsumeFood(FoodItem food)
     {
         // Courting animals don't stop to eat food they happen to touch.
-        if (food == null || currentState == State.Courting || !CanReachFood(food) || currentEnergy >= maxEnergy ||
+        if (food == null || currentState == State.Courting || !CanEat(food) || currentEnergy >= maxEnergy ||
             !food.TryConsume(out float rawNutrition, out FoodType foodType))
         {
             return false;
@@ -1819,9 +1852,15 @@ public class SeekFood : MonoBehaviour, IEcosystemMaterializationLifecycle
             TryResetPath();
         }
 
-        // Plates absorb part of every attack, but not starvation.
         if (attacker != null)
         {
+            // Venom: the attacker takes back part of every bite, whatever this animal's plates absorb.
+            if (perkEffects.venomDamageReturned > 0f)
+            {
+                attacker.TakeVenomDamage(amount * perkEffects.venomDamageReturned);
+            }
+
+            // Plates absorb part of every attack, but not starvation.
             amount *= bodyEffects.damageTakenMultiplier;
         }
 
@@ -1829,6 +1868,22 @@ public class SeekFood : MonoBehaviour, IEcosystemMaterializationLifecycle
         if (currentHealth <= 0f)
         {
             Die(attacker == null ? AgentDeathCause.Starvation : AgentDeathCause.Predation, attacker);
+        }
+    }
+
+    // Damage from biting a venomous animal. It isn't an attack, so plates don't absorb it and the bitten animal
+    // isn't remembered as a threat.
+    void TakeVenomDamage(float amount)
+    {
+        if (isDying || amount <= 0f)
+        {
+            return;
+        }
+
+        currentHealth -= amount;
+        if (currentHealth <= 0f)
+        {
+            Die(AgentDeathCause.Venom, null);
         }
     }
 
@@ -1848,7 +1903,7 @@ public class SeekFood : MonoBehaviour, IEcosystemMaterializationLifecycle
         {
             float carcassLinearScale = Mathf.Pow(BodyMassFactor, 1f / 3f);
             FoodItem.CreateCarcass(transform.position, carcassEnergy, speciesName,
-                                   carcassLifetime, carcassScale * carcassLinearScale);
+                                   carcassLifetime, carcassScale * carcassLinearScale, carcassSpoiledLifetime);
         }
 
         if (cause == AgentDeathCause.Predation && SpeciesManager.Instance != null)
@@ -1870,18 +1925,20 @@ public class SeekFood : MonoBehaviour, IEcosystemMaterializationLifecycle
         AnimalGenome childGenome = genome.CreateMutatedCopy(mutationChance, mutationMagnitude, bodyPlanMutation,
                                                             out bool mutated);
         mutated |= childGenome.TryAddHarmfulMutation(harmfulMutationChance);
+        mutated |= childGenome.MutatePerks(perkFlipChance);
         TryGiveBirth(childGenome, mutated, null);
     }
 
-    // The child takes each gene and body site from a random parent, and each parent's harmful mutations with a
-    // 50% chance each, then mutates. Each parent gives it a share of its energy. Returns false when the child
-    // had nowhere to be born.
+    // The child takes each gene, body site and perk from a random parent, and each parent's harmful mutations
+    // with a 50% chance each, then mutates. Each parent gives it a share of its energy. Returns false when the
+    // child had nowhere to be born.
     bool ReproduceWith(SeekFood partner)
     {
         AnimalGenome childGenome = AnimalGenome.Recombine(genome, partner.genome)
                                                .CreateMutatedCopy(mutationChance, mutationMagnitude,
                                                                   bodyPlanMutation, out bool mutated);
         mutated |= childGenome.TryAddHarmfulMutation(harmfulMutationChance);
+        mutated |= childGenome.MutatePerks(perkFlipChance);
         return TryGiveBirth(childGenome, mutated, partner);
     }
 
@@ -1995,18 +2052,22 @@ public class SeekFood : MonoBehaviour, IEcosystemMaterializationLifecycle
         ApplyBodyPlan();
     }
 
-    // Body parts adjust the traits the genes have just set (see AnimalBodyPlan). The genome keeps the
-    // unadjusted values, so parts never compound over generations.
+    // Body parts and perks adjust the traits the genes have just set (see AnimalBodyPlan and AnimalPerks). The
+    // genome keeps the unadjusted values, so their effects never compound over generations.
     void ApplyBodyPlan()
     {
         bodyEffects = AnimalBodyPlan.Evaluate(genome);
+        perkEffects = AnimalPerks.Evaluate(genome);
         geneMoveSpeed = moveSpeed;
         moveSpeed *= bodyEffects.speedMultiplier;
         strength *= bodyEffects.strengthMultiplier;
         visionRadius *= bodyEffects.visionMultiplier;
-        thermalResponse.coldTolerance = Mathf.Max(0f, thermalResponse.coldTolerance + bodyEffects.coldToleranceChange);
-        thermalResponse.heatTolerance = Mathf.Max(0f, thermalResponse.heatTolerance + bodyEffects.heatToleranceChange);
+        thermalResponse.coldTolerance = Mathf.Max(0f, thermalResponse.coldTolerance + bodyEffects.coldToleranceChange +
+                                                      perkEffects.coldToleranceChange);
+        thermalResponse.heatTolerance = Mathf.Max(0f, thermalResponse.heatTolerance + bodyEffects.heatToleranceChange +
+                                                      perkEffects.heatToleranceChange);
         bodyPlan = AnimalBodyPlan.Describe(genome);
+        perks = AnimalPerks.Describe(genome);
     }
 
     AnimalGenome CaptureGenome()
@@ -2091,20 +2152,21 @@ public class SeekFood : MonoBehaviour, IEcosystemMaterializationLifecycle
         if (referenceMaxHealth <= 0f) referenceMaxHealth = Mathf.Max(0.01f, maxHealth);
     }
 
-    // Harmful mutations add their cost on top of the traits' cost, outside its limits.
+    // Harmful mutations and perks add their costs on top of the traits' cost, outside its limits.
     public void RefreshMetabolicRate()
     {
         InitializeMetabolicReference();
 
-        float mutationLoad = genome != null && genome.IsValid
-            ? genome.EnergyUseMultiplier(harmfulMutationEnergyCost)
-            : 1f;
+        float inheritedCost = perkEffects.energyUseMultiplier *
+                              (genome != null && genome.IsValid
+                                  ? genome.EnergyUseMultiplier(harmfulMutationEnergyCost)
+                                  : 1f);
         float totalWeight = speedMetabolicWeight + strengthMetabolicWeight + bodyMassMetabolicWeight +
                             visionMetabolicWeight + energyCapacityMetabolicWeight +
                             staminaCapacityMetabolicWeight + healthMetabolicWeight;
         if (totalWeight <= Mathf.Epsilon)
         {
-            currentEnergyDrainPerSecond = Mathf.Max(0f, baseEnergyDrainPerSecond) * mutationLoad;
+            currentEnergyDrainPerSecond = Mathf.Max(0f, baseEnergyDrainPerSecond) * inheritedCost;
             return;
         }
 
@@ -2128,7 +2190,7 @@ public class SeekFood : MonoBehaviour, IEcosystemMaterializationLifecycle
         float minimum = Mathf.Max(0f, minimumMetabolicMultiplier);
         float maximum = Mathf.Max(minimum, maximumMetabolicMultiplier);
         float multiplier = Mathf.Clamp(weightedTraitCost / totalWeight, minimum, maximum);
-        currentEnergyDrainPerSecond = Mathf.Max(0f, baseEnergyDrainPerSecond) * multiplier * mutationLoad;
+        currentEnergyDrainPerSecond = Mathf.Max(0f, baseEnergyDrainPerSecond) * multiplier * inheritedCost;
     }
 
     // Called by SpeciesManager when this animal's group splits off into a new species.

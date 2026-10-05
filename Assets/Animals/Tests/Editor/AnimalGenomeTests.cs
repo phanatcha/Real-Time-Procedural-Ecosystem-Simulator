@@ -147,7 +147,7 @@ public class AnimalGenomeTests
     }
 
     [Test]
-    public void DistanceIsOneBetweenOppositeEndsOfEveryGeneAndFullyDifferentBodies()
+    public void DistanceIsOneBetweenOppositeEndsOfEveryGeneFullyDifferentBodiesAndOppositePerks()
     {
         AnimalGenome minimum = AnimalGenome.Create();
         AnimalGenome maximum = AnimalGenome.Create();
@@ -161,6 +161,11 @@ public class AnimalGenomeTests
         {
             BodySite site = (BodySite)index;
             maximum.SetPart(site, AnimalGenome.GetAllowedParts(site)[0], 1f);
+        }
+
+        for (int index = 0; index < AnimalGenome.PerkCount; index++)
+        {
+            maximum.SetPerk((AnimalPerk)index, true);
         }
 
         Assert.That(AnimalGenome.Distance(minimum, maximum), Is.EqualTo(1f).Within(Tolerance));
@@ -469,6 +474,110 @@ public class AnimalGenomeTests
     public void HarmfulMutationsDoNotCountTowardsGeneticDistance()
     {
         Assert.AreEqual(0f, AnimalGenome.Distance(CreateMidpointGenome(), CreateGenomeWithHarmfulMutations(20)));
+    }
+
+    [Test]
+    public void ANewGenomeHasNoPerks()
+    {
+        AnimalGenome genome = AnimalGenome.Create();
+
+        for (int index = 0; index < AnimalGenome.PerkCount; index++)
+        {
+            Assert.IsFalse(genome.HasPerk((AnimalPerk)index), ((AnimalPerk)index).ToString());
+        }
+    }
+
+    [Test]
+    public void SettingAPerkTurnsOnlyThatPerkOnAndOff()
+    {
+        AnimalGenome genome = AnimalGenome.Create();
+
+        genome.SetPerk(AnimalPerk.Venom, true);
+        Assert.IsTrue(genome.HasPerk(AnimalPerk.Venom));
+        Assert.IsFalse(genome.HasPerk(AnimalPerk.Camouflage));
+
+        genome.SetPerk(AnimalPerk.Venom, false);
+        Assert.IsFalse(genome.HasPerk(AnimalPerk.Venom));
+    }
+
+    [Test]
+    public void PerkFlipChanceIsAPercentagePerPerkPerBirth()
+    {
+        AnimalGenome genome = AnimalGenome.Create();
+        Assert.IsFalse(genome.MutatePerks(0f));
+
+        Assert.IsTrue(genome.MutatePerks(100f));
+        Assert.IsTrue(genome.HasPerk(AnimalPerk.ThickFur) && genome.HasPerk(AnimalPerk.ScavengerGut));
+        Assert.IsTrue(genome.MutatePerks(100f));
+        Assert.IsFalse(genome.HasPerk(AnimalPerk.ThickFur) || genome.HasPerk(AnimalPerk.ScavengerGut));
+
+        // At 1% per perk, about one perk flips in every 100 / PerkCount = 20 births.
+        int flips = 0;
+        for (int birth = 0; birth < 2000; birth++)
+        {
+            AnimalGenome child = AnimalGenome.Create();
+            child.MutatePerks(1f);
+            for (int index = 0; index < AnimalGenome.PerkCount; index++)
+            {
+                if (child.HasPerk((AnimalPerk)index)) flips++;
+            }
+        }
+
+        Assert.That(flips, Is.InRange(60, 140));
+    }
+
+    [Test]
+    public void ClonesKeepTheirPerks()
+    {
+        AnimalGenome parent = CreateMidpointGenome();
+        parent.SetPerk(AnimalPerk.Camouflage, true);
+
+        Assert.IsTrue(parent.Clone().HasPerk(AnimalPerk.Camouflage));
+        Assert.IsTrue(parent.CreateMutatedCopy(100f, 0.5f, BodyPlanMutation.Default, out _)
+                            .HasPerk(AnimalPerk.Camouflage));
+    }
+
+    [Test]
+    public void AChildOfTwoParentsTakesEachPerkFromOneParent()
+    {
+        AnimalGenome first = CreateMidpointGenome();
+        AnimalGenome second = CreateMidpointGenome();
+        for (int index = 0; index < AnimalGenome.PerkCount; index++)
+        {
+            first.SetPerk((AnimalPerk)index, true);
+        }
+
+        int[] fromFirst = new int[AnimalGenome.PerkCount];
+        for (int child = 0; child < 400; child++)
+        {
+            AnimalGenome genome = AnimalGenome.Recombine(first, second);
+            for (int index = 0; index < AnimalGenome.PerkCount; index++)
+            {
+                if (genome.HasPerk((AnimalPerk)index)) fromFirst[index]++;
+            }
+        }
+
+        foreach (int count in fromFirst)
+        {
+            Assert.That(count, Is.InRange(140, 260));
+        }
+    }
+
+    [Test]
+    public void APerkOfDifferenceCountsHalfAsMuchAsAWholeBodyPart()
+    {
+        AnimalGenome plain = CreateMidpointGenome();
+        AnimalGenome venomous = CreateMidpointGenome();
+        venomous.SetPerk(AnimalPerk.Venom, true);
+        AnimalGenome withNeck = CreateMidpointGenome();
+        withNeck.SetPart(BodySite.Head, BodyPartType.Neck, 1f);
+
+        float perkDistance = AnimalGenome.Distance(plain, venomous);
+
+        float expectedRatio = AnimalGenome.PerkDistanceWeight / AnimalGenome.BodySiteDistanceWeight;
+        Assert.That(perkDistance / AnimalGenome.Distance(plain, withNeck), Is.EqualTo(expectedRatio).Within(Tolerance));
+        // Under half the default species threshold (0.03), so one perk doesn't lower fertility.
+        Assert.Less(perkDistance, 0.015f);
     }
 
     [Test]

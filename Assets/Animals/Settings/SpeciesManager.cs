@@ -9,7 +9,9 @@ public enum AgentDeathCause
     OldAge,
     Other,
     ColdExposure,
-    HeatExposure
+    HeatExposure,
+    // Bit a venomous animal.
+    Venom
 }
 
 // Animals kept as numbers away from the camera (see OffscreenPopulationBridge). They keep their species
@@ -53,6 +55,8 @@ public sealed class SpeciesTelemetryRecord
     public float sexualDrive;
     [Tooltip("Average number of harmful mutations carried, each adding to energy use.")]
     public float harmfulMutations;
+    [Tooltip("Share of the living members with each perk (0-1), indexed by AnimalPerk.")]
+    public float[] perkShares = new float[AnimalGenome.PerkCount];
     public int births;
     public int deaths;
     public int starvationDeaths;
@@ -60,6 +64,7 @@ public sealed class SpeciesTelemetryRecord
     public int oldAgeDeaths;
     public int coldExposureDeaths;
     public int heatExposureDeaths;
+    public int venomDeaths;
     public int fightResponses;
     public int fleeResponses;
     public int reproductionEvents;
@@ -521,6 +526,7 @@ public class SpeciesManager : MonoBehaviour
             if (deathCause == AgentDeathCause.OldAge) record.oldAgeDeaths++;
             if (deathCause == AgentDeathCause.ColdExposure) record.coldExposureDeaths++;
             if (deathCause == AgentDeathCause.HeatExposure) record.heatExposureDeaths++;
+            if (deathCause == AgentDeathCause.Venom) record.venomDeaths++;
             
             if (speciesPopulation[speciesName] <= 0)
             {
@@ -796,6 +802,16 @@ public class SpeciesManager : MonoBehaviour
         record.maxLifespan = Mathf.Lerp(record.maxLifespan, agent.maxLifespan, weight);
         record.sexualDrive = Mathf.Lerp(record.sexualDrive, agent.sexualDrive, weight);
         record.harmfulMutations = Mathf.Lerp(record.harmfulMutations, agent.HarmfulMutations, weight);
+        if (record.perkShares == null || record.perkShares.Length != AnimalGenome.PerkCount)
+        {
+            record.perkShares = new float[AnimalGenome.PerkCount];
+        }
+
+        for (int perk = 0; perk < record.perkShares.Length; perk++)
+        {
+            record.perkShares[perk] = Mathf.Lerp(record.perkShares[perk],
+                                                 agent.HasPerk((AnimalPerk)perk) ? 1f : 0f, weight);
+        }
         if (agent.ThermalResponse != null)
         {
             record.preferredTemperature = Mathf.Lerp(record.preferredTemperature,
@@ -827,9 +843,11 @@ public class SpeciesManager : MonoBehaviour
             builder.Append($"preferredC={record.preferredTemperature:F1}, coldTolerance={record.coldTolerance:F1}, ");
             builder.Append($"heatTolerance={record.heatTolerance:F1}, sexualDrive={record.sexualDrive:F2}, ");
             builder.Append($"harmfulMutations={record.harmfulMutations:F1}, ");
+            builder.Append($"perks=[{AnimalPerks.DescribeShares(record.perkShares)}], ");
             builder.Append($"living={living}, births={record.births}, deaths={record.deaths}, ");
             builder.Append($"oldAge={record.oldAgeDeaths}, ");
             builder.Append($"coldExposure={record.coldExposureDeaths}, heatExposure={record.heatExposureDeaths}, ");
+            builder.Append($"venom={record.venomDeaths}, ");
             builder.Append($"fight={record.fightResponses}, flee={record.fleeResponses}, ");
             builder.Append($"offspring={record.reproductionEvents} ({record.sexualOffspring} with two parents), ");
             builder.Append($"plants={record.plantMeals} ");

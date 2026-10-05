@@ -17,6 +17,7 @@ public class FoodItem : MonoBehaviour
         new Dictionary<Vector2Int, List<FoodItem>>();
     private static readonly int BaseColorId = Shader.PropertyToID("_BaseColor");
     private static readonly int ColorId = Shader.PropertyToID("_Color");
+    private static readonly Color SpoiledColor = new Color(0.24f, 0.2f, 0.07f, 1f);
 
     [Header("Food Properties")]
     public FoodType foodType = FoodType.Plant;
@@ -57,10 +58,16 @@ public class FoodItem : MonoBehaviour
     [Min(0.01f)] public float minimumSpoilageMultiplier = 0.25f;
     [Min(0.01f)] public float maximumSpoilageMultiplier = 4f;
     [Min(0.05f)] public float temperatureSampleInterval = 0.5f;
+    [Tooltip("Simulated seconds, at the reference temperature, that the food stays as spoiled once it goes off. " +
+             "Only animals with a scavenger gut can eat spoiled food. Zero removes it as soon as it goes off.")]
+    [Min(0f)] public float spoiledLifetime;
 
     [Header("Spoilage Runtime")]
     [SerializeField, Range(0f, 1f)] private float freshness = 1f;
     [SerializeField] private float remainingReferenceLifetime;
+    [SerializeField] private bool spoiled;
+    [Tooltip("What is left of the spoiled stage, from 1 when the food goes off to 0 when it is gone.")]
+    [SerializeField, Range(0f, 1f)] private float spoiledRemaining;
     [SerializeField] private bool hasLocalTemperature;
     [SerializeField] private float localTemperatureCelsius = 20f;
     [SerializeField] private float currentSpoilageMultiplier = 1f;
@@ -75,6 +82,8 @@ public class FoodItem : MonoBehaviour
     public bool IsAvailable => !consumed && isActiveAndEnabled;
     public bool IsPerishable => referenceLifetime > 0f && IsFinite(referenceLifetime);
     public float Freshness => freshness;
+    // Gone off but still there: only animals with a scavenger gut can eat it.
+    public bool IsSpoiled => spoiled;
     public float RemainingReferenceLifetime => remainingReferenceLifetime;
     public float CurrentSpoilageMultiplier => currentSpoilageMultiplier;
 
@@ -151,13 +160,14 @@ public class FoodItem : MonoBehaviour
     }
 
     public void Configure(FoodType type, float rawNutrition, string sourceSpecies = "", float lifetime = 0f,
-                          float requiredReach = 0f)
+                          float requiredReach = 0f, float spoiledFor = 0f)
     {
         foodType = type;
         nutritionValue = Mathf.Max(0f, rawNutrition);
         sourceSpeciesName = sourceSpecies;
         requiredFeedingReach = Mathf.Max(0f, requiredReach);
         referenceLifetime = IsFinite(lifetime) ? Mathf.Max(0f, lifetime) : 0f;
+        spoiledLifetime = IsFinite(spoiledFor) ? Mathf.Max(0f, spoiledFor) : 0f;
         ResetFreshness();
     }
 
@@ -179,17 +189,56 @@ public class FoodItem : MonoBehaviour
             SampleTemperature();
         }
 
-        freshness = Mathf.Max(0f, freshness - elapsed * currentSpoilageMultiplier / referenceLifetime);
+        float decay = elapsed * currentSpoilageMultiplier;
+        if (spoiled)
+        {
+            spoiledRemaining = Mathf.Max(0f, spoiledRemaining - decay / spoiledLifetime);
+            if (spoiledRemaining <= 0f)
+            {
+                RemoveFromSimulation();
+            }
+
+            return;
+        }
+
+        freshness = Mathf.Max(0f, freshness - decay / referenceLifetime);
         remainingReferenceLifetime = freshness * referenceLifetime;
-        if (freshness <= 0f)
+        if (freshness > 0f)
+        {
+            return;
+        }
+
+        if (spoiledLifetime > 0f && IsFinite(spoiledLifetime))
+        {
+            BeginSpoiledStage();
+        }
+        else
         {
             RemoveFromSimulation();
         }
     }
 
+    // The food has gone off: it stays for its spoiled lifetime, darker, for animals with a scavenger gut.
+    void BeginSpoiledStage()
+    {
+        spoiled = true;
+        spoiledRemaining = 1f;
+
+        MeshRenderer meshRenderer = GetComponent<MeshRenderer>();
+        if (meshRenderer == null) return;
+
+        MaterialPropertyBlock propertyBlock = new MaterialPropertyBlock();
+        meshRenderer.GetPropertyBlock(propertyBlock);
+        propertyBlock.SetColor(BaseColorId, SpoiledColor);
+        propertyBlock.SetColor(ColorId, SpoiledColor);
+        meshRenderer.SetPropertyBlock(propertyBlock);
+    }
+
     void ResetFreshness()
     {
         freshness = 1f;
+        spoiled = false;
+        spoiledRemaining = 0f;
         remainingReferenceLifetime = IsPerishable ? referenceLifetime : 0f;
         SampleTemperature();
     }
@@ -278,8 +327,9 @@ public class FoodItem : MonoBehaviour
         return TryConsume(out nutrition, out _);
     }
 
+    // spoiledLifetime is how long the carcass stays as spoiled meat for scavengers once it goes off.
     public static FoodItem CreateCarcass(Vector3 position, float rawNutrition, string sourceSpecies,
-                                         float lifetime, float scale)
+                                         float lifetime, float scale, float spoiledLifetime = 0f)
     {
         if (rawNutrition <= 0f)
         {
@@ -301,7 +351,7 @@ public class FoodItem : MonoBehaviour
         rigidbody.useGravity = false;
 
         FoodItem foodItem = carcass.AddComponent<FoodItem>();
-        foodItem.Configure(FoodType.Meat, rawNutrition, sourceSpecies, lifetime);
+        foodItem.Configure(FoodType.Meat, rawNutrition, sourceSpecies, lifetime, spoiledFor: spoiledLifetime);
 
         MeshRenderer renderer = carcass.GetComponent<MeshRenderer>();
         MaterialPropertyBlock propertyBlock = new MaterialPropertyBlock();

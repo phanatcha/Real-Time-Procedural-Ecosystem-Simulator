@@ -205,6 +205,7 @@ public class EcosystemHud : MonoBehaviour
                     $"sexual drive {now.sexualDrive:0.00} {Signed(now.sexualDrive - first.sexualDrive, "0.00")}");
         text.Append($"\n   harmful mutations: {now.harmfulMutations:0.0} " +
                     $"{Signed(now.harmfulMutations - first.harmfulMutations, "0.0")}");
+        text.Append($"\n   perks: {AnimalPerks.DescribeShares(record.perkShares)}");
         text.Append($"\n   body parts: {DescribeBodyParts(manager, largest)}");
         text.Append($"\n   swimming ability: {swimmingSummary}");
     }
