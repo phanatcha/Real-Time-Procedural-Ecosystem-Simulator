@@ -39,6 +39,7 @@ public class VegetationTypeSettings
 [CreateAssetMenu()]
 public class VegetationSettings : ScriptableObject
 {
+    [Tooltip("Replaced by a seed from the world seed when SeedManager generates the world.")]
     public int seed = 0;
 
     public VegetationTypeSettings trees = new VegetationTypeSettings

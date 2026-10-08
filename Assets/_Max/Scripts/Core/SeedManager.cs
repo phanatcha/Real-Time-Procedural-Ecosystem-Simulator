@@ -170,11 +170,11 @@ public class SeedManager : MonoBehaviour
 
         if (terrainGenerator != null)
         {
-            int terrainSeed = GetSeed("Terrain");
+            WorldSeeds seeds = GetWorldSeeds(seedString);
 
-            Debug.Log($"Terrain Seed: {terrainSeed}");
+            Debug.Log($"World seeds: {seeds}");
 
-            terrainGenerator.GenerateTerrain(terrainSeed);
+            terrainGenerator.GenerateTerrain(seeds);
         }
         else
         {
@@ -196,6 +196,24 @@ public class SeedManager : MonoBehaviour
     public static int GetSeed(string seedString, string systemName)
     {
         return StringToSeed(seedString + "_" + systemName);
+    }
+
+
+
+    // The seed of every part of the world for a seed string. Editor tools use it to rebuild the same world.
+    public static WorldSeeds GetWorldSeeds(string seedString)
+    {
+        return new WorldSeeds
+        {
+            terrain = GetSeed(seedString, "Terrain"),
+            ridges = GetSeed(seedString, "Ridges"),
+            rivers = GetSeed(seedString, "Rivers"),
+            lakes = GetSeed(seedString, "Lakes"),
+            vegetation = GetSeed(seedString, "Vegetation"),
+            moisture = GetSeed(seedString, "Moisture"),
+            temperature = GetSeed(seedString, "Temperature"),
+            resourcePatches = GetSeed(seedString, "ResourcePatches")
+        };
     }
 
 

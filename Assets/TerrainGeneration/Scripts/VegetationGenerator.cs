@@ -61,7 +61,9 @@ public static class VegetationGenerator
         int gzMin = Mathf.FloorToInt(chunkWorldMin.y / cellSize) - 1;
         int gzMax = Mathf.CeilToInt(chunkWorldMax.y / cellSize) + 1;
 
-        float saltBase = seed * 13.7f + typeSalt * 91.3f;
+        // The seed moves the points the hashes below read by up to 235 m, in 1024 steps. Hash21 loses precision
+        // far from the origin, and world seeds use the whole int range, so seed * 13.7 would line plants up in rows.
+        float saltBase = (seed & 1023) * 0.2293f + typeSalt * 91.3f;
 
         for (int gx = gxMin; gx <= gxMax; gx++)
         {

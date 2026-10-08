@@ -47,21 +47,24 @@ public class TextureData : UpdatableData
     float savedMinHeight;
     float savedMaxHeight;
 
-    public void ApplyToMaterial(Material material)
+    // definitions replaces this asset's environment definitions, for a world whose moisture is moved by its
+    // world seed (see TerrainGenerator).
+    public void ApplyToMaterial(Material material, EnvironmentDefinitions definitions = null)
     {
-        if (material == null || environmentDefinitions == null) return;
+        EnvironmentDefinitions environment = definitions != null ? definitions : environmentDefinitions;
+        if (material == null || environment == null) return;
 
         material.SetInt("layerCount", layers.Length);
         material.SetColorArray("baseColours", GetColours());
-        material.SetFloatArray("baseStartHeights", GetStartHeights());
+        material.SetFloatArray("baseStartHeights", GetStartHeights(environment));
         material.SetFloatArray("baseBlends", GetBlends());
-        material.SetFloat("normalizedWaterLevel", environmentDefinitions.ShorelineThreshold);
-        material.SetFloat("landThreshold", environmentDefinitions.LandThreshold);
+        material.SetFloat("normalizedWaterLevel", environment.ShorelineThreshold);
+        material.SetFloat("landThreshold", environment.LandThreshold);
 
         material.SetInt("enableBog", enableBog ? 1 : 0);
         material.SetColor("bogTint", bogTint);
-        material.SetFloat("moistureScale", Mathf.Max(environmentDefinitions.moistureScale, 0.01f));
-        material.SetVector("moistureOffset", environmentDefinitions.moistureOffset);
+        material.SetFloat("moistureScale", Mathf.Max(environment.moistureScale, 0.01f));
+        material.SetVector("moistureOffset", environment.moistureOffset);
         material.SetFloat("bogMoistureThreshold", bogMoistureThreshold);
         material.SetFloat("bogMinHeight", bogMinHeight);
         material.SetFloat("bogMaxHeight", bogMaxHeight);
@@ -95,12 +98,12 @@ public class TextureData : UpdatableData
         return colours;
     }
 
-    float[] GetStartHeights()
+    float[] GetStartHeights(EnvironmentDefinitions environment)
     {
         float[] heights = new float[layers.Length];
         for (int i = 0; i < layers.Length; i++)
         {
-            heights[i] = environmentDefinitions.GetBiomeStartHeight(layers[i].biome);
+            heights[i] = environment.GetBiomeStartHeight(layers[i].biome);
         }
         return heights;
     }

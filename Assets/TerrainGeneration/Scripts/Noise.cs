@@ -192,6 +192,7 @@ public class NoiseSettings {
 	public float persistance =.45f;
 	public float lacunarity = 2.2f;
 
+	[Tooltip("Replaced by a seed from the world seed when SeedManager generates the world.")]
 	public int seed;
 	public Vector2 offset;
 
@@ -213,6 +214,7 @@ public class NoiseSettings {
 
 [System.Serializable]
 public class RidgeSettings {
+	[Tooltip("Replaced by a seed from the world seed when SeedManager generates the world.")]
 	public int seed;
 	public float scale = 220f;
 	public int octaves = 4;

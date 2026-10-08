@@ -4,6 +4,7 @@ using UnityEngine;
 public class RiverSettings
 {
     public bool enabled = true;
+    [Tooltip("Replaced by a seed from the world seed when SeedManager generates the world.")]
     public int seed;
     [Tooltip("World units per meander wavelength.")]
     public float scale = 250f;
@@ -31,6 +32,7 @@ public class RiverSettings
 public class LakeSettings
 {
     public bool enabled = true;
+    [Tooltip("Replaced by a seed from the world seed when SeedManager generates the world.")]
     public int seed;
     [Tooltip("World units per lake-noise feature - bigger = fewer, larger lakes.")]
     public float scale = 400f;

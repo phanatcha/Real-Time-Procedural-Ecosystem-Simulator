@@ -5,7 +5,7 @@ Open **Tools → Boreal Ecosystem → Habitat Analysis** in Unity. It measures, 
 ## Run and export
 
 1. The window loads the active terrain's settings and the founders' start point. **Load from active terrain** and **Use scene start point** refresh them.
-2. Enter seeds, one per line, exactly as typed on the seed screen (for example `FOREST-001`). Each seed gets the same terrain seed as in the game.
+2. Enter seeds, one per line, exactly as typed on the seed screen (for example `FOREST-001`). Each seed builds the same world as in the game: its terrain, ridges, rivers, lakes, moisture, temperature and plant patches all take their seeds from it. `settings-snapshot.json` lists them under `worldSeeds`.
 3. Keep **Sample spacing** at 8 m, the spacing the animals' navigation samples terrain at. 16–32 m is faster for quick comparisons but can miss narrow barriers.
 4. Click **Analyse**. The results list shows availability, accessibility and habitat regions per seed; select one to see its map.
 5. Click **Export maps + CSV…** and choose a folder outside `Assets`. A new timestamped folder contains:
