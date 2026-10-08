@@ -40,6 +40,15 @@ public static class TerrainHeightEvaluator
         }
 
         float heightAfterRidges = noiseValue;
+
+        // The island falloff comes before the carving, so the river and lake height ranges are tested against the
+        // height the ground really ends up with, and a bed level is the channel's final height before the curve.
+        // Testing them before the falloff made rivers pick ground the falloff later sank into the sea.
+        if (settings.useFalloff)
+        {
+            noiseValue = Mathf.Clamp01(noiseValue - falloffValue);
+        }
+
         float riverStrength = 0f;
         if (settings.riverSettings != null && settings.riverSettings.enabled)
         {
@@ -66,10 +75,7 @@ public static class TerrainHeightEvaluator
         if (settings.lakeSettings != null && settings.lakeSettings.enabled)
         {
             LakeSettings lake = settings.lakeSettings;
-            float lakeNoise = (OpenSimplex2.Noise2(
-                lake.seed + 2929,
-                terrainPosition.x / lake.scale,
-                terrainPosition.y / lake.scale) + 1f) * 0.5f;
+            float lakeNoise = LakeNoise(lake, terrainPosition);
             float lakeMask = Mathf.Clamp01(Mathf.InverseLerp(
                 lake.threshold - 0.05f,
                 lake.threshold,
@@ -87,11 +93,6 @@ public static class TerrainHeightEvaluator
             noiseValue = Mathf.Lerp(noiseValue, lake.bedLevel, lakeStrength);
         }
 
-        if (settings.useFalloff)
-        {
-            noiseValue = Mathf.Clamp01(noiseValue - falloffValue);
-        }
-
         float beforeErosion = heightCurve.Evaluate(noiseValue) * settings.heightMultiplier;
         float height = erosion == null ? beforeErosion : erosion.ApplyHeight(terrainPosition, beforeErosion);
         return new TerrainHeightEvaluation
@@ -105,5 +106,22 @@ public static class TerrainHeightEvaluator
             heightAfterRidges = heightAfterRidges,
             falloff = falloffValue
         };
+    }
+
+    // How far inside one of the lake noise's patches a point lies: 0 at the patch edge (the lake threshold), 1 where
+    // the noise peaks. Lakes are only carved into the land, so the sea map uses this to keep its dead zones in deep
+    // water inside these patches.
+    public static float LakeBasin(LakeSettings lake, Vector2 terrainPosition)
+    {
+        if (lake == null || !lake.enabled) return 0f;
+        return Mathf.InverseLerp(lake.threshold, 1f, LakeNoise(lake, terrainPosition));
+    }
+
+    static float LakeNoise(LakeSettings lake, Vector2 terrainPosition)
+    {
+        return (OpenSimplex2.Noise2(
+            lake.seed + 2929,
+            terrainPosition.x / lake.scale,
+            terrainPosition.y / lake.scale) + 1f) * 0.5f;
     }
 }

@@ -44,7 +44,7 @@ public sealed class TerrainReportData : IDisposable
         "Actual river carving weight. White = strongest carving; black = no carving.",
         "Actual lake carving weight. White = strongest carving; black = no carving.",
         "World-space height subtraction mask. Black when falloff is disabled.",
-        "Height after ridge blending, river/lake carving and falloff, before the height curve.",
+        "Height after ridge blending, falloff and river/lake carving, before the height curve.",
         "Final world height after the height curve, multiplier and optional hydraulic erosion. This drives the 3D meshes.",
         "The same terrain before hydraulic erosion, on the same fixed height scale as the final heightmap.",
         "Actual final minus original height. Blue = erosion, orange = deposition, white = unchanged. Units and symmetric color range are recorded in the captions.",

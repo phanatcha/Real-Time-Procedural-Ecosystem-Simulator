@@ -438,7 +438,7 @@ public class TerrainReportPreviewWindow : EditorWindow
         result.AppendLine(string.Format(CultureInfo.InvariantCulture,
             "Before/after heightmaps use a fixed grayscale range: black = {0:0.###}, white = {1:0.###} world units. Actual final sampled range: {2:0.###}–{3:0.###}. PNGs are 8-bit visualizations, not lossless height data. Other grayscale stages use 0–1. Values outside the display range are clipped.\n",
             generated.HeightScaleMinimum, generated.HeightScaleMaximum, generated.MinimumHeight, generated.MaximumHeight));
-        result.AppendLine("Pipeline: domain-warped sampling coordinates → seeded octave noise → mountain ridge blending → river carving → lake carving → world falloff → height curve and multiplier → optional hydraulic erosion → mesh. Stage 01 disables domain warp only as a comparison; stage 02 is the actual generator input. River and lake images show carving weights, not water occupancy. World falloff is a subtraction mask, not a heightmap.\n");
+        result.AppendLine("Pipeline: domain-warped sampling coordinates → seeded octave noise → mountain ridge blending → world falloff → river carving → lake carving → height curve and multiplier → optional hydraulic erosion → mesh. Stage 01 disables domain warp only as a comparison; stage 02 is the actual generator input. River and lake images show carving weights, not water occupancy. World falloff is a subtraction mask, not a heightmap.\n");
         if (generated.Erosion != null)
         {
             HydraulicErosionSettings erosion = heights.erosionSettings.ValidatedCopy();

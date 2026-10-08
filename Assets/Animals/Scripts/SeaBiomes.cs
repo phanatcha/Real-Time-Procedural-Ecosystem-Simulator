@@ -2,7 +2,7 @@ using UnityEngine;
 
 // The kinds of sea the water divides into. Every patch of water gets one from its depth, the slope of its bed
 // (steep beds are rock, flat beds are sand and mud), the temperature at the surface, and whether it lies in one of
-// the terrain's carved basins.
+// the terrain's lake basins.
 public enum SeaBiome : byte
 {
     None,           // not water
@@ -36,7 +36,8 @@ public struct SeaBiomeRules : System.IEquatable<SeaBiomeRules>
     [Tooltip("How far patches of rock and sand blur that line, in degrees either way, so the bed isn't sorted " +
              "purely by slope.")]
     [Min(0f)] public float rockySlopeJitter;
-    [Tooltip("How much a spot must lie in one of the terrain's carved basins (0-1) to be a dead zone.")]
+    [Tooltip("How much a spot must lie in one of the terrain's lake basins (0-1) to be a dead zone. At sea this is how far " +
+             "inside the lake noise's patches it lies, from 0 at a patch edge to 1 where the noise peaks.")]
     [Range(0f, 1f)] public float deadZoneBasin;
     [Tooltip("Basins only turn into dead zones from this depth down, where the water stops mixing.")]
     public float deadZoneMinDepth;
@@ -59,7 +60,7 @@ public struct SeaBiomeRules : System.IEquatable<SeaBiomeRules>
         deadZoneEnergyCost = 3f
     };
 
-    // The biome of one patch of water. basin is how much the spot lies in a carved basin (0-1); reefPatch and
+    // The biome of one patch of water. basin is how much the spot lies in a lake basin (0-1); reefPatch and
     // substratePatch are smooth noise (0-1) that make reefs patchy and mix rock and sand on gentle slopes.
     public SeaBiome Classify(float depth, float slopeDegrees, float basin, float surfaceCelsius,
                              float reefPatch, float substratePatch)

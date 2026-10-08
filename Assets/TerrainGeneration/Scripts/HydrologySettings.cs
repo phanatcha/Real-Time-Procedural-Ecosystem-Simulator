@@ -12,13 +12,16 @@ public class RiverSettings
     [Tooltip("How wide the carved channel is, in noise-threshold units.")]
     public float width = 0.025f;
     [Range(0, 1)]
-    [Tooltip("Rivers only carve where the natural (pre-carve) terrain falls in this height range.")]
-    public float minHeightPercent = 0.15f;
+    [Tooltip("Rivers only carve where the ground, after the island falloff and before the height curve, falls in this range. " +
+             "Start it about 0.05 below the shoreline (about 0.55 with the current height curve and water level) so rivers reach the sea.")]
+    public float minHeightPercent = 0.5f;
     [Range(0, 1)]
-    public float maxHeightPercent = 0.65f;
+    public float maxHeightPercent = 0.8f;
     [Range(0, 1)]
-    [Tooltip("Pre-curve value the channel bed is pulled toward - keep below Water Shallow's start height.")]
-    public float bedLevel = 0.12f;
+    [Tooltip("Height the channel bed is pulled down to, after the island falloff and before the height curve. " +
+             "Keep it below the shoreline (about 0.55) so the channel fills with water, and no lower than Min Height Percent, " +
+             "or the carving raises the ground at the bottom of the range.")]
+    public float bedLevel = 0.5f;
 
     public void ValidateValues()
     {
@@ -40,13 +43,15 @@ public class LakeSettings
     [Tooltip("Only the noise values above this become a lake.")]
     public float threshold = 0.62f;
     [Range(0, 1)]
-    [Tooltip("Lakes only settle where the natural (pre-carve) terrain falls in this height range.")]
-    public float minHeightPercent = 0.1f;
+    [Tooltip("Lakes only settle where the ground, after the island falloff and before the height curve, falls in this range. " +
+             "Start it above the shoreline (about 0.55 with the current height curve and water level) so lakes stay inland.")]
+    public float minHeightPercent = 0.6f;
     [Range(0, 1)]
-    public float maxHeightPercent = 0.4f;
+    public float maxHeightPercent = 0.82f;
     [Range(0, 1)]
-    [Tooltip("Pre-curve value the lake bed is pulled toward - keep below Water Deep's start height for a proper deep look.")]
-    public float bedLevel = 0.08f;
+    [Tooltip("Height the lake bed is pulled down to, after the island falloff and before the height curve. " +
+             "Keep it just below the shoreline (about 0.55) so the lake fills with water.")]
+    public float bedLevel = 0.5f;
 
     public void ValidateValues()
     {

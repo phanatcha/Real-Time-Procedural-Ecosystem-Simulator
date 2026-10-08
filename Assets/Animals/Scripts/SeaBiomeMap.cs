@@ -7,7 +7,7 @@ using UnityEngine.EventSystems;
 using UnityEngine.UI;
 
 // The sea-biome rules for the current world, ready for background threads: the rules plus what they need to know
-// about the world (its water level, its seed, and how its normalised temperatures map to degrees).
+// about the world (its water level, its seed, its lake patches, and how its normalised temperatures map to degrees).
 public readonly struct SeaBiomeClassifier
 {
     // Rough size, in world units, of reef patches and of patches of rock and sand.
@@ -21,9 +21,11 @@ public readonly struct SeaBiomeClassifier
     readonly long substrateSeed;
     readonly float coldestCelsius;
     readonly float warmestCelsius;
+    readonly LakeSettings lakes;
+    readonly float meshScale;
 
     public SeaBiomeClassifier(SeaBiomeRules rules, EnvironmentDefinitions definitions, float waterLevel, int worldSeed,
-                              float coldestCelsius, float warmestCelsius)
+                              float coldestCelsius, float warmestCelsius, LakeSettings lakes = null, float meshScale = 1f)
     {
         this.rules = rules;
         this.definitions = definitions;
@@ -32,6 +34,8 @@ public readonly struct SeaBiomeClassifier
         substrateSeed = worldSeed + 104729L;
         this.coldestCelsius = coldestCelsius;
         this.warmestCelsius = warmestCelsius;
+        this.lakes = lakes;
+        this.meshScale = meshScale > 0f ? meshScale : 1f;
     }
 
     public bool IsValid => definitions != null && !float.IsInfinity(waterLevel);
@@ -48,7 +52,7 @@ public readonly struct SeaBiomeClassifier
         Vector2 position = new Vector2(sample.position.x, sample.position.z);
         depth = Mathf.Max(0f, waterLevel - sample.position.y);
         surfaceCelsius = SurfaceCelsius(position);
-        return rules.Classify(depth, sample.slopeDegrees, sample.lakeStrength, surfaceCelsius,
+        return rules.Classify(depth, sample.slopeDegrees, Basin(sample), surfaceCelsius,
                               Patch(reefSeed, position, ReefPatchSize),
                               Patch(substrateSeed, position, SubstratePatchSize));
     }
@@ -57,7 +61,17 @@ public readonly struct SeaBiomeClassifier
     public bool IsDeadZone(in EnvironmentSample sample)
     {
         return IsValid && sample.isValid && sample.isWater &&
-               rules.IsDeadZone(Mathf.Max(0f, waterLevel - sample.position.y), sample.lakeStrength);
+               rules.IsDeadZone(Mathf.Max(0f, waterLevel - sample.position.y), Basin(sample));
+    }
+
+    // How much a spot lies in one of the terrain's lake basins (0-1). Lakes are only carved into the land (item 45),
+    // so out at sea this is how far inside the lake noise's patches the spot is, which keeps dead zones in deep
+    // water there.
+    public float Basin(in EnvironmentSample sample)
+    {
+        if (lakes == null) return sample.lakeStrength;
+        Vector2 terrainPosition = new Vector2(sample.position.x, sample.position.z) / meshScale;
+        return Mathf.Max(sample.lakeStrength, TerrainHeightEvaluator.LakeBasin(lakes, terrainPosition));
     }
 
     // The temperature at the water surface, which is what an animal in the water feels.
@@ -213,7 +227,8 @@ public class SeaBiomeMap : MonoBehaviour
         }
 
         classifier = new SeaBiomeClassifier(CurrentRules, sampler.EnvironmentDefinitions, WaterAccess.SurfaceHeight,
-                                            sampler.HeightMapSettings.noiseSettings.seed, coldest, warmest);
+                                            sampler.HeightMapSettings.noiseSettings.seed, coldest, warmest,
+                                            sampler.HeightMapSettings.lakeSettings, sampler.MeshSettings.meshScale);
         return true;
     }
 
@@ -374,7 +389,7 @@ public class SeaBiomeMap : MonoBehaviour
                         kind = (byte)biome;
                         if (biome == SeaBiome.None) rows.statistics.landCells++;
                         else rows.statistics.Add(biome, depth, celsius, sample.slopeDegrees,
-                                                 sample.lakeStrength >= classifier.rules.deadZoneBasin);
+                                                 classifier.Basin(sample) >= classifier.rules.deadZoneBasin);
                     }
 
                     rows.cells[(z - first) * resolution + x] = kind;
@@ -607,7 +622,7 @@ public class SeaBiomeMap : MonoBehaviour
         text.AppendLine("Slope of the sea bed: " + DescribeBands(statistics.slopeHistogram,
                                                                  SeaBiomeStatistics.SlopeBands, "deg", water));
         text.AppendLine($"Surface temperature of the sea: {statistics.coldestWater:0.#} to {statistics.warmestWater:0.#} C");
-        text.AppendLine($"Carved basins (strength {mappedRules.deadZoneBasin:0.##} or more): " +
+        text.AppendLine($"Lake basins (strength {mappedRules.deadZoneBasin:0.##} or more): " +
                         $"{100.0 * statistics.basinCells / water:0.0}% of the sea" +
                         (statistics.basinCells > 0
                             ? $", {statistics.shallowestBasin:0.#}-{statistics.deepestBasin:0.#} m deep"

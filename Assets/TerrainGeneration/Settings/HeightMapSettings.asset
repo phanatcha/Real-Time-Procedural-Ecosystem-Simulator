@@ -41,17 +41,17 @@ MonoBehaviour:
     seed: 0
     scale: 300
     width: 0.065
-    minHeightPercent: 0.15
-    maxHeightPercent: 0.55
-    bedLevel: 0.2
+    minHeightPercent: 0.5
+    maxHeightPercent: 0.8
+    bedLevel: 0.5
   lakeSettings:
     enabled: 1
     seed: 0
     scale: 500
     threshold: 0.66
-    minHeightPercent: 0.1
-    maxHeightPercent: 0.42
-    bedLevel: 0.16
+    minHeightPercent: 0.6
+    maxHeightPercent: 0.82
+    bedLevel: 0.5
   erosionSettings:
     enabled: 1
     resolution: 257

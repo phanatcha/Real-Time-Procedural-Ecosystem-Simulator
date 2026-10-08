@@ -9,7 +9,7 @@
 
 | Figure | File | Meaning |
 | --- | --- | --- |
-| Before erosion, 3D | `14-before-erosion-3d.png` | Original geometry after noise shaping, river/lake carving, falloff, and the height curve |
+| Before erosion, 3D | `14-before-erosion-3d.png` | Original geometry after noise shaping, falloff, river/lake carving, and the height curve |
 | After erosion, 3D | `09-matching-3d-terrain.png` | The same geometry with the hydraulic erosion delta applied |
 | Before / after heightmaps | `11-before-erosion-heightmap.png`, `08-final-heightmap.png` | Identical grayscale height limits for a fair comparison |
 | Erosion / deposition | `12-erosion-deposition-change.png` | Blue: material removed; orange: material deposited; white: unchanged |

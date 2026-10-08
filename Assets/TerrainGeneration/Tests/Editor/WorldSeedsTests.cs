@@ -117,9 +117,11 @@ public class WorldSeedsTests
         {
             SeedManager.GetWorldSeeds("FOREST-001").ApplyTo(heights);
             SeedManager.GetWorldSeeds("MOSSY-FJORD").ApplyTo(other);
+            heights.useFalloff = false;
+            other.useFalloff = false;
 
-            // 0.3 lies inside both the river and the lake height ranges, and no ridge is added, so only the river
-            // and lake noise decide where water is carved.
+            // With no island falloff and no ridge, the ground stays at 0.72 everywhere, inside both the river and
+            // the lake height ranges, so only the river and lake noise decide where water is carved.
             int riverDifferences = 0;
             int lakeDifferences = 0;
             for (int x = -1000; x <= 1000; x += 20)
@@ -127,8 +129,8 @@ public class WorldSeedsTests
                 for (int y = -1000; y <= 1000; y += 20)
                 {
                     Vector2 position = new Vector2(x, y);
-                    TerrainHeightEvaluation first = TerrainHeightEvaluator.Evaluate(0.3f, 0f, position, heights, heights.heightCurve);
-                    TerrainHeightEvaluation second = TerrainHeightEvaluator.Evaluate(0.3f, 0f, position, other, other.heightCurve);
+                    TerrainHeightEvaluation first = TerrainHeightEvaluator.Evaluate(0.72f, 0f, position, heights, heights.heightCurve);
+                    TerrainHeightEvaluation second = TerrainHeightEvaluator.Evaluate(0.72f, 0f, position, other, other.heightCurve);
                     if (Mathf.Abs(first.riverStrength - second.riverStrength) > 0.5f) riverDifferences++;
                     if (Mathf.Abs(first.lakeStrength - second.lakeStrength) > 0.5f) lakeDifferences++;
                 }

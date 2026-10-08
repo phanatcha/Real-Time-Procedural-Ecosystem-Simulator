@@ -26,7 +26,7 @@ Use one region and seed for the complete sequence. Use the generated `FIGURE-CAP
 ## What the figures mean
 
 - Base noise is the configured octave-noise map with domain warp disabled for comparison. Domain-warped noise is the actual input to the terrain evaluator.
-- Ridge blending, river carving, lake carving, world falloff, and height-curve evaluation reuse the production terrain calculations. The preview does not implement a separate approximation of the terrain algorithm.
+- Ridge blending, world falloff, river carving, lake carving, and height-curve evaluation reuse the production terrain calculations. The preview does not implement a separate approximation of the terrain algorithm.
 - River and lake masks show carving weights, not every position classified as water. World falloff shows height subtraction. A disabled effect has a black mask or leaves the previous height unchanged.
 - All 2D maps have north (+Z) at the top and east (+X) at the right. Shared boundary samples overlap once when chunks are stitched. Global normalization is recommended; local normalization retains its existing chunk-dependent behavior.
 - Grayscale uses a fixed 0–1 range for intermediate maps and the settings' minimum/maximum heights for the final heightmap. The sampled region's range is also reported. PNGs are 8-bit illustrations, not lossless numerical height data; values beyond their display range are clipped.
