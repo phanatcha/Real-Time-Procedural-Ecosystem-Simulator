@@ -105,3 +105,10 @@ InitTestScene*.unity*
 
 # Auto-generated scenes by play mode tests
 /[Aa]ssets/[Ii]nit[Tt]est[Ss]cene*.unity*
+
+# macOS Finder metadata
+.DS_Store
+
+# Scenes Unity saves after a crash
+/[Aa]ssets/_Recovery/
+/[Aa]ssets/_Recovery.meta
