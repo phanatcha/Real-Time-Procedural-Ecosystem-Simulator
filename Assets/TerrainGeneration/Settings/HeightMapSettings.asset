@@ -15,7 +15,7 @@ MonoBehaviour:
   autoUpdate: 1
   noiseSettings:
     normalizeMode: 1
-    globalHeightBias: 0.02
+    globalHeightBias: 0.08
     globalContrast: 1.18
     scale: 300
     octaves: 4
@@ -36,6 +36,18 @@ MonoBehaviour:
     bandWidth: 0.22
     bandJitterScale: 1100
     bandJitterStrength: 0.22
+  valleySettings:
+    enabled: 1
+    seed: 0
+    scale: 1200
+    meander: 80
+    floorHalfWidth: 30
+    halfWidth: 140
+    floorLevel: 0.6
+    strength: 1
+    riverHalfWidth: 6
+    shoulderHeight: 0.6
+    shoulderWidth: 350
   riverSettings:
     enabled: 1
     seed: 0
@@ -70,7 +82,7 @@ MonoBehaviour:
     edgeFadeCells: 8
   useFalloff: 1
   worldRadius: 1000
-  heightMultiplier: 100
+  heightMultiplier: 180
   heightCurve:
     serializedVersion: 2
     m_Curve:

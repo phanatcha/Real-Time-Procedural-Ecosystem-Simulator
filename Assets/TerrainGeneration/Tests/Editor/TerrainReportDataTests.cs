@@ -83,6 +83,7 @@ public class TerrainReportDataTests
         heights.ridgeSettings.strength = 0f;
         heights.riverSettings.enabled = false;
         heights.lakeSettings.enabled = false;
+        heights.valleySettings.enabled = false;
         heights.useFalloff = false;
         using (TerrainReportData data = TerrainReportData.Generate(heights, meshes, null, Vector2Int.zero, 1, 0))
         {
@@ -95,6 +96,7 @@ public class TerrainReportDataTests
                     Assert.AreEqual(expected, data.Maps[(int)TerrainReportStage.ShapedHeight][x, y]);
                     Assert.AreEqual(0f, data.Maps[(int)TerrainReportStage.RiverMask][x, y]);
                     Assert.AreEqual(0f, data.Maps[(int)TerrainReportStage.LakeMask][x, y]);
+                    Assert.AreEqual(0f, data.Maps[(int)TerrainReportStage.ValleyMask][x, y]);
                     Assert.AreEqual(0f, data.Maps[(int)TerrainReportStage.Falloff][x, y]);
                 }
         }

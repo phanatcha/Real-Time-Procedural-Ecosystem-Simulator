@@ -5,6 +5,7 @@ public class HeightMapSettings : UpdatableData
 {
     public NoiseSettings noiseSettings;
     public RidgeSettings ridgeSettings = new RidgeSettings();
+    public ValleySettings valleySettings = new ValleySettings();
     public RiverSettings riverSettings = new RiverSettings();
     public LakeSettings lakeSettings = new LakeSettings();
 
@@ -45,6 +46,10 @@ public class HeightMapSettings : UpdatableData
         if (ridgeSettings != null)
         {
             ridgeSettings.ValidateValues();
+        }
+        if (valleySettings != null)
+        {
+            valleySettings.ValidateValues();
         }
         if (riverSettings != null)
         {

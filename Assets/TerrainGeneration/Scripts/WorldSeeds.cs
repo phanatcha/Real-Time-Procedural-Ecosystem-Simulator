@@ -28,6 +28,8 @@ public struct WorldSeeds
         if (heights.noiseSettings != null) heights.noiseSettings.seed = terrain;
         if (heights.ridgeSettings != null) heights.ridgeSettings.seed = ridges;
         if (heights.riverSettings != null) heights.riverSettings.seed = rivers;
+        // Each valley carries a river, so valleys belong to the river system.
+        if (heights.valleySettings != null) heights.valleySettings.seed = rivers;
         if (heights.lakeSettings != null) heights.lakeSettings.seed = lakes;
     }
 

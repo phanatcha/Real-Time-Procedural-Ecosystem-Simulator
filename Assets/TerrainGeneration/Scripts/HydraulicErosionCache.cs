@@ -96,6 +96,15 @@ public static class HydraulicErosionCache
             key.Add(ridge.scale, ridge.persistance, ridge.lacunarity, ridge.strength,
                 ridge.bandCenter, ridge.bandWidth, ridge.bandJitterScale, ridge.bandJitterStrength);
         }
+        ValleySettings valley = settings.valleySettings;
+        key.Add(valley != null);
+        if (valley != null)
+        {
+            key.Add(valley.enabled);
+            key.Add(valley.seed);
+            key.Add(valley.scale, valley.meander, valley.floorHalfWidth, valley.halfWidth, valley.floorLevel,
+                valley.strength, valley.riverHalfWidth, valley.shoulderHeight, valley.shoulderWidth);
+        }
         RiverSettings river = settings.riverSettings;
         key.Add(river != null);
         if (river != null)
