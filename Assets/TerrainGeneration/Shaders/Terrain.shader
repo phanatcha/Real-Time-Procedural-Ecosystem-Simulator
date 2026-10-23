@@ -17,10 +17,9 @@ Shader "Custom/Terrain"
             #pragma vertex vert
             #pragma fragment frag
 
-            #pragma multi_compile _ _MAIN_LIGHT_SHADOWS
-            #pragma multi_compile _ _MAIN_LIGHT_SHADOWS_CASCADE
-            #pragma multi_compile _ _MAIN_LIGHT_SHADOWS_SCREEN
-            #pragma multi_compile_fragment _ _SHADOWS_SOFT
+            #pragma multi_compile _ _MAIN_LIGHT_SHADOWS _MAIN_LIGHT_SHADOWS_CASCADE _MAIN_LIGHT_SHADOWS_SCREEN
+            #pragma multi_compile_fragment _ _SHADOWS_SOFT _SHADOWS_SOFT_LOW _SHADOWS_SOFT_MEDIUM _SHADOWS_SOFT_HIGH
+            #pragma multi_compile_fragment _ _SCREEN_SPACE_OCCLUSION
             #pragma multi_compile_fog
 
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
@@ -93,7 +92,6 @@ Shader "Custom/Terrain"
                 float4 positionHCS : SV_POSITION;
                 float3 positionWS : TEXCOORD0;
                 float3 normalWS : TEXCOORD1;
-                float4 shadowCoord : TEXCOORD2;
                 float fogFactor : TEXCOORD3;
             };
 
@@ -187,7 +185,6 @@ Shader "Custom/Terrain"
                 OUT.positionWS = TransformObjectToWorld(IN.positionOS.xyz);
                 OUT.normalWS = normalize(TransformObjectToWorldNormal(IN.normalOS));
                 OUT.positionHCS = TransformWorldToHClip(OUT.positionWS);
-                OUT.shadowCoord = TransformWorldToShadowCoord(OUT.positionWS);
                 OUT.fogFactor = ComputeFogFactor(OUT.positionHCS.z);
                 return OUT;
             }
@@ -272,7 +269,10 @@ Shader "Custom/Terrain"
                     }
                 }
 
-                Light mainLight = GetMainLight(IN.shadowCoord);
+                // Shadow coordinates are found per pixel, because each pixel picks its own shadow cascade. Passing the
+                // position lets the shadows fade out towards the shadow distance instead of ending in a hard line.
+                Light mainLight = GetMainLight(TransformWorldToShadowCoord(IN.positionWS), IN.positionWS, half4(1, 1, 1, 1));
+                AmbientOcclusionFactor occlusion = GetScreenSpaceAmbientOcclusion(GetNormalizedScreenSpaceUV(IN.positionHCS));
                 float NdotL = saturate(dot(normalWS, mainLight.direction));
                 float3 radiance = mainLight.color * (NdotL * mainLight.shadowAttenuation * mainLight.distanceAttenuation);
 
@@ -289,7 +289,8 @@ Shader "Custom/Terrain"
                     }
                 }
 
-                float3 ambient = SampleSH(normalWS);
+                radiance *= occlusion.directAmbientOcclusion;
+                float3 ambient = SampleSH(normalWS) * occlusion.indirectAmbientOcclusion;
 
                 float3 colour = albedo * (radiance + ambient);
                 colour = MixFog(colour, IN.fogFactor);
