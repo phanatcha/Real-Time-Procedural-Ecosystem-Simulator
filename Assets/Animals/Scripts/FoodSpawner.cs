@@ -95,6 +95,8 @@ public class FoodSpawner : MonoBehaviour
         // How far the plant's centre is above the ground it grows from.
         public float heightAboveGround;
         public bool isTall;
+        // Ground plants only: the summer forest food it is drawn as (see ForestFoodLooks). Looks only.
+        public ForestFood forestFood;
         // Sea plants only: the biome they grow in (None on land), the depth of the water under them, and whether
         // that is too deep to wade.
         public SeaBiome seaBiome;
@@ -104,6 +106,8 @@ public class FoodSpawner : MonoBehaviour
         // grown plant is ready to appear.
         public float regrowProgress;
         public FoodItem plant;
+        // Tall food only: the spruce the shoots grow on. It stays while they are eaten and regrow.
+        public GameObject tree;
     }
 
     private sealed class FoodTile
@@ -120,6 +124,7 @@ public class FoodSpawner : MonoBehaviour
         public Vector2Int coordinate;
         public readonly List<Vector3> positions = new List<Vector3>();
         public readonly List<float> moistures = new List<float>();
+        public readonly List<float> treeCovers = new List<float>();
         // 0 for ground plants, otherwise the height of tall food above the ground.
         public readonly List<float> heights = new List<float>();
 
@@ -134,6 +139,7 @@ public class FoodSpawner : MonoBehaviour
         {
             positions.Add(environment.position);
             moistures.Add(environment.moisture);
+            treeCovers.Add(environment.treeCover);
             heights.Add(height);
         }
 
@@ -146,10 +152,16 @@ public class FoodSpawner : MonoBehaviour
         }
     }
 
-    private static readonly int BaseColorId = Shader.PropertyToID("_BaseColor");
-    private static readonly int ColorId = Shader.PropertyToID("_Color");
-    private static readonly Color TallFoodColor = new Color(0.16f, 0.5f, 0.2f);
-    private static readonly Color TrunkColor = new Color(0.36f, 0.25f, 0.16f);
+    // Tall food is a clump of bright fresh shoots on the side of a Norway spruce, drawn like the island's own trees
+    // (the terrain's vegetation material and the world's vegetation colours). The shoots are the food; the spruce
+    // belongs to the site and stays standing while they are eaten and regrow.
+    private const int FoodSpruceVariants = 3;
+    private const float FoodSpruceHeight = 15f;
+    // How far up the spruce's tiers the shoots grow, between the lowest (0) and the top (1).
+    private const float ShootTierFraction = 0.55f;
+    private static Mesh[] foodSpruces;
+    private static Mesh[] shootClumps;
+    private static VegetationSettings foodLooksBuiltFor;
 
     private readonly Dictionary<Vector2Int, FoodTile> tiles = new Dictionary<Vector2Int, FoodTile>();
     private readonly HashSet<Vector2Int> neededTiles = new HashSet<Vector2Int>();
@@ -174,6 +186,7 @@ public class FoodSpawner : MonoBehaviour
             foreach (PlantSite site in tile.sites)
             {
                 if (site.plant != null) Destroy(site.plant.gameObject);
+                if (site.tree != null) Destroy(site.tree);
             }
         }
 
@@ -254,6 +267,8 @@ public class FoodSpawner : MonoBehaviour
 
             foreach (PlantSite site in tile.sites)
             {
+                if (site.isTall && tile.shown && site.tree == null) AddSpruce(site);
+
                 if (site.plant != null && site.plant.IsAvailable)
                 {
                     CountShown(site);
@@ -354,6 +369,8 @@ public class FoodSpawner : MonoBehaviour
                 regrowSeconds = baseRegrowSeconds / growthRate,
                 heightAboveGround = heightAboveGround,
                 isTall = isTall,
+                forestFood = ForestFoodLooks.Choose(moisture, candidates.treeCovers[index],
+                                                    SiteHash(position) % 1000 / 1000f),
                 regrowProgress = 1f
             });
         }
@@ -409,8 +426,13 @@ public class FoodSpawner : MonoBehaviour
 
         if (site.isTall)
         {
-            // Darker leaves on a thin trunk down to the ground, so tall food reads as a small tree.
-            DressWithStem(plantObject, TallFoodColor, site.heightAboveGround, 0.35f, TrunkColor);
+            DressAsShoots(plantObject);
+            AddSpruce(site);
+        }
+        else if (site.seaBiome == SeaBiome.None && FoodLooksReady(out Material material))
+        {
+            ForestFoodLooks.Dress(plantObject, site.forestFood, site.heightAboveGround, site.sizeMultiplier, material,
+                                  terrainWorld.Sampler.VegetationSettings);
         }
         else if (site.seaBiome != SeaBiome.None)
         {
@@ -418,42 +440,108 @@ public class FoodSpawner : MonoBehaviour
         }
     }
 
-    // Colours the food and hangs a stem of the given width beneath it, reaching the given distance down from the
-    // food's centre: a trunk for tall food.
-    static void DressWithStem(GameObject food, Color foodColor, float distanceDown, float width, Color stemColor)
+    // Hides the food's box and draws fresh shoots in its place; the box still decides where animals reach and touch.
+    void DressAsShoots(GameObject food)
     {
-        if (!food.TryGetComponent(out MeshRenderer foodRenderer))
-        {
-            return;
-        }
+        if (!food.TryGetComponent(out MeshRenderer foodRenderer) || !FoodLooksReady(out Material material)) return;
+        foodRenderer.enabled = false;
 
-        SetColor(foodRenderer, foodColor);
-
-        GameObject stem = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
-        stem.name = "Stem";
-        stem.layer = food.layer;
-        DestroyImmediate(stem.GetComponent<Collider>());
-        stem.transform.SetParent(food.transform, false);
-
-        // The food is unrotated, so undoing its scale keeps the stem's own proportions.
+        // The food box is scaled; this unrotated holder undoes that, so the shoots are in metres.
         Vector3 foodScale = food.transform.lossyScale;
-        float foodHalfHeight = foodScale.y * 0.5f;
-        float stemLength = Mathf.Max(0.1f, distanceDown - foodHalfHeight);
-        stem.transform.localScale = new Vector3(width / foodScale.x, stemLength * 0.5f / foodScale.y, width / foodScale.z);
-        stem.transform.localPosition = new Vector3(0f, -(foodHalfHeight + stemLength * 0.5f) / foodScale.y, 0f);
+        Transform holder = new GameObject("Look").transform;
+        holder.gameObject.layer = food.layer;
+        holder.SetParent(food.transform, false);
+        holder.localScale = new Vector3(1f / foodScale.x, 1f / foodScale.y, 1f / foodScale.z);
 
-        MeshRenderer stemRenderer = stem.GetComponent<MeshRenderer>();
-        stemRenderer.sharedMaterial = foodRenderer.sharedMaterial;
-        SetColor(stemRenderer, stemColor);
+        int hash = SiteHash(food.transform.position);
+        GameObject shoots = NewTreePart("Fresh Shoots", shootClumps[hash % shootClumps.Length], holder, food.layer, material);
+        shoots.transform.localRotation = Quaternion.Euler(0f, (hash >> 3) % 360, 0f);
     }
 
-    static void SetColor(Renderer target, Color color)
+    // A spruce sized so its tiers reach the shoots' height, standing to one side so the shoots sit on the outside of
+    // its branches, where they can be seen.
+    void AddSpruce(PlantSite site)
     {
-        MaterialPropertyBlock block = new MaterialPropertyBlock();
-        target.GetPropertyBlock(block);
-        block.SetColor(BaseColorId, color);
-        block.SetColor(ColorId, color);
-        target.SetPropertyBlock(block);
+        if (site.tree != null || !FoodLooksReady(out Material material)) return;
+
+        int hash = SiteHash(site.position);
+        Mesh mesh = foodSpruces[hash % foodSpruces.Length];
+        float shootHeight = VegetationMeshBuilder.SpruceSkirt +
+                            ShootTierFraction * (FoodSpruceHeight - VegetationMeshBuilder.SpruceSkirt - 2.3f);
+        float scale = Mathf.Clamp(site.heightAboveGround / shootHeight, 0.7f, 1.9f);
+        float angle = (hash >> 5) % 360 * Mathf.Deg2Rad;
+        Vector3 side = new Vector3(Mathf.Cos(angle), 0f, Mathf.Sin(angle));
+        Vector3 ground = site.position - Vector3.up * site.heightAboveGround -
+                         side * (VegetationMeshBuilder.SpruceRadius(ShootTierFraction) * scale * 0.85f);
+
+        TerrainEnvironmentSampler sampler = terrainWorld != null ? terrainWorld.Sampler : null;
+        if (sampler != null && sampler.TrySample(new Vector2(ground.x, ground.z), out EnvironmentSample below))
+        {
+            ground.y = below.height;
+        }
+
+        site.tree = NewTreePart("Spruce", mesh, spawnedFoodParent, foodPrefab.layer, material);
+        site.tree.transform.position = ground - Vector3.up * 0.4f;
+        site.tree.transform.rotation = Quaternion.Euler(0f, (hash >> 9) % 360, 0f);
+        site.tree.transform.localScale = Vector3.one * scale;
+    }
+
+    static int SiteHash(Vector3 position)
+    {
+        int hash = (Mathf.FloorToInt(position.x * 3.1f) * 73856093) ^ (Mathf.FloorToInt(position.z * 3.1f) * 19349663);
+        return hash & int.MaxValue;
+    }
+
+    static GameObject NewTreePart(string partName, Mesh mesh, Transform parent, int layer, Material material)
+    {
+        GameObject part = new GameObject(partName, typeof(MeshFilter), typeof(MeshRenderer));
+        part.layer = layer;
+        part.transform.SetParent(parent, false);
+        part.GetComponent<MeshFilter>().sharedMesh = mesh;
+        part.GetComponent<MeshRenderer>().sharedMaterial = material;
+        return part;
+    }
+
+    // Builds the spruces and shoots in the world's vegetation colours, again when a new world brings new settings.
+    bool FoodLooksReady(out Material material)
+    {
+        TerrainGenerator terrain = terrainWorld != null ? terrainWorld.terrainGenerator : null;
+        TerrainEnvironmentSampler sampler = terrainWorld != null ? terrainWorld.Sampler : null;
+        VegetationSettings vegetation = sampler != null ? sampler.VegetationSettings : null;
+        material = terrain != null ? terrain.vegetationMaterial : null;
+        if (material == null || vegetation == null) return false;
+
+        if (foodLooksBuiltFor != vegetation || foodSpruces == null || foodSpruces[0] == null)
+        {
+            DestroyMeshes(foodSpruces);
+            DestroyMeshes(shootClumps);
+            System.Random random = new System.Random(1729);
+            foodSpruces = new Mesh[FoodSpruceVariants];
+            for (int i = 0; i < FoodSpruceVariants; i++)
+            {
+                foodSpruces[i] = VegetationMeshBuilder.BuildTree(vegetation.trunkColour,
+                    i % 2 == 0 ? vegetation.foliageColourA : vegetation.foliageColourB, random, FoodSpruceHeight);
+            }
+
+            shootClumps = new Mesh[FoodSpruceVariants];
+            for (int i = 0; i < FoodSpruceVariants; i++)
+            {
+                shootClumps[i] = VegetationMeshBuilder.BuildShoots(vegetation.freshShootColour, random);
+            }
+
+            foodLooksBuiltFor = vegetation;
+        }
+
+        return true;
+    }
+
+    static void DestroyMeshes(Mesh[] meshes)
+    {
+        if (meshes == null) return;
+        foreach (Mesh mesh in meshes)
+        {
+            if (mesh != null) Destroy(mesh);
+        }
     }
 
     void HideTile(FoodTile tile)
@@ -470,6 +558,11 @@ public class FoodSpawner : MonoBehaviour
             }
 
             site.plant = null;
+            if (site.tree != null)
+            {
+                Destroy(site.tree);
+                site.tree = null;
+            }
         }
     }
 

@@ -107,6 +107,7 @@ public class TerrainChunk
     private MeshFilter treesMeshFilter;
     private MeshFilter grassMeshFilter;
     private MeshFilter rocksMeshFilter;
+    private MeshFilter bushesMeshFilter;
 
     private int vegetationLODIndex = -1;
 
@@ -598,6 +599,13 @@ public class TerrainChunk
             );
 
 
+        bushesMeshFilter =
+            AddVegetationLayer(
+                vegetationObject.transform,
+                "Bushes"
+            );
+
+
         if (previousLODIndex >= 0)
         {
             UpdateVegetationForLOD(
@@ -676,7 +684,8 @@ public class TerrainChunk
                 meshObject.transform.position,
                 out Mesh treesMesh,
                 out Mesh grassMesh,
-                out Mesh rocksMesh
+                out Mesh rocksMesh,
+                out Mesh bushesMesh
             );
 
 
@@ -703,6 +712,15 @@ public class TerrainChunk
             rocksMesh,
             "Rocks (" +
             projected.rocks.Count +
+            ")"
+        );
+
+
+        SetVegetationLayer(
+            bushesMeshFilter,
+            bushesMesh,
+            "Bushes (" +
+            projected.bushes.Count +
             ")"
         );
 

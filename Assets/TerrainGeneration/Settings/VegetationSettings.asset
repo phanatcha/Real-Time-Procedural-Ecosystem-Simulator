@@ -15,7 +15,7 @@ MonoBehaviour:
   seed: 0
   trees:
     enabled: 1
-    cellSize: 6.5
+    cellSize: 9.5
     density: 0.82
     minHeightPercent: 0.38
     maxHeightPercent: 0.76

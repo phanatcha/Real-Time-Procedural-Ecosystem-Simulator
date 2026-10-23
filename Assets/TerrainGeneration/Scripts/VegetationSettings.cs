@@ -34,6 +34,11 @@ public class VegetationTypeSettings
     [Range(0, 1)]
     [Tooltip("0 keeps the object upright; 1 aligns it completely to the terrain normal.")]
     public float surfaceAlignment = 0f;
+
+    [Tooltip("Only drawn on chunks at this terrain detail level or finer (the LOD numbers in TerrainGenerator's " +
+             "detail levels; 0 is the nearest). Small, numerous plants can stop at 1, about 200 m away.")]
+    [Min(0)]
+    public int maxLevelOfDetail = 4;
 }
 
 [CreateAssetMenu()]
@@ -82,10 +87,28 @@ public class VegetationSettings : ScriptableObject
         surfaceAlignment = 0.85f,
     };
 
+    // Berry bushes scattered over the forest floor and clearings, as in Valheim: bilberry on moist ground, raspberry
+    // on drier, sunnier ground. Scenery; the edible ones are FoodSpawner's ground plants, drawn as the same bushes.
+    public VegetationTypeSettings bushes = new VegetationTypeSettings
+    {
+        cellSize = 6f,
+        density = 0.55f,
+        minHeightPercent = 0.38f,
+        maxHeightPercent = 0.8f,
+        maxSlope = 0.3f,
+        minScale = 0.8f,
+        maxScale = 1.25f,
+        groundSink = 0.1f,
+        surfaceAlignment = 0.3f,
+        maxLevelOfDetail = 1,
+    };
+
     [Header("Tree colours")]
     public Color trunkColour = new Color(0.28f, 0.19f, 0.13f);
     public Color foliageColourA = new Color(0.09f, 0.20f, 0.13f);
     public Color foliageColourB = new Color(0.16f, 0.30f, 0.18f);
+    [Tooltip("Bright new growth on the spruces animals feed from (FoodSpawner's tall food).")]
+    public Color freshShootColour = new Color(0.56f, 0.8f, 0.26f);
 
     [Header("Grass colours")]
     public Color grassColourA = new Color(0.20f, 0.34f, 0.14f);
@@ -94,4 +117,11 @@ public class VegetationSettings : ScriptableObject
     [Header("Rock colours")]
     public Color rockColourA = new Color(0.42f, 0.42f, 0.40f);
     public Color rockColourB = new Color(0.55f, 0.53f, 0.50f);
+    [Header("Berry bush colours")]
+    public Color bushLeafColour = new Color(0.2f, 0.38f, 0.16f);
+    public Color bilberryColour = new Color(0.17f, 0.2f, 0.45f);
+    public Color raspberryColour = new Color(0.85f, 0.14f, 0.2f);
+
+    [Tooltip("Moss on the upper faces of rocks.")]
+    public Color rockMossColour = new Color(0.3f, 0.42f, 0.18f);
 }

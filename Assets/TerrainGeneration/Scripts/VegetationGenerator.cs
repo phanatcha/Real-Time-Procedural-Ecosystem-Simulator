@@ -15,13 +15,17 @@ public class VegetationPlacementData
     public List<VegetationInstance> trees = new List<VegetationInstance>();
     public List<VegetationInstance> grass = new List<VegetationInstance>();
     public List<VegetationInstance> rocks = new List<VegetationInstance>();
+    public List<VegetationInstance> bushes = new List<VegetationInstance>();
 }
 
 public static class VegetationGenerator
 {
+    // Three Norway spruces, as VegetationTemplateCache.BuildTreeTemplates builds them.
     const int TreeVariants = 3;
     const int GrassVariants = 3;
     const int RockVariants = 3;
+    // Two bilberry bushes and a raspberry bush, as VegetationTemplateCache.BuildBushTemplates builds them.
+    const int BushVariants = 3;
 
     public static VegetationPlacementData GeneratePlacements(
         Vector2 chunkWorldMin, Vector2 chunkWorldMax,
@@ -41,6 +45,10 @@ public static class VegetationGenerator
             chunkWorldMin, chunkWorldMax, heightMap, terrainMinHeight, terrainMaxHeight,
             environmentDefinitions, vegSettings.seed, chunkWorldCentre, numVertsPerLine, meshScale);
         GenerateType(vegSettings.rocks, EnvironmentResourceType.Rock, data.rocks, RockVariants, 3,
+            chunkWorldMin, chunkWorldMax, heightMap, terrainMinHeight, terrainMaxHeight,
+            environmentDefinitions, vegSettings.seed, chunkWorldCentre, numVertsPerLine, meshScale);
+        // Bushes grow where grass does, so they share its patches.
+        GenerateType(vegSettings.bushes, EnvironmentResourceType.Grass, data.bushes, BushVariants, 4,
             chunkWorldMin, chunkWorldMax, heightMap, terrainMinHeight, terrainMaxHeight,
             environmentDefinitions, vegSettings.seed, chunkWorldCentre, numVertsPerLine, meshScale);
 
@@ -94,7 +102,9 @@ public static class VegetationGenerator
                 if (localDensity <= 0f || densityRoll >= localDensity) continue;
 
                 float variantRoll = ValueNoise.Hash21(cellOrigin + new Vector2(saltBase, 88.3f));
-                int variant = Mathf.Clamp(Mathf.FloorToInt(variantRoll * variantCount), 0, variantCount - 1);
+                int variant = typeSalt == 4
+                    ? ChooseBushVariant(environmentSample, variantRoll)
+                    : Mathf.Clamp(Mathf.FloorToInt(variantRoll * variantCount), 0, variantCount - 1);
                 float rotRoll = ValueNoise.Hash21(cellOrigin + new Vector2(saltBase, 5.5f));
                 float scaleRoll = ValueNoise.Hash21(cellOrigin + new Vector2(saltBase, 44.4f));
 
@@ -112,6 +122,15 @@ public static class VegetationGenerator
                 });
             }
         }
+    }
+
+    // Bilberry carpets the moist forest floor; raspberry takes drier, sunnier ground. Returns 0 or 1 for a bilberry
+    // bush and 2 for a raspberry bush.
+    static int ChooseBushVariant(EnvironmentSample sample, float roll)
+    {
+        float raspberry = Mathf.Lerp(0.75f, 0.1f, Mathf.InverseLerp(0.3f, 0.65f, sample.moisture));
+        if (roll < raspberry) return 2;
+        return roll < raspberry + (1f - raspberry) * 0.5f ? 0 : 1;
     }
 
     public static VegetationPlacementData ProjectPlacementsToLOD(
@@ -133,6 +152,9 @@ public static class VegetationGenerator
         ProjectTypeToLOD(source.rocks, projected.rocks, vegSettings.rocks, heightMap,
             terrainMinHeight, terrainMaxHeight, environmentDefinitions,
             chunkWorldCentre, numVertsPerLine, meshScale, levelOfDetail);
+        ProjectTypeToLOD(source.bushes, projected.bushes, vegSettings.bushes, heightMap,
+            terrainMinHeight, terrainMaxHeight, environmentDefinitions,
+            chunkWorldCentre, numVertsPerLine, meshScale, levelOfDetail);
 
         return projected;
     }
@@ -143,6 +165,8 @@ public static class VegetationGenerator
         float terrainMinHeight, float terrainMaxHeight, EnvironmentDefinitions environmentDefinitions,
         Vector2 chunkWorldCentre, int numVertsPerLine, float meshScale, int levelOfDetail)
     {
+        if (settings == null || levelOfDetail > settings.maxLevelOfDetail) return;
+
         for (int i = 0; i < source.Count; i++)
         {
             VegetationInstance instance = source[i];
@@ -252,11 +276,12 @@ public static class VegetationGenerator
     }
 
     public static void BuildCombinedMeshes(VegetationPlacementData data, Vector3 chunkOrigin,
-        out Mesh treesMesh, out Mesh grassMesh, out Mesh rocksMesh)
+        out Mesh treesMesh, out Mesh grassMesh, out Mesh rocksMesh, out Mesh bushesMesh)
     {
         treesMesh = CombineType(data.trees, VegetationTemplateCache.Trees, chunkOrigin);
         grassMesh = CombineType(data.grass, VegetationTemplateCache.Grass, chunkOrigin);
         rocksMesh = CombineType(data.rocks, VegetationTemplateCache.Rocks, chunkOrigin);
+        bushesMesh = CombineType(data.bushes, VegetationTemplateCache.Bushes, chunkOrigin);
     }
 
     static Mesh CombineType(List<VegetationInstance> instances, Mesh[] templates, Vector3 chunkOrigin)
@@ -295,11 +320,13 @@ public static class VegetationTemplateCache
     static Mesh[] treeTemplates;
     static Mesh[] grassTemplates;
     static Mesh[] rockTemplates;
+    static Mesh[] bushTemplates;
     static VegetationSettings cachedFor;
 
     public static Mesh[] Trees => treeTemplates;
     public static Mesh[] Grass => grassTemplates;
     public static Mesh[] Rocks => rockTemplates;
+    public static Mesh[] Bushes => bushTemplates;
 
     public static void EnsureBuilt(VegetationSettings settings)
     {
@@ -307,12 +334,7 @@ public static class VegetationTemplateCache
 
         System.Random rng = new System.Random(settings.seed);
 
-        treeTemplates = new Mesh[3];
-        for (int i = 0; i < treeTemplates.Length; i++)
-        {
-            Color foliage = i % 2 == 0 ? settings.foliageColourA : settings.foliageColourB;
-            treeTemplates[i] = VegetationMeshBuilder.BuildTree(settings.trunkColour, foliage, rng);
-        }
+        treeTemplates = BuildTreeTemplates(settings, rng);
 
         grassTemplates = new Mesh[3];
         for (int i = 0; i < grassTemplates.Length; i++)
@@ -323,9 +345,35 @@ public static class VegetationTemplateCache
         rockTemplates = new Mesh[3];
         for (int i = 0; i < rockTemplates.Length; i++)
         {
-            rockTemplates[i] = VegetationMeshBuilder.BuildRock(settings.rockColourA, settings.rockColourB, rng);
+            rockTemplates[i] = VegetationMeshBuilder.BuildRock(settings.rockColourA, settings.rockColourB,
+                settings.rockMossColour, rng);
         }
 
+        bushTemplates = BuildBushTemplates(settings, rng);
+
         cachedFor = settings;
+    }
+
+    // The berry bushes VegetationGenerator's bush variants index: two bilberry bushes and a raspberry bush.
+    public static Mesh[] BuildBushTemplates(VegetationSettings settings, System.Random rng)
+    {
+        return new[]
+        {
+            VegetationMeshBuilder.BuildBerryBush(settings.bushLeafColour, settings.bilberryColour, false, rng),
+            VegetationMeshBuilder.BuildBerryBush(settings.bushLeafColour, settings.bilberryColour, false, rng),
+            VegetationMeshBuilder.BuildBerryBush(settings.bushLeafColour, settings.raspberryColour, true, rng)
+        };
+    }
+
+    // The tree meshes VegetationGenerator's tree variants index: three Norway spruces in two shades of green.
+    public static Mesh[] BuildTreeTemplates(VegetationSettings settings, System.Random rng)
+    {
+        return new[]
+        {
+            VegetationMeshBuilder.BuildTree(settings.trunkColour, settings.foliageColourA, rng),
+            VegetationMeshBuilder.BuildTree(settings.trunkColour, settings.foliageColourB, rng),
+            VegetationMeshBuilder.BuildTree(settings.trunkColour,
+                Color.Lerp(settings.foliageColourA, settings.foliageColourB, 0.5f), rng)
+        };
     }
 }
