@@ -5,8 +5,9 @@ using UnityEngine;
 // - legs make it faster (and lift it higher, so it reaches higher food)
 // - a neck reaches higher food and sees a little further
 // - horns hit harder, plates absorb damage, eye stalks see further
+// - fins (and a little, long legs) give swimming ability (see WaterMovement)
 // Every part costs something: its weight raises energy use (SeekFood's metabolism already charges for mass,
-// speed, strength and vision), plates and fins slow the animal, and long limbs shed heat.
+// speed, strength and vision), plates and fins slow the animal on land, and long limbs shed heat.
 public readonly struct BodyPlanEffects
 {
     public readonly float speedMultiplier;
@@ -23,12 +24,15 @@ public readonly struct BodyPlanEffects
     public readonly float heatToleranceChange;
     // Size (0-1) of the largest leg pair, which sets how far the body stands off the ground.
     public readonly float longestLegs;
+    // 0 = can only wade, 1 = the best swimmer. Mostly from fins, a little from long legs.
+    public readonly float swimmingAbility;
 
     public static readonly BodyPlanEffects None = new BodyPlanEffects(1f, 1f, 1f, 0f, 1f, 0f, 0f, 0f, 0f);
 
     public BodyPlanEffects(float speedMultiplier, float visionMultiplier, float strengthMultiplier,
                            float extraFeedingReach, float damageTakenMultiplier, float partsMass,
-                           float coldToleranceChange, float heatToleranceChange, float longestLegs)
+                           float coldToleranceChange, float heatToleranceChange, float longestLegs,
+                           float swimmingAbility = 0f)
     {
         this.speedMultiplier = speedMultiplier;
         this.visionMultiplier = visionMultiplier;
@@ -39,6 +43,7 @@ public readonly struct BodyPlanEffects
         this.coldToleranceChange = coldToleranceChange;
         this.heatToleranceChange = heatToleranceChange;
         this.longestLegs = longestLegs;
+        this.swimmingAbility = swimmingAbility;
     }
 }
 
@@ -55,6 +60,12 @@ public static class AnimalBodyPlan
     public const float MaximumDamageReduction = 0.6f;
     public const float PlateSpeedPenalty = 0.08f;       // per site
     public const float FinLandSpeedPenalty = 0.05f;     // per site
+    // Swimming ability from a full-size fin at each kind of site. A full tail fin alone reaches deep water (0.5).
+    public const float TailFinSwimming = 0.5f;
+    public const float BackFinSwimming = 0.2f;
+    public const float PairedFinSwimming = 0.25f;       // per pair
+    // Long legs help wading, but never enough on their own to reach deep water.
+    public const float LegWadingSwimming = 0.1f;
     public const float MinimumSpeedMultiplier = 0.3f;
     // Allen's rule: long legs, necks and fins shed heat, so they suit warmth and cost cold tolerance.
     public const float AppendageToleranceShift = 3f;    // degrees C per unit of exposure
@@ -75,6 +86,7 @@ public static class AnimalBodyPlan
         float eyeStalks = 0f;
         float plates = 0f;
         float fins = 0f;
+        float finSwimming = 0f;
         float mass = 0f;
         float exposure = 0f;
 
@@ -102,7 +114,10 @@ public static class AnimalBodyPlan
                 case BodyPartType.Horn: horn += size; break;
                 case BodyPartType.EyeStalks: eyeStalks += size; break;
                 case BodyPartType.Plates: plates += size; break;
-                case BodyPartType.Fins: fins += size; break;
+                case BodyPartType.Fins:
+                    fins += size;
+                    finSwimming += FinSwimming(site) * size;
+                    break;
             }
         }
 
@@ -123,8 +138,19 @@ public static class AnimalBodyPlan
             mass,
             coldChange,
             -coldChange,
-            longestLegs);
+            longestLegs,
+            Mathf.Clamp01(finSwimming + LegWadingSwimming * longestLegs));
     }
+
+    // Swimming ability a full-size fin gives at a site: a tail fin drives the animal forward, side fins steer
+    // and paddle, and a back fin keeps it steady.
+    public static float FinSwimming(BodySite site) => site switch
+    {
+        BodySite.Tail => TailFinSwimming,
+        BodySite.Back => BackFinSwimming,
+        BodySite.FrontPair or BodySite.MiddlePair or BodySite.RearPair => PairedFinSwimming,
+        _ => 0f
+    };
 
     // Mass of one full-size part as a fraction of the plain body. Paired sites carry two of them.
     public static float PartMass(BodyPartType type) => type switch

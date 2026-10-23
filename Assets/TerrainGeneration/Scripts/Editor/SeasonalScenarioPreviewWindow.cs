@@ -111,7 +111,7 @@ public sealed class SeasonalScenarioPreviewWindow : EditorWindow
         }
         if (!string.IsNullOrEmpty(error)) EditorGUILayout.HelpBox(error, MessageType.Error);
         if (data == null) { EditorGUILayout.EndScrollView(); return; }
-        EditorGUILayout.LabelField($"Snapshot: {data.TreeCount:N0} pines, {data.GrassCount:N0} grass clumps, {data.RockCount:N0} rocks. Placements are identical across seasons.", EditorStyles.wordWrappedMiniLabel);
+        EditorGUILayout.LabelField($"Snapshot: {data.TreeCount:N0} spruces, {data.GrassCount:N0} grass clumps, {data.RockCount:N0} rocks. Placements are identical across seasons.", EditorStyles.wordWrappedMiniLabel);
         using (new EditorGUILayout.HorizontalScope())
         {
             int next = GUILayout.Toolbar(selected, SeasonNames);
@@ -216,8 +216,8 @@ public sealed class SeasonalScenarioPreviewWindow : EditorWindow
         if (Directory.Exists(destination) || File.Exists(destination)) throw new IOException("Use a new folder to avoid overwriting previous figures.");
         Directory.CreateDirectory(destination);
         StringBuilder captions = new StringBuilder("# Seasonal scenario mockup\n\n");
-        captions.AppendLine("Four illustrative seasonal states of the same procedural boreal forest. Terrain geometry, erosion settings, pine/grass/rock placements, camera and scale are fixed. Only seasonal colors, surface snow/wetness shading and lighting tint vary. Ground grass browns in fall; evergreen pine foliage is not recolored orange. Snow is a surface overlay, not a change of biome or mesh height.\n");
-        captions.AppendLine($"Region: {data.Terrain.CentreChunk}; {data.Terrain.ChunkCount} × {data.Terrain.ChunkCount} chunks; LOD 0; {data.TreeCount} pines, {data.GrassCount} grass clumps, {data.RockCount} rocks.\n");
+        captions.AppendLine("Four illustrative seasonal states of the same procedural boreal forest. Terrain geometry, erosion settings, spruce/grass/rock placements, camera and scale are fixed. Only seasonal colors, surface snow/wetness shading and lighting tint vary. Ground grass browns in fall; evergreen spruce foliage is not recolored orange. Snow is a surface overlay, not a change of biome or mesh height.\n");
+        captions.AppendLine($"Region: {data.Terrain.CentreChunk}; {data.Terrain.ChunkCount} × {data.Terrain.ChunkCount} chunks; LOD 0; {data.TreeCount} spruces, {data.GrassCount} grass clumps, {data.RockCount} rocks.\n");
         captions.AppendLine(string.Format(CultureInfo.InvariantCulture, "Camera: yaw {0:0.##}°, pitch {1:0.##}°, zoom {2:0.###}; each PNG is 2048 × 2048.\n", orbit.x, orbit.y, zoom));
         captions.AppendLine("| Figure | Mean temperature | Mean moisture | Mean snow coverage | Mean accessible grass | Mean grass growth multiplier |\n| --- | ---: | ---: | ---: | ---: | ---: |");
         StringBuilder csv = new StringBuilder("season,land_samples,temperature_01,moisture_01,snow_01,accessible_grass_01,growth_multiplier\n");

@@ -30,6 +30,7 @@ MonoBehaviour:
   resourcePatchScale: 180
   resourceDetailScale: 62
   resourceDetailStrength: 0.22
+  resourcePatchOffset: {x: 0, y: 0}
   treePatchMinimum: 0.52
   grassPatchMinimum: 0.66
   rockPatchMinimum: 0.58

@@ -61,7 +61,12 @@ public static class HydraulicErosionCache
             }
         }
         int seed = unchecked(settings.noiseSettings.seed * 397 ^ erosion.seed);
-        HydraulicErosionMap map = HydraulicErosion.Simulate(heights, erosion, seed, radius, settings.minHeight, settings.maxHeight,
+        // The bake runs on whichever terrain worker needs it first, and settings.minHeight/maxHeight evaluate the
+        // shared height curve, which gives wrong values when several threads evaluate it at once. The bake's own
+        // copy holds the same keys, so it gives the same range safely.
+        float minHeight = settings.heightMultiplier * curve.Evaluate(0f);
+        float maxHeight = settings.heightMultiplier * curve.Evaluate(1f);
+        HydraulicErosionMap map = HydraulicErosion.Simulate(heights, erosion, seed, radius, minHeight, maxHeight,
             cancel == null ? null : new Func<float, bool>(progress => cancel(0.15f + 0.85f * progress)));
         timer.Stop();
         map.BakeMilliseconds = timer.Elapsed.TotalMilliseconds;
@@ -90,6 +95,15 @@ public static class HydraulicErosionCache
             key.Add(ridge.octaves);
             key.Add(ridge.scale, ridge.persistance, ridge.lacunarity, ridge.strength,
                 ridge.bandCenter, ridge.bandWidth, ridge.bandJitterScale, ridge.bandJitterStrength);
+        }
+        ValleySettings valley = settings.valleySettings;
+        key.Add(valley != null);
+        if (valley != null)
+        {
+            key.Add(valley.enabled);
+            key.Add(valley.seed);
+            key.Add(valley.scale, valley.meander, valley.floorHalfWidth, valley.halfWidth, valley.floorLevel,
+                valley.strength, valley.riverHalfWidth, valley.shoulderHeight, valley.shoulderWidth);
         }
         RiverSettings river = settings.riverSettings;
         key.Add(river != null);

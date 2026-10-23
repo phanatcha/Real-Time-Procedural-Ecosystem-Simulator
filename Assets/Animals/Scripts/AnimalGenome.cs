@@ -16,7 +16,9 @@ public enum AnimalGene
     DietAffinity,
     PreferredTemperature,
     ColdTolerance,
-    HeatTolerance
+    HeatTolerance,
+    // 0 to 1: how much the animal looks for a mate instead of cloning itself (see MatingRules).
+    SexualDrive
 }
 
 // Where a body part can grow on the capsule body. Paired sites grow the same part mirrored left and right.
@@ -41,6 +43,16 @@ public enum BodyPartType
     Fins
 }
 
+// On/off inherited traits, each flipping rarely at birth. See AnimalPerks for what each does and costs.
+public enum AnimalPerk
+{
+    ThickFur,
+    Venom,
+    Camouflage,
+    Regeneration,
+    ScavengerGut
+}
+
 // How the body plan changes at birth. Chances are percentages per birth.
 [System.Serializable]
 public struct BodyPlanMutation
@@ -58,7 +70,7 @@ public struct BodyPlanMutation
     [Tooltip("Percent chance per birth that a part becomes another part allowed at its site, keeping its size " +
              "(as fins became legs in real evolution).")]
     public float repurposeChance;
-    [Tooltip("Fins only help once animals can swim, so they cannot appear until swimming is added.")]
+    [Tooltip("Lets fins sprout. Fins give swimming ability, which opens deep water and speeds the animal up in water.")]
     public bool allowFins;
 
     public static BodyPlanMutation Default => new BodyPlanMutation
@@ -69,7 +81,7 @@ public struct BodyPlanMutation
         growthStep = 0.08f,
         lossSize = 0.02f,
         repurposeChance = 0.2f,
-        allowFins = false
+        allowFins = true
     };
 }
 
@@ -110,24 +122,32 @@ public readonly struct AnimalGeneDefinition
     }
 }
 
-// Everything an animal inherits: numeric trait genes plus a body plan of one part (type and size) per site.
-// SeekFood copies the genes into its trait fields at birth and lets the body parts adjust them.
+// Everything an animal inherits: numeric trait genes, a body plan of one part (type and size) per site, its perks
+// and the harmful mutations it carries. SeekFood copies the genes into its trait fields at birth and lets the
+// body parts and perks adjust them.
 [System.Serializable]
 public sealed class AnimalGenome
 {
     public static readonly int GeneCount = System.Enum.GetValues(typeof(AnimalGene)).Length;
     public static readonly int SiteCount = System.Enum.GetValues(typeof(BodySite)).Length;
+    public static readonly int PerkCount = System.Enum.GetValues(typeof(AnimalPerk)).Length;
 
-    // How much one body site counts towards genetic distance, next to the numeric genes' weights (16 in
+    // How much one body site counts towards genetic distance, next to the numeric genes' weights (17 in
     // total). At 0.5 a whole full-size part of difference is about one species threshold (0.03). In a
-    // neutral-drift simulation (250 animals, default mutation rates) the first split still came after
-    // about 45 generations, with about 10 species alive instead of 6 without body parts.
+    // neutral-drift simulation (250 animals, default mutation rates, cloning only and before the sexual drive
+    // gene) the first split still came after about 45 generations, with about 10 species alive instead of 6
+    // without body parts.
     public const float BodySiteDistanceWeight = 0.5f;
+
+    // How much one perk of difference counts towards genetic distance. At 0.25 it is about 0.012, under half
+    // the species threshold, so a single perk neither splits a species nor lowers fertility on its own.
+    public const float PerkDistanceWeight = 0.25f;
 
     // Per gene: distance weight divided by the gene's range, so Distance is one multiply per gene.
     // Declared after GeneCount because static fields initialise in order.
     static readonly float[] DistanceScales = BuildDistanceScales();
-    static readonly float TotalDistanceWeight = SumDistanceWeights() + BodySiteDistanceWeight * SiteCount;
+    static readonly float TotalDistanceWeight = SumDistanceWeights() + BodySiteDistanceWeight * SiteCount +
+                                                PerkDistanceWeight * PerkCount;
 
     // The parts each site can grow, indexed by BodySite.
     static readonly BodyPartType[][] AllowedParts =
@@ -143,6 +163,13 @@ public sealed class AnimalGenome
     [SerializeField] private float[] genes;
     [SerializeField] private BodyPartType[] partTypes;
     [SerializeField] private float[] partSizes;
+    // Harmful mutations carried, each adding the same small cost to energy use (Muller's ratchet). A clone
+    // keeps all of its parent's; a child of two parents inherits each of each parent's with a 50% chance, so
+    // sexual lineages can shed them while cloning lineages only gain them. They are not genes, so they don't
+    // count towards genetic distance.
+    [SerializeField] private int harmfulMutations;
+    // One bit per AnimalPerk.
+    [SerializeField] private int perks;
 
     // An unset genome has no genes. SeekFood replaces it with one captured from the
     // animal's inspector values, which is how founders get their genome.
@@ -155,6 +182,21 @@ public sealed class AnimalGenome
         get => genes[(int)gene];
         set => genes[(int)gene] = GetDefinition(gene).Clamp(value);
     }
+
+    public int HarmfulMutations => harmfulMutations;
+
+    public bool HasPerk(AnimalPerk perk) => (perks & PerkBit(perk)) != 0;
+
+    public void SetPerk(AnimalPerk perk, bool on)
+    {
+        perks = on ? perks | PerkBit(perk) : perks & ~PerkBit(perk);
+    }
+
+    static int PerkBit(AnimalPerk perk) => 1 << (int)perk;
+
+    // How much the harmful mutations multiply energy use: 1 plus the cost of each, e.g. 1.1 for five at 0.02.
+    public float EnergyUseMultiplier(float costPerHarmfulMutation) =>
+        1f + harmfulMutations * Mathf.Max(0f, costPerHarmfulMutation);
 
     public static bool IsPaired(BodySite site) => site >= BodySite.FrontPair;
 
@@ -203,6 +245,7 @@ public sealed class AnimalGenome
         AnimalGene.PreferredTemperature => new AnimalGeneDefinition(-40f, 60f, GeneMutationStyle.Additive, 10f),
         AnimalGene.ColdTolerance => new AnimalGeneDefinition(0f, 40f, GeneMutationStyle.Proportional, 1f),
         AnimalGene.HeatTolerance => new AnimalGeneDefinition(0f, 40f, GeneMutationStyle.Proportional, 1f),
+        AnimalGene.SexualDrive => new AnimalGeneDefinition(0f, 1f, GeneMutationStyle.Additive, 1f),
         _ => throw new System.ArgumentOutOfRangeException(nameof(gene), gene, null)
     };
 
@@ -230,8 +273,88 @@ public sealed class AnimalGenome
         {
             genes = (float[])genes.Clone(),
             partTypes = (BodyPartType[])partTypes.Clone(),
-            partSizes = (float[])partSizes.Clone()
+            partSizes = (float[])partSizes.Clone(),
+            harmfulMutations = harmfulMutations,
+            perks = perks
         };
+    }
+
+    // A child of two parents, before mutation: each gene, each body site (its part and size together) and each
+    // perk comes from one parent or the other at random, and each harmful mutation of either parent is passed on
+    // with a 50% chance.
+    public static AnimalGenome Recombine(AnimalGenome first, AnimalGenome second)
+    {
+        AnimalGenome child = first.Clone();
+        child.harmfulMutations = InheritHalf(first.harmfulMutations) + InheritHalf(second.harmfulMutations);
+        for (int index = 0; index < GeneCount; index++)
+        {
+            if (Random.value < 0.5f) child.genes[index] = second.genes[index];
+        }
+
+        for (int site = 0; site < SiteCount; site++)
+        {
+            if (Random.value < 0.5f)
+            {
+                child.partTypes[site] = second.partTypes[site];
+                child.partSizes[site] = second.partSizes[site];
+            }
+        }
+
+        for (int perk = 0; perk < PerkCount; perk++)
+        {
+            if (Random.value < 0.5f) child.SetPerk((AnimalPerk)perk, second.HasPerk((AnimalPerk)perk));
+        }
+
+        return child;
+    }
+
+    // How many of a parent's harmful mutations a child of two parents inherits: each one with a 50% chance.
+    static int InheritHalf(int count)
+    {
+        int inherited = 0;
+        for (int mutation = 0; mutation < count; mutation++)
+        {
+            if (Random.value < 0.5f) inherited++;
+        }
+
+        return inherited;
+    }
+
+    // chance is a percentage per birth. Call it once on each newborn's genome. Returns true when the genome
+    // gained a harmful mutation.
+    public bool TryAddHarmfulMutation(float chance)
+    {
+        if (chance <= 0f || (chance < 100f && Random.Range(0f, 100f) >= chance))
+        {
+            return false;
+        }
+
+        harmfulMutations++;
+        return true;
+    }
+
+    // chance is a percentage per perk per birth. Call it once on each newborn's genome. Each perk that flips
+    // turns on if it was off and off if it was on. Returns true when any perk flipped.
+    public bool MutatePerks(float chance)
+    {
+        if (chance <= 0f)
+        {
+            return false;
+        }
+
+        bool flipped = false;
+        for (int perk = 0; perk < PerkCount; perk++)
+        {
+            if (chance < 100f && Random.Range(0f, 100f) >= chance)
+            {
+                continue;
+            }
+
+            perks ^= PerkBit((AnimalPerk)perk);
+            flipped = true;
+        }
+
+        return flipped;
     }
 
     // Mutates the numeric genes only; the body plan is copied unchanged.
@@ -354,8 +477,8 @@ public sealed class AnimalGenome
     }
 
     // Weighted average of how far apart each gene is relative to its range, together with how different
-    // each body site is: 0 means identical, 1 means opposite ends of every gene's range and completely
-    // different parts at every site.
+    // each body site is and which perks differ: 0 means identical, 1 means opposite ends of every gene's range,
+    // completely different parts at every site and opposite perks.
     public static float Distance(AnimalGenome first, AnimalGenome second)
     {
         float total = 0f;
@@ -367,6 +490,11 @@ public sealed class AnimalGenome
         for (int site = 0; site < SiteCount; site++)
         {
             total += BodySiteDistanceWeight * SiteDifference(first, second, site);
+        }
+
+        for (int perk = 0; perk < PerkCount; perk++)
+        {
+            if (first.HasPerk((AnimalPerk)perk) != second.HasPerk((AnimalPerk)perk)) total += PerkDistanceWeight;
         }
 
         return total / TotalDistanceWeight;

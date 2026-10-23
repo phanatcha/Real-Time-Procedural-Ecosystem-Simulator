@@ -6,6 +6,9 @@ using UnityEngine.AI;
 // of staying inside one pre-built area. The tiles around every animal are kept built, at least one tile
 // ahead of where it can wander. Tile geometry is sampled from the terrain on background threads and
 // added to a single NavMesh that Unity updates in the background, so new tiles connect seamlessly.
+// With water included, each tile also carries the flat water surface as NavMesh areas for shallow water,
+// deep water and dead zones (see WaterAccess and SeaBiomes), joined to the shore so animals can walk straight
+// into the water.
 [DisallowMultipleComponent]
 public sealed class HabitatNavigation : MonoBehaviour
 {
@@ -22,7 +25,19 @@ public sealed class HabitatNavigation : MonoBehaviour
     [Min(0.1f)] public float refreshInterval = 0.5f;
     [Tooltip("Real seconds before a tile whose terrain sampling never finished is requested again.")]
     [Min(1f)] public float retryAfterSeconds = 15f;
+    [Tooltip("Real seconds before a tile no animal has needed is taken out of the NavMesh, so it doesn't keep " +
+             "growing as animals roam (swimmers cross a lot of sea). Animals that come back get it rebuilt. " +
+             "0 keeps every tile.")]
+    [Min(0f)] public float unloadDelay = 60f;
     public int agentTypeId;
+
+    [Header("Water")]
+    [Tooltip("Builds the water surface into the NavMesh and makes the shore walkable, so animals can wade and " +
+             "swim. Off keeps animals on land and away from the shore.")]
+    public bool includeWater = true;
+    [Tooltip("Water up to this deep, in world units, is shallow: every animal can wade in it. Deeper water is " +
+             "only open to swimmers.")]
+    [Min(0f)] public float wadingDepth = 1f;
 
     [Header("Runtime")]
     [SerializeField] private int navigableTileCount;
@@ -31,10 +46,13 @@ public sealed class HabitatNavigation : MonoBehaviour
     private sealed class NavigationTile
     {
         public float requestTime;
+        // Last time an animal (or anything else asking for an area) was near enough to need the tile.
+        public float lastNeededTime;
         public bool geometryReady;
         public bool hasGround;
         public bool navigable;
-        public Mesh mesh;
+        // One mesh per NavMesh area the tile has: land, shallow water, deep water, dead zone.
+        public readonly List<Mesh> meshes = new List<Mesh>(4);
     }
 
     private sealed class TileGeometry
@@ -42,7 +60,13 @@ public sealed class HabitatNavigation : MonoBehaviour
         public int worldVersion;
         public Vector2Int coordinate;
         public Vector3[] vertices;
-        public int[] triangles;
+        public int[] landTriangles;
+        public int[] shallowWaterTriangles;
+        public int[] deepWaterTriangles;
+        public int[] deadZoneTriangles;
+
+        public bool IsEmpty => landTriangles.Length == 0 && shallowWaterTriangles.Length == 0 &&
+                               deepWaterTriangles.Length == 0 && deadZoneTriangles.Length == 0;
     }
 
     private readonly Dictionary<Vector2Int, NavigationTile> tiles = new Dictionary<Vector2Int, NavigationTile>();
@@ -50,6 +74,9 @@ public sealed class HabitatNavigation : MonoBehaviour
     private readonly List<Vector2Int> tilesAwaitingUpdate = new List<Vector2Int>();
     private readonly List<Vector2Int> tilesInRunningUpdate = new List<Vector2Int>();
     private readonly List<Vector2Int> expiredRequests = new List<Vector2Int>();
+    private readonly List<Vector2Int> tilesToUnload = new List<Vector2Int>();
+    private readonly HashSet<Object> meshesToUnload = new HashSet<Object>();
+    private bool sourcesRemoved;
     private NavMeshData navMeshData;
     private NavMeshDataInstance navMeshInstance;
     private NavMeshBuildSettings buildSettings;
@@ -67,6 +94,7 @@ public sealed class HabitatNavigation : MonoBehaviour
         DiscardNavigation();
         worldVersion++;
         ResolveTerrainWorld();
+        RefreshWaterLevel();
 
         buildSettings = ResolveBuildSettings();
         if (buildSettings.agentTypeID < 0)
@@ -81,12 +109,15 @@ public sealed class HabitatNavigation : MonoBehaviour
 
     public void RequestArea(Vector3 center, float radius)
     {
+        float now = Time.unscaledTime;
         GetTileRange(center, radius, out Vector2Int minimum, out Vector2Int maximum);
         for (int tileZ = minimum.y; tileZ <= maximum.y; tileZ++)
         {
             for (int tileX = minimum.x; tileX <= maximum.x; tileX++)
             {
-                RequestTile(new Vector2Int(tileX, tileZ));
+                Vector2Int coordinate = new Vector2Int(tileX, tileZ);
+                if (tiles.TryGetValue(coordinate, out NavigationTile tile)) tile.lastNeededTime = now;
+                else RequestTile(coordinate);
             }
         }
     }
@@ -168,10 +199,11 @@ public sealed class HabitatNavigation : MonoBehaviour
             runningUpdate = null;
         }
 
-        if (runningUpdate == null && tilesAwaitingUpdate.Count > 0)
+        if (runningUpdate == null && (tilesAwaitingUpdate.Count > 0 || sourcesRemoved))
         {
             tilesInRunningUpdate.AddRange(tilesAwaitingUpdate);
             tilesAwaitingUpdate.Clear();
+            sourcesRemoved = false;
 
             // Each update gets its own copy of the sources, since new tiles arrive while it runs. The
             // bounds cover every tile built so far, padded vertically so agents fit above the ground.
@@ -187,6 +219,7 @@ public sealed class HabitatNavigation : MonoBehaviour
             refreshTimer = refreshInterval;
             RetryExpiredRequests();
             RequestTilesAroundAnimals();
+            UnloadUnneededTiles();
         }
 
         tilesInProgress = tiles.Count - navigableTileCount;
@@ -214,8 +247,9 @@ public sealed class HabitatNavigation : MonoBehaviour
 
         TerrainEnvironmentSampler sampler = terrainWorld.Sampler;
         if (sampler == null || !sampler.IsConfigured) return;
+        if (includeWater && !WaterAccess.HasWater) RefreshWaterLevel();
 
-        tiles.Add(coordinate, new NavigationTile { requestTime = Time.unscaledTime });
+        tiles.Add(coordinate, new NavigationTile { requestTime = Time.unscaledTime, lastNeededTime = Time.unscaledTime });
 
         // Copy everything the background thread needs; it must not touch Unity objects.
         int version = worldVersion;
@@ -223,9 +257,16 @@ public sealed class HabitatNavigation : MonoBehaviour
         float spacing = sampleSpacing;
         float extent = terrainWorld.HabitableExtent;
         float maximumSlope = terrainWorld.maximumWalkableSlopeDegrees;
-        bool excludeShore = terrainWorld.excludeShore;
+        // With water, the shore is walkable so the ground runs down into the water.
+        bool withWater = includeWater && WaterAccess.HasWater;
+        bool excludeShore = terrainWorld.excludeShore && !withWater;
+        float waterLevel = WaterAccess.SurfaceHeight;
+        float shallowDepth = wadingDepth;
+        // Without sea biomes (no map in the scene yet) the classifier finds none, so there are no dead zones.
+        SeaBiomeMap.TryCreateClassifier(terrainWorld, out SeaBiomeClassifier seaBiomes);
         ThreadedDataRequester.RequestData(
-            () => BuildTileGeometry(version, coordinate, sampler, size, spacing, extent, maximumSlope, excludeShore),
+            () => BuildTileGeometry(version, coordinate, sampler, size, spacing, extent, maximumSlope, excludeShore,
+                                    withWater, waterLevel, shallowDepth, seaBiomes),
             OnTileGeometryReady);
     }
 
@@ -239,31 +280,44 @@ public sealed class HabitatNavigation : MonoBehaviour
         }
 
         tile.geometryReady = true;
-        if (geometry.triangles.Length == 0)
+        if (geometry.IsEmpty)
         {
-            // Water or cliffs only: there is nothing to walk on, so the tile is already complete.
+            // Cliffs only (or water, when water isn't included): there is nothing to walk or swim on, so the
+            // tile is already complete.
             MarkNavigable(tile);
             return;
         }
 
         tile.hasGround = true;
-        tile.mesh = new Mesh { name = $"Habitat Navigation Tile {geometry.coordinate}" };
-        tile.mesh.vertices = geometry.vertices;
-        tile.mesh.triangles = geometry.triangles;
-        tile.mesh.RecalculateBounds();
+        AddSource(tile, geometry, geometry.landTriangles, 0, "Land");
+        AddSource(tile, geometry, geometry.shallowWaterTriangles, WaterAccess.ShallowWaterArea, "Shallow Water");
+        AddSource(tile, geometry, geometry.deepWaterTriangles, WaterAccess.DeepWaterArea, "Deep Water");
+        AddSource(tile, geometry, geometry.deadZoneTriangles, WaterAccess.DeadZoneArea, "Dead Zone");
+        tilesAwaitingUpdate.Add(geometry.coordinate);
+    }
+
+    // Each NavMesh area needs its own source. The meshes share the tile's vertices, so the areas join exactly.
+    void AddSource(NavigationTile tile, TileGeometry geometry, int[] triangles, int area, string label)
+    {
+        if (triangles.Length == 0) return;
+
+        Mesh mesh = new Mesh { name = $"Habitat Navigation {label} {geometry.coordinate}" };
+        mesh.vertices = geometry.vertices;
+        mesh.triangles = triangles;
+        mesh.RecalculateBounds();
+        tile.meshes.Add(mesh);
 
         // Tile meshes are in world space, so their bounds can be combined directly.
-        if (sources.Count == 0) sourceBounds = tile.mesh.bounds;
-        else sourceBounds.Encapsulate(tile.mesh.bounds);
+        if (sources.Count == 0) sourceBounds = mesh.bounds;
+        else sourceBounds.Encapsulate(mesh.bounds);
 
         sources.Add(new NavMeshBuildSource
         {
             shape = NavMeshBuildSourceShape.Mesh,
-            sourceObject = tile.mesh,
+            sourceObject = mesh,
             transform = Matrix4x4.identity,
-            area = 0
+            area = area
         });
-        tilesAwaitingUpdate.Add(geometry.coordinate);
     }
 
     void MarkNavigable(NavigationTile tile)
@@ -272,6 +326,46 @@ public sealed class HabitatNavigation : MonoBehaviour
 
         tile.navigable = true;
         navigableTileCount++;
+    }
+
+    // Takes tiles no animal has needed for unloadDelay out of the NavMesh. A running update still reads the tiles'
+    // meshes, so this waits until none is running.
+    void UnloadUnneededTiles()
+    {
+        if (unloadDelay <= 0f || runningUpdate != null) return;
+
+        float now = Time.unscaledTime;
+        tilesToUnload.Clear();
+        foreach (KeyValuePair<Vector2Int, NavigationTile> entry in tiles)
+        {
+            if (entry.Value.geometryReady && now - entry.Value.lastNeededTime > unloadDelay) tilesToUnload.Add(entry.Key);
+        }
+
+        if (tilesToUnload.Count == 0) return;
+
+        meshesToUnload.Clear();
+        foreach (Vector2Int coordinate in tilesToUnload)
+        {
+            NavigationTile tile = tiles[coordinate];
+            foreach (Mesh mesh in tile.meshes) meshesToUnload.Add(mesh);
+            if (tile.navigable) navigableTileCount--;
+            tiles.Remove(coordinate);
+            tilesAwaitingUpdate.Remove(coordinate);
+        }
+
+        sources.RemoveAll(source => meshesToUnload.Contains(source.sourceObject));
+        foreach (Object mesh in meshesToUnload) Destroy(mesh);
+        meshesToUnload.Clear();
+
+        // The next update covers only the remaining tiles, which clears the NavMesh where the unloaded ones were.
+        for (int index = 0; index < sources.Count; index++)
+        {
+            Bounds bounds = ((Mesh)sources[index].sourceObject).bounds;
+            if (index == 0) sourceBounds = bounds;
+            else sourceBounds.Encapsulate(bounds);
+        }
+
+        sourcesRemoved = true;
     }
 
     // A failed background job never calls back, so forget stale requests and let them be made again.
@@ -294,9 +388,11 @@ public sealed class HabitatNavigation : MonoBehaviour
     }
 
     // Runs on a background thread. Vertices lie on a world-aligned grid, so neighbouring tiles share
-    // their edge vertices exactly and the NavMesh has no seams.
+    // their edge vertices exactly and the NavMesh has no seams. With water, water vertices sit on the flat
+    // water surface, so triangles between the shore and the water form a ramp down into it.
     static TileGeometry BuildTileGeometry(int version, Vector2Int coordinate, TerrainEnvironmentSampler sampler,
-        float size, float spacing, float extent, float maximumSlope, bool excludeShore)
+        float size, float spacing, float extent, float maximumSlope, bool excludeShore, bool withWater,
+        float waterLevel, float wadingDepth, SeaBiomeClassifier seaBiomes)
     {
         int cellsPerSide = Mathf.Max(1, Mathf.RoundToInt(size / spacing));
         float step = size / cellsPerSide;
@@ -305,33 +401,40 @@ public sealed class HabitatNavigation : MonoBehaviour
         float minimumZ = coordinate.y * size;
 
         Vector3[] vertices = new Vector3[pointsPerSide * pointsPerSide];
-        bool[] walkable = new bool[vertices.Length];
+        WaterAccess.Corner[] corners = new WaterAccess.Corner[vertices.Length];
         for (int z = 0; z < pointsPerSide; z++)
         {
             for (int x = 0; x < pointsPerSide; x++)
             {
                 int index = z * pointsPerSide + x;
                 Vector2 position = new Vector2(minimumX + x * step, minimumZ + z * step);
-                walkable[index] = TrySampleWalkable(sampler, position, extent, maximumSlope, excludeShore,
-                    out EnvironmentSample sample);
-                vertices[index] = walkable[index] ? sample.position : new Vector3(position.x, 0f, position.y);
+                corners[index] = SampleCorner(sampler, position, extent, maximumSlope, excludeShore, withWater,
+                    waterLevel, seaBiomes, out vertices[index]);
             }
         }
 
-        List<int> triangles = new List<int>(cellsPerSide * cellsPerSide * 6);
+        // Triangle indices for each kind of surface, indexed by WaterAccess.Surface.
+        List<int>[] surfaces = new List<int>[5];
+        for (int surface = 0; surface < surfaces.Length; surface++) surfaces[surface] = new List<int>();
         for (int z = 0; z < cellsPerSide; z++)
         {
             for (int x = 0; x < cellsPerSide; x++)
             {
+                // A quad whose middle is a cliff stays a hole, even when its corners are usable. Only whether the
+                // middle is usable matters, so its sea biome isn't worked out.
                 Vector2 quadCenter = new Vector2(minimumX + (x + 0.5f) * step, minimumZ + (z + 0.5f) * step);
-                if (!TrySampleWalkable(sampler, quadCenter, extent, maximumSlope, excludeShore, out _)) continue;
+                if (!SampleCorner(sampler, quadCenter, extent, maximumSlope, excludeShore, withWater, waterLevel,
+                        default, out _).usable)
+                {
+                    continue;
+                }
 
                 int a = z * pointsPerSide + x;
                 int b = a + 1;
                 int c = a + pointsPerSide;
                 int d = c + 1;
-                AddTriangleIfWalkable(a, c, d, vertices, walkable, maximumSlope, triangles);
-                AddTriangleIfWalkable(a, d, b, vertices, walkable, maximumSlope, triangles);
+                AddTriangle(a, c, d, vertices, corners, maximumSlope, wadingDepth, surfaces);
+                AddTriangle(a, d, b, vertices, corners, maximumSlope, wadingDepth, surfaces);
             }
         }
 
@@ -340,28 +443,52 @@ public sealed class HabitatNavigation : MonoBehaviour
             worldVersion = version,
             coordinate = coordinate,
             vertices = vertices,
-            triangles = triangles.ToArray()
+            landTriangles = surfaces[(int)WaterAccess.Surface.Land].ToArray(),
+            shallowWaterTriangles = surfaces[(int)WaterAccess.Surface.ShallowWater].ToArray(),
+            deepWaterTriangles = surfaces[(int)WaterAccess.Surface.DeepWater].ToArray(),
+            deadZoneTriangles = surfaces[(int)WaterAccess.Surface.DeadZone].ToArray()
         };
     }
 
-    static bool TrySampleWalkable(TerrainEnvironmentSampler sampler, Vector2 position, float extent,
-        float maximumSlope, bool excludeShore, out EnvironmentSample sample)
+    // A grid point is water (on the water surface, with the depth below it and whether it is in a dead zone),
+    // walkable land, or unusable.
+    static WaterAccess.Corner SampleCorner(TerrainEnvironmentSampler sampler, Vector2 position, float extent,
+        float maximumSlope, bool excludeShore, bool withWater, float waterLevel, SeaBiomeClassifier seaBiomes,
+        out Vector3 vertex)
     {
-        sample = default;
-        if (Mathf.Abs(position.x) > extent || Mathf.Abs(position.y) > extent) return false;
+        vertex = new Vector3(position.x, 0f, position.y);
+        if (Mathf.Abs(position.x) > extent || Mathf.Abs(position.y) > extent ||
+            !sampler.TrySample(position, out EnvironmentSample sample) || !sample.isValid)
+        {
+            return WaterAccess.Corner.Unusable;
+        }
 
-        return sampler.TrySample(position, out sample) &&
-               AnimalTerrainWorld.IsWalkable(sample, maximumSlope, excludeShore);
+        if (withWater && sample.isWater)
+        {
+            vertex = new Vector3(position.x, waterLevel, position.y);
+            return WaterAccess.Corner.Water(waterLevel - sample.position.y, seaBiomes.IsDeadZone(sample));
+        }
+
+        if (!AnimalTerrainWorld.IsWalkable(sample, maximumSlope, excludeShore))
+        {
+            return WaterAccess.Corner.Unusable;
+        }
+
+        vertex = sample.position;
+        return WaterAccess.Corner.Land;
     }
 
-    static void AddTriangleIfWalkable(int a, int b, int c, Vector3[] vertices, bool[] walkable,
-        float maximumSlope, List<int> triangles)
+    static void AddTriangle(int a, int b, int c, Vector3[] vertices, WaterAccess.Corner[] corners,
+        float maximumSlope, float wadingDepth, List<int>[] surfaces)
     {
-        if (!walkable[a] || !walkable[b] || !walkable[c]) return;
+        WaterAccess.Surface surface = WaterAccess.ClassifyTriangle(corners[a], corners[b], corners[c], wadingDepth);
+        if (surface == WaterAccess.Surface.None) return;
 
+        // Open water is flat; land and the ramps from the shore into the water must not be too steep to climb.
         Vector3 normal = Vector3.Cross(vertices[b] - vertices[a], vertices[c] - vertices[a]).normalized;
         if (Vector3.Angle(normal, Vector3.up) > maximumSlope) return;
 
+        List<int> triangles = surfaces[(int)surface];
         triangles.Add(a);
         triangles.Add(b);
         triangles.Add(c);
@@ -404,6 +531,23 @@ public sealed class HabitatNavigation : MonoBehaviour
         if (terrainWorld == null) terrainWorld = FindAnyObjectByType<AnimalTerrainWorld>();
     }
 
+    // The water surface sits where the terrain starts counting as water, the level the water is drawn at.
+    void RefreshWaterLevel()
+    {
+        WaterAccess.SurfaceHeight = float.NegativeInfinity;
+        WaterAccess.WadingDepth = wadingDepth;
+        TerrainEnvironmentSampler sampler = terrainWorld != null ? terrainWorld.Sampler : null;
+        if (!includeWater || sampler == null || !sampler.IsConfigured ||
+            sampler.EnvironmentDefinitions == null || sampler.HeightMapSettings == null)
+        {
+            return;
+        }
+
+        HeightMapSettings heights = sampler.HeightMapSettings;
+        WaterAccess.SurfaceHeight = Mathf.Lerp(heights.minHeight, heights.maxHeight,
+                                               sampler.EnvironmentDefinitions.ShorelineThreshold);
+    }
+
     void DiscardNavigation()
     {
         if (navMeshData != null && runningUpdate != null && !runningUpdate.isDone)
@@ -415,7 +559,7 @@ public sealed class HabitatNavigation : MonoBehaviour
         if (navMeshData != null) Destroy(navMeshData);
         foreach (NavigationTile tile in tiles.Values)
         {
-            if (tile.mesh != null) Destroy(tile.mesh);
+            foreach (Mesh mesh in tile.meshes) Destroy(mesh);
         }
 
         navMeshData = null;
@@ -427,5 +571,6 @@ public sealed class HabitatNavigation : MonoBehaviour
         tilesInRunningUpdate.Clear();
         navigableTileCount = 0;
         tilesInProgress = 0;
+        WaterAccess.SurfaceHeight = float.NegativeInfinity;
     }
 }

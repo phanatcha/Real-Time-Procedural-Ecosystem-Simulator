@@ -78,6 +78,7 @@ public class EnvironmentDefinitions : UpdatableData
     [Header("Moisture")]
     [Min(0.01f)]
     public float moistureScale = 300f;
+    [Tooltip("Replaced by an offset from the world seed when SeedManager generates the world.")]
     public Vector2 moistureOffset;
 
     [Header("Temperature")]
@@ -89,6 +90,7 @@ public class EnvironmentDefinitions : UpdatableData
     public float temperatureVariation = 0.12f;
     [Min(0.01f)]
     public float temperatureScale = 1200f;
+    [Tooltip("Replaced by an offset from the world seed when SeedManager generates the world.")]
     public Vector2 temperatureOffset = new Vector2(417.3f, -286.9f);
 
     [Header("Resources")]
@@ -98,6 +100,8 @@ public class EnvironmentDefinitions : UpdatableData
     public float resourceDetailScale = 62f;
     [Range(0f, 1f)]
     public float resourceDetailStrength = 0.22f;
+    [Tooltip("Moves the tree, grass and rock patches. Replaced by an offset from the world seed when SeedManager generates the world.")]
+    public Vector2 resourcePatchOffset;
     [Range(0f, 1f)]
     public float treePatchMinimum = 0.52f;
     [Range(0f, 1f)]
@@ -248,6 +252,7 @@ public class EnvironmentDefinitions : UpdatableData
                 break;
         }
 
+        worldPosition += resourcePatchOffset;
         float broadPatch = ValueNoise.Sample((worldPosition + salt) / Mathf.Max(resourcePatchScale, 0.01f));
         float detailPatch = ValueNoise.Sample((worldPosition + detailSalt) / Mathf.Max(resourceDetailScale, 0.01f));
         float patch = Mathf.Lerp(broadPatch, detailPatch, resourceDetailStrength);

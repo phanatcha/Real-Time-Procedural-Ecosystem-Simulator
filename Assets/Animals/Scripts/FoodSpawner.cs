@@ -7,6 +7,8 @@ using UnityEngine;
 // - Nutrition follows moisture, so wetter ground grows richer (and larger) plants.
 // - Regrowth speed follows temperature, so an eaten plant comes back fastest where it is warm.
 // - Well-wooded ground also grows richer leaves high up, which only animals that reach high enough can eat.
+// - The sea grows its own plants, one kind per sea biome (see SeaFood), floating at the water surface and drawn
+//   as seagrass, kelp, coral or plankton (see SeaPlantLooks). Those in water too deep to wade are for swimmers only.
 // Plant positions come from a hash of the world seed and fixed world cells, so a seed always gives the
 // same layout. Tiles that nothing needs are unloaded but remember what was eaten, and keep regrowing.
 public class FoodSpawner : MonoBehaviour
@@ -66,11 +68,23 @@ public class FoodSpawner : MonoBehaviour
     [Tooltip("Tall food is richer than ground plants.")]
     [Min(1f)] public float tallFoodNutritionMultiplier = 1.6f;
 
+    [Header("Sea Food")]
+    [Tooltip("Grows plants in the sea, one kind per sea biome, floating at the water surface. Needs the water built " +
+             "into navigation (Include Water on Habitat Navigation).")]
+    public bool growSeaFood = true;
+    [Tooltip("How much each sea biome grows, and the surface temperatures sea plants grow in. Changes apply to " +
+             "tiles loaded afterwards.")]
+    public SeaFoodRules seaFood = SeaFoodRules.Default;
+    [Tooltip("How far a sea plant's centre floats above the water surface, in world units.")]
+    [Min(0f)] public float seaFoodSurfaceOffset = 0.3f;
+
     [Header("Runtime")]
     [SerializeField] private int loadedTileCount;
     [SerializeField] private int shownTileCount;
     [SerializeField] private int plantSiteCount;
     [SerializeField] private int shownPlantCount;
+    [SerializeField] private int shownSeaPlantCount;
+    [SerializeField] private int seaPlantsEaten;
 
     private sealed class PlantSite
     {
@@ -81,10 +95,19 @@ public class FoodSpawner : MonoBehaviour
         // How far the plant's centre is above the ground it grows from.
         public float heightAboveGround;
         public bool isTall;
+        // Ground plants only: the summer forest food it is drawn as (see ForestFoodLooks). Looks only.
+        public ForestFood forestFood;
+        // Sea plants only: the biome they grow in (None on land), the depth of the water under them, and whether
+        // that is too deep to wade.
+        public SeaBiome seaBiome;
+        public float waterDepth;
+        public bool inDeepWater;
         // Progress towards the next plant, advancing only while the site is empty; 1 or more means a
         // grown plant is ready to appear.
         public float regrowProgress;
         public FoodItem plant;
+        // Tall food only: the spruce the shoots grow on. It stays while they are eaten and regrow.
+        public GameObject tree;
     }
 
     private sealed class FoodTile
@@ -101,21 +124,44 @@ public class FoodSpawner : MonoBehaviour
         public Vector2Int coordinate;
         public readonly List<Vector3> positions = new List<Vector3>();
         public readonly List<float> moistures = new List<float>();
+        public readonly List<float> treeCovers = new List<float>();
         // 0 for ground plants, otherwise the height of tall food above the ground.
         public readonly List<float> heights = new List<float>();
+
+        // Sea plants, kept apart because they need no temperature lookup on the main thread: each one's spot on
+        // the water surface, its biome, the depth below it and the surface temperature.
+        public readonly List<Vector3> seaPositions = new List<Vector3>();
+        public readonly List<SeaBiome> seaBiomes = new List<SeaBiome>();
+        public readonly List<float> seaDepths = new List<float>();
+        public readonly List<float> seaCelsius = new List<float>();
 
         public void Add(EnvironmentSample environment, float height)
         {
             positions.Add(environment.position);
             moistures.Add(environment.moisture);
+            treeCovers.Add(environment.treeCover);
             heights.Add(height);
+        }
+
+        public void AddSea(Vector3 surfacePosition, SeaBiome biome, float depth, float celsius)
+        {
+            seaPositions.Add(surfacePosition);
+            seaBiomes.Add(biome);
+            seaDepths.Add(depth);
+            seaCelsius.Add(celsius);
         }
     }
 
-    private static readonly int BaseColorId = Shader.PropertyToID("_BaseColor");
-    private static readonly int ColorId = Shader.PropertyToID("_Color");
-    private static readonly Color TallFoodColor = new Color(0.16f, 0.5f, 0.2f);
-    private static readonly Color TrunkColor = new Color(0.36f, 0.25f, 0.16f);
+    // Tall food is a clump of bright fresh shoots on the side of a Norway spruce, drawn like the island's own trees
+    // (the terrain's vegetation material and the world's vegetation colours). The shoots are the food; the spruce
+    // belongs to the site and stays standing while they are eaten and regrow.
+    private const int FoodSpruceVariants = 3;
+    private const float FoodSpruceHeight = 15f;
+    // How far up the spruce's tiers the shoots grow, between the lowest (0) and the top (1).
+    private const float ShootTierFraction = 0.55f;
+    private static Mesh[] foodSpruces;
+    private static Mesh[] shootClumps;
+    private static VegetationSettings foodLooksBuiltFor;
 
     private readonly Dictionary<Vector2Int, FoodTile> tiles = new Dictionary<Vector2Int, FoodTile>();
     private readonly HashSet<Vector2Int> neededTiles = new HashSet<Vector2Int>();
@@ -126,6 +172,10 @@ public class FoodSpawner : MonoBehaviour
 
     public int PlantSiteCount => plantSiteCount;
     public int ShownPlantCount => shownPlantCount;
+    // Of the shown plants, those in the sea.
+    public int ShownSeaPlantCount => shownSeaPlantCount;
+    // Sea plants eaten since the world was created.
+    public int SeaPlantsEaten => seaPlantsEaten;
 
     // Forgets every plant, for a newly generated world. The seed decides the new plant layout.
     public void ResetWorld(int seed)
@@ -136,6 +186,7 @@ public class FoodSpawner : MonoBehaviour
             foreach (PlantSite site in tile.sites)
             {
                 if (site.plant != null) Destroy(site.plant.gameObject);
+                if (site.tree != null) Destroy(site.tree);
             }
         }
 
@@ -147,6 +198,8 @@ public class FoodSpawner : MonoBehaviour
         shownTileCount = 0;
         plantSiteCount = 0;
         shownPlantCount = 0;
+        shownSeaPlantCount = 0;
+        seaPlantsEaten = 0;
     }
 
     void Update()
@@ -207,20 +260,25 @@ public class FoodSpawner : MonoBehaviour
     {
         int created = 0;
         shownPlantCount = 0;
+        shownSeaPlantCount = 0;
         foreach (FoodTile tile in tiles.Values)
         {
             if (tile.sites == null) continue;
 
             foreach (PlantSite site in tile.sites)
             {
+                if (site.isTall && tile.shown && site.tree == null) AddSpruce(site);
+
                 if (site.plant != null && site.plant.IsAvailable)
                 {
-                    shownPlantCount++;
+                    CountShown(site);
                     continue;
                 }
 
                 // Eaten or spoiled. The plant destroys itself, so from the next frame it reads as null
-                // here; its site regrows from the zero set when it was planted either way.
+                // here; its site regrows from the zero set when it was planted either way. Plants don't spoil
+                // and hidden tiles let go of their plants themselves, so a plant still held here was eaten.
+                if (site.seaBiome != SeaBiome.None && !ReferenceEquals(site.plant, null)) seaPlantsEaten++;
                 site.plant = null;
                 if (site.regrowProgress < 1f)
                 {
@@ -232,10 +290,16 @@ public class FoodSpawner : MonoBehaviour
                 {
                     CreatePlant(site);
                     created++;
-                    shownPlantCount++;
+                    CountShown(site);
                 }
             }
         }
+    }
+
+    void CountShown(PlantSite site)
+    {
+        shownPlantCount++;
+        if (site.seaBiome != SeaBiome.None) shownSeaPlantCount++;
     }
 
     FoodTile RequestSites(Vector2Int coordinate, float now)
@@ -263,9 +327,13 @@ public class FoodSpawner : MonoBehaviour
             lowest = Mathf.Min(tallFoodHeight.x, tallFoodHeight.y),
             highest = Mathf.Max(tallFoodHeight.x, tallFoodHeight.y)
         };
+        // Without water in the navigation there is no water level or sea map, and so no sea food.
+        SeaFoodSettings seaFoodSettings = new SeaFoodSettings { rules = seaFood, waterLevel = WaterAccess.SurfaceHeight };
+        seaFoodSettings.enabled = growSeaFood &&
+                                  SeaBiomeMap.TryCreateClassifier(terrainWorld, out seaFoodSettings.biomes);
         ThreadedDataRequester.RequestData(
             () => FindPlantCandidates(version, coordinate, sampler, seed, size, spacing, minimumGrass,
-                                      extent, maximumSlope, excludeShore, tallFood),
+                                      extent, maximumSlope, excludeShore, tallFood, seaFoodSettings),
             OnPlantCandidatesFound);
         return tile;
     }
@@ -301,6 +369,30 @@ public class FoodSpawner : MonoBehaviour
                 regrowSeconds = baseRegrowSeconds / growthRate,
                 heightAboveGround = heightAboveGround,
                 isTall = isTall,
+                forestFood = ForestFoodLooks.Choose(moisture, candidates.treeCovers[index],
+                                                    SiteHash(position) % 1000 / 1000f),
+                regrowProgress = 1f
+            });
+        }
+
+        // Sea plants float on the water, so animals reach them at the surface, and grow by the sea's own rules.
+        float wadingDepth = WaterAccess.WadingDepth;
+        for (int index = 0; index < candidates.seaPositions.Count; index++)
+        {
+            float growthRate = seaFood.GrowthRate(candidates.seaCelsius[index]);
+            if (growthRate < minimumGrowthRate) continue;
+
+            SeaFoodYield yield = seaFood.Yield(candidates.seaBiomes[index]);
+            tile.sites.Add(new PlantSite
+            {
+                position = candidates.seaPositions[index] + Vector3.up * seaFoodSurfaceOffset,
+                nutrition = baseNutrition * yield.nutrition,
+                sizeMultiplier = 1f,
+                regrowSeconds = baseRegrowSeconds * Mathf.Max(0.1f, yield.regrowth) / growthRate,
+                heightAboveGround = seaFoodSurfaceOffset,
+                seaBiome = candidates.seaBiomes[index],
+                waterDepth = candidates.seaDepths[index],
+                inDeepWater = candidates.seaDepths[index] > wadingDepth,
                 regrowProgress = 1f
             });
         }
@@ -314,57 +406,142 @@ public class FoodSpawner : MonoBehaviour
     {
         GameObject plantObject = Instantiate(foodPrefab, site.position, Quaternion.identity, spawnedFoodParent);
         Vector3 scale = foodPrefab.transform.localScale * site.sizeMultiplier;
-        // Tall food is a wide, flat clump of leaves.
-        plantObject.transform.localScale = site.isTall ? Vector3.Scale(scale, new Vector3(1.5f, 0.7f, 1.5f)) : scale;
+        // Tall food is a wide, flat clump of leaves. Sea food is a flatter box floating at the surface, smaller for
+        // plankton; animals eat by touching it, and SeaPlantLooks draws it as its biome's plant.
+        Vector3 shape = site.isTall ? new Vector3(1.5f, 0.7f, 1.5f)
+            : site.seaBiome == SeaBiome.OpenSea ? new Vector3(0.7f, 0.25f, 0.7f)
+            : site.seaBiome != SeaBiome.None ? new Vector3(1.4f, 0.4f, 1.4f)
+            : Vector3.one;
+        plantObject.transform.localScale = Vector3.Scale(scale, shape);
+        if (site.seaBiome != SeaBiome.None) plantObject.name = SeaFoodRules.PlantName(site.seaBiome);
         if (!plantObject.activeSelf) plantObject.SetActive(true);
 
         // Plants stay until eaten; the next one starts growing once this one is gone.
         site.plant = plantObject.GetComponent<FoodItem>();
         site.plant.Configure(FoodType.Plant, site.nutrition);
         site.plant.heightAboveGround = site.heightAboveGround;
+        site.plant.seaBiome = site.seaBiome;
+        site.plant.inDeepWater = site.inDeepWater;
         site.regrowProgress = 0f;
 
         if (site.isTall)
         {
-            DressAsTree(plantObject, site.heightAboveGround);
+            DressAsShoots(plantObject);
+            AddSpruce(site);
         }
-    }
-
-    // Darker leaves on a thin trunk that reaches down to the ground, so tall food reads as a small tree.
-    static void DressAsTree(GameObject leaves, float heightAboveGround)
-    {
-        if (!leaves.TryGetComponent(out MeshRenderer leafRenderer))
+        else if (site.seaBiome == SeaBiome.None && FoodLooksReady(out Material material))
         {
-            return;
+            ForestFoodLooks.Dress(plantObject, site.forestFood, site.heightAboveGround, site.sizeMultiplier, material,
+                                  terrainWorld.Sampler.VegetationSettings);
         }
-
-        SetColor(leafRenderer, TallFoodColor);
-
-        GameObject trunk = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
-        trunk.name = "Trunk";
-        trunk.layer = leaves.layer;
-        DestroyImmediate(trunk.GetComponent<Collider>());
-        trunk.transform.SetParent(leaves.transform, false);
-
-        // The leaves are unrotated, so undoing their scale keeps the trunk's own proportions.
-        Vector3 leafScale = leaves.transform.lossyScale;
-        float leafHalfHeight = leafScale.y * 0.5f;
-        float trunkLength = Mathf.Max(0.1f, heightAboveGround - leafHalfHeight);
-        trunk.transform.localScale = new Vector3(0.35f / leafScale.x, trunkLength * 0.5f / leafScale.y, 0.35f / leafScale.z);
-        trunk.transform.localPosition = new Vector3(0f, -(leafHalfHeight + trunkLength * 0.5f) / leafScale.y, 0f);
-
-        MeshRenderer trunkRenderer = trunk.GetComponent<MeshRenderer>();
-        trunkRenderer.sharedMaterial = leafRenderer.sharedMaterial;
-        SetColor(trunkRenderer, TrunkColor);
+        else if (site.seaBiome != SeaBiome.None)
+        {
+            SeaPlantLooks.Dress(plantObject, site.seaBiome, site.waterDepth, site.heightAboveGround);
+        }
     }
 
-    static void SetColor(Renderer target, Color color)
+    // Hides the food's box and draws fresh shoots in its place; the box still decides where animals reach and touch.
+    void DressAsShoots(GameObject food)
     {
-        MaterialPropertyBlock block = new MaterialPropertyBlock();
-        target.GetPropertyBlock(block);
-        block.SetColor(BaseColorId, color);
-        block.SetColor(ColorId, color);
-        target.SetPropertyBlock(block);
+        if (!food.TryGetComponent(out MeshRenderer foodRenderer) || !FoodLooksReady(out Material material)) return;
+        foodRenderer.enabled = false;
+
+        // The food box is scaled; this unrotated holder undoes that, so the shoots are in metres.
+        Vector3 foodScale = food.transform.lossyScale;
+        Transform holder = new GameObject("Look").transform;
+        holder.gameObject.layer = food.layer;
+        holder.SetParent(food.transform, false);
+        holder.localScale = new Vector3(1f / foodScale.x, 1f / foodScale.y, 1f / foodScale.z);
+
+        int hash = SiteHash(food.transform.position);
+        GameObject shoots = NewTreePart("Fresh Shoots", shootClumps[hash % shootClumps.Length], holder, food.layer, material);
+        shoots.transform.localRotation = Quaternion.Euler(0f, (hash >> 3) % 360, 0f);
+    }
+
+    // A spruce sized so its tiers reach the shoots' height, standing to one side so the shoots sit on the outside of
+    // its branches, where they can be seen.
+    void AddSpruce(PlantSite site)
+    {
+        if (site.tree != null || !FoodLooksReady(out Material material)) return;
+
+        int hash = SiteHash(site.position);
+        Mesh mesh = foodSpruces[hash % foodSpruces.Length];
+        float shootHeight = VegetationMeshBuilder.SpruceSkirt +
+                            ShootTierFraction * (FoodSpruceHeight - VegetationMeshBuilder.SpruceSkirt - 2.3f);
+        float scale = Mathf.Clamp(site.heightAboveGround / shootHeight, 0.7f, 1.9f);
+        float angle = (hash >> 5) % 360 * Mathf.Deg2Rad;
+        Vector3 side = new Vector3(Mathf.Cos(angle), 0f, Mathf.Sin(angle));
+        Vector3 ground = site.position - Vector3.up * site.heightAboveGround -
+                         side * (VegetationMeshBuilder.SpruceRadius(ShootTierFraction) * scale * 0.85f);
+
+        TerrainEnvironmentSampler sampler = terrainWorld != null ? terrainWorld.Sampler : null;
+        if (sampler != null && sampler.TrySample(new Vector2(ground.x, ground.z), out EnvironmentSample below))
+        {
+            ground.y = below.height;
+        }
+
+        site.tree = NewTreePart("Spruce", mesh, spawnedFoodParent, foodPrefab.layer, material);
+        site.tree.transform.position = ground - Vector3.up * 0.4f;
+        site.tree.transform.rotation = Quaternion.Euler(0f, (hash >> 9) % 360, 0f);
+        site.tree.transform.localScale = Vector3.one * scale;
+    }
+
+    static int SiteHash(Vector3 position)
+    {
+        int hash = (Mathf.FloorToInt(position.x * 3.1f) * 73856093) ^ (Mathf.FloorToInt(position.z * 3.1f) * 19349663);
+        return hash & int.MaxValue;
+    }
+
+    static GameObject NewTreePart(string partName, Mesh mesh, Transform parent, int layer, Material material)
+    {
+        GameObject part = new GameObject(partName, typeof(MeshFilter), typeof(MeshRenderer));
+        part.layer = layer;
+        part.transform.SetParent(parent, false);
+        part.GetComponent<MeshFilter>().sharedMesh = mesh;
+        part.GetComponent<MeshRenderer>().sharedMaterial = material;
+        return part;
+    }
+
+    // Builds the spruces and shoots in the world's vegetation colours, again when a new world brings new settings.
+    bool FoodLooksReady(out Material material)
+    {
+        TerrainGenerator terrain = terrainWorld != null ? terrainWorld.terrainGenerator : null;
+        TerrainEnvironmentSampler sampler = terrainWorld != null ? terrainWorld.Sampler : null;
+        VegetationSettings vegetation = sampler != null ? sampler.VegetationSettings : null;
+        material = terrain != null ? terrain.vegetationMaterial : null;
+        if (material == null || vegetation == null) return false;
+
+        if (foodLooksBuiltFor != vegetation || foodSpruces == null || foodSpruces[0] == null)
+        {
+            DestroyMeshes(foodSpruces);
+            DestroyMeshes(shootClumps);
+            System.Random random = new System.Random(1729);
+            foodSpruces = new Mesh[FoodSpruceVariants];
+            for (int i = 0; i < FoodSpruceVariants; i++)
+            {
+                foodSpruces[i] = VegetationMeshBuilder.BuildTree(vegetation.trunkColour,
+                    i % 2 == 0 ? vegetation.foliageColourA : vegetation.foliageColourB, random, FoodSpruceHeight);
+            }
+
+            shootClumps = new Mesh[FoodSpruceVariants];
+            for (int i = 0; i < FoodSpruceVariants; i++)
+            {
+                shootClumps[i] = VegetationMeshBuilder.BuildShoots(vegetation.freshShootColour, random);
+            }
+
+            foodLooksBuiltFor = vegetation;
+        }
+
+        return true;
+    }
+
+    static void DestroyMeshes(Mesh[] meshes)
+    {
+        if (meshes == null) return;
+        foreach (Mesh mesh in meshes)
+        {
+            if (mesh != null) Destroy(mesh);
+        }
     }
 
     void HideTile(FoodTile tile)
@@ -381,6 +558,11 @@ public class FoodSpawner : MonoBehaviour
             }
 
             site.plant = null;
+            if (site.tree != null)
+            {
+                Destroy(site.tree);
+                site.tree = null;
+            }
         }
     }
 
@@ -438,11 +620,21 @@ public class FoodSpawner : MonoBehaviour
         public float highest;
     }
 
+    // Copied settings for sea food, with the sea map's rules for this world, so the background thread never reads
+    // the component or the scene.
+    private struct SeaFoodSettings
+    {
+        public bool enabled;
+        public SeaBiomeClassifier biomes;
+        public SeaFoodRules rules;
+        public float waterLevel;
+    }
+
     // Runs on a background thread. Cells are fixed in world space, so a tile's plants are the same
     // whenever it loads for the same seed.
     static PlantCandidates FindPlantCandidates(int version, Vector2Int coordinate, TerrainEnvironmentSampler sampler,
         int seed, float size, float spacing, float minimumGrass, float extent, float maximumSlope, bool excludeShore,
-        TallFoodRules tallFood)
+        TallFoodRules tallFood, SeaFoodSettings sea)
     {
         int cellsPerSide = Mathf.Max(1, Mathf.RoundToInt(size / spacing));
         float cellSize = size / cellsPerSide;
@@ -457,12 +649,24 @@ public class FoodSpawner : MonoBehaviour
                 // Grass biomass is both the minimum requirement and the chance a cell holds a plant.
                 Vector2 position = CellPoint(seed, cellX, cellZ, cellSize, 0);
                 if (IsInside(position, extent) &&
-                    sampler.TrySample(position, out EnvironmentSample environment) &&
-                    AnimalTerrainWorld.IsWalkable(environment, maximumSlope, excludeShore) &&
-                    environment.grassBiomass >= minimumGrass &&
-                    Hash01(seed, cellX, cellZ, 2) < environment.grassBiomass)
+                    sampler.TrySample(position, out EnvironmentSample environment))
                 {
-                    candidates.Add(environment, 0f);
+                    if (AnimalTerrainWorld.IsWalkable(environment, maximumSlope, excludeShore) &&
+                        environment.grassBiomass >= minimumGrass &&
+                        Hash01(seed, cellX, cellZ, 2) < environment.grassBiomass)
+                    {
+                        candidates.Add(environment, 0f);
+                    }
+                    else if (sea.enabled)
+                    {
+                        // On water, the same spot can hold a sea plant instead, as often as its biome allows.
+                        SeaBiome biome = sea.biomes.Classify(environment, out float depth, out float celsius);
+                        if (biome != SeaBiome.None && Hash01(seed, cellX, cellZ, 7) < sea.rules.Yield(biome).chance)
+                        {
+                            candidates.AddSea(new Vector3(position.x, sea.waterLevel, position.y), biome, depth,
+                                              celsius);
+                        }
+                    }
                 }
 
                 // Wooded cells can also hold leaves up high, growing from their own spot in the cell.
@@ -496,6 +700,42 @@ public class FoodSpawner : MonoBehaviour
     static bool IsInside(Vector2 position, float extent)
     {
         return Mathf.Abs(position.x) <= extent && Mathf.Abs(position.y) <= extent;
+    }
+
+    // Expected nutrition regrowing per simulated minute on one plant cell (siteSpacing across) with this
+    // environment and temperature, by the same rules that place and regrow plants. The survivability
+    // heatmap uses it to judge how much food an area supplies.
+    public float EstimateNutritionPerMinute(EnvironmentSample environment, float celsius)
+    {
+        FoodItem growthProfile = foodPrefab != null ? foodPrefab.GetComponent<FoodItem>() : null;
+        float growthRate = growthProfile != null ? growthProfile.EvaluateGrowthMultiplier(celsius) : 1f;
+        if (growthRate < minimumGrowthRate)
+        {
+            return 0f;
+        }
+
+        // The chance of a ground plant and, in woods, of leaves up a tree, weighted by their nutrition.
+        float ground = environment.grassBiomass >= minimumGrassBiomass ? Mathf.Clamp01(environment.grassBiomass) : 0f;
+        float tall = growTallFood && environment.treeCover >= minimumTreeCover
+            ? tallFoodChance * Mathf.Clamp01(environment.treeCover) * tallFoodNutritionMultiplier
+            : 0f;
+        float nutrition = baseNutrition * Mathf.Lerp(moistureNutritionMultiplier.x, moistureNutritionMultiplier.y,
+                                                     environment.moisture);
+        return (ground + tall) * nutrition * growthRate * 60f / baseRegrowSeconds;
+    }
+
+    // The same for a water cell in the given sea biome, by the rules that place and regrow sea plants. The
+    // temperature is the water surface's, which is what sea plants grow in.
+    public float EstimateSeaNutritionPerMinute(SeaBiome biome, float surfaceCelsius)
+    {
+        if (!growSeaFood || biome == SeaBiome.None) return 0f;
+
+        float growthRate = seaFood.GrowthRate(surfaceCelsius);
+        if (growthRate < minimumGrowthRate) return 0f;
+
+        SeaFoodYield yield = seaFood.Yield(biome);
+        return yield.chance * baseNutrition * yield.nutrition * growthRate * 60f /
+               (baseRegrowSeconds * Mathf.Max(0.1f, yield.regrowth));
     }
 
     // Fraction of the ideal regrowth rate at this position, from the food's growth temperature range.

@@ -15,7 +15,8 @@ public class TerrainReportPreviewWindow : EditorWindow
         "01-base-noise.png", "02-domain-warped-noise.png", "03-mountain-ridge-blend.png",
         "04-river-carving-mask.png", "05-lake-carving-mask.png", "06-world-falloff-mask.png",
         "07-shaped-height-before-curve.png", "08-final-heightmap.png",
-        "11-before-erosion-heightmap.png", "12-erosion-deposition-change.png", "13-droplet-flow.png"
+        "11-before-erosion-heightmap.png", "12-erosion-deposition-change.png", "13-droplet-flow.png",
+        "15-valley-carving-mask.png"
     };
 
     [SerializeField] HeightMapSettings heightSettings;
@@ -438,7 +439,7 @@ public class TerrainReportPreviewWindow : EditorWindow
         result.AppendLine(string.Format(CultureInfo.InvariantCulture,
             "Before/after heightmaps use a fixed grayscale range: black = {0:0.###}, white = {1:0.###} world units. Actual final sampled range: {2:0.###}–{3:0.###}. PNGs are 8-bit visualizations, not lossless height data. Other grayscale stages use 0–1. Values outside the display range are clipped.\n",
             generated.HeightScaleMinimum, generated.HeightScaleMaximum, generated.MinimumHeight, generated.MaximumHeight));
-        result.AppendLine("Pipeline: domain-warped sampling coordinates → seeded octave noise → mountain ridge blending → river carving → lake carving → world falloff → height curve and multiplier → optional hydraulic erosion → mesh. Stage 01 disables domain warp only as a comparison; stage 02 is the actual generator input. River and lake images show carving weights, not water occupancy. World falloff is a subtraction mask, not a heightmap.\n");
+        result.AppendLine("Pipeline: domain-warped sampling coordinates → seeded octave noise → mountain ridge blending → world falloff → river carving → lake carving → valley carving → height curve and multiplier → optional hydraulic erosion → mesh. Stage 01 disables domain warp only as a comparison; stage 02 is the actual generator input. Valley, river and lake images show carving weights, not water occupancy. World falloff is a subtraction mask, not a heightmap.\n");
         if (generated.Erosion != null)
         {
             HydraulicErosionSettings erosion = heights.erosionSettings.ValidatedCopy();

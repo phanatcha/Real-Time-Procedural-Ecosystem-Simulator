@@ -18,9 +18,16 @@ public class SeedManager : MonoBehaviour
 
     public string SeedString => seedString;
 
+    // Raised whenever the seed changes, so the seed panel can show it.
+    public event System.Action SeedChanged;
+
 
 
     [Header("UI")]
+    [Tooltip("Show the collapsible seed panel in the top-right corner instead of the older seed box assigned below.")]
+    [SerializeField]
+    private bool useSeedPanel = true;
+
     [SerializeField]
     private TMP_Text seedText;
 
@@ -53,6 +60,28 @@ public class SeedManager : MonoBehaviour
         DontDestroyOnLoad(gameObject);
 
         GenerateSeed();
+
+        if (useSeedPanel)
+        {
+            ShowSeedPanel();
+        }
+    }
+
+
+
+    // The older seed box (seed text, input field and Generate button) is only hidden, so turning
+    // useSeedPanel off brings it back.
+    private void ShowSeedPanel()
+    {
+        WorldSeedPanel.Create(this, seedText != null ? seedText.font : null);
+
+        Transform oldSeedBox = seedInputField != null ? seedInputField.transform.parent
+            : seedText != null ? seedText.transform.parent : null;
+
+        if (oldSeedBox != null && oldSeedBox.GetComponent<Canvas>() == null)
+        {
+            oldSeedBox.gameObject.SetActive(false);
+        }
     }
 
 
@@ -70,6 +99,8 @@ public class SeedManager : MonoBehaviour
         Seed = StringToSeed(seedString);
 
         UpdateUI();
+
+        SeedChanged?.Invoke();
 
         Debug.Log($"Seed String: {seedString}");
         Debug.Log($"World Seed: {Seed}");
@@ -117,6 +148,20 @@ public class SeedManager : MonoBehaviour
 
 
 
+    // Switches to the given seed, or keeps the current one when it is empty, and rebuilds the world.
+    public void GenerateWorld(string newSeed)
+    {
+        if (!string.IsNullOrWhiteSpace(newSeed))
+        {
+            SetSeed(newSeed);
+        }
+
+        GenerateWorld();
+    }
+
+
+
+
     // Only the terrain is generated here. The ecosystem (navigation, plant food and founder animals)
     // rebuilds itself whenever TerrainGenerator reports new terrain.
     private void GenerateWorld()
@@ -125,11 +170,11 @@ public class SeedManager : MonoBehaviour
 
         if (terrainGenerator != null)
         {
-            int terrainSeed = GetSeed("Terrain");
+            WorldSeeds seeds = GetWorldSeeds(seedString);
 
-            Debug.Log($"Terrain Seed: {terrainSeed}");
+            Debug.Log($"World seeds: {seeds}");
 
-            terrainGenerator.GenerateTerrain(terrainSeed);
+            terrainGenerator.GenerateTerrain(seeds);
         }
         else
         {
@@ -151,6 +196,24 @@ public class SeedManager : MonoBehaviour
     public static int GetSeed(string seedString, string systemName)
     {
         return StringToSeed(seedString + "_" + systemName);
+    }
+
+
+
+    // The seed of every part of the world for a seed string. Editor tools use it to rebuild the same world.
+    public static WorldSeeds GetWorldSeeds(string seedString)
+    {
+        return new WorldSeeds
+        {
+            terrain = GetSeed(seedString, "Terrain"),
+            ridges = GetSeed(seedString, "Ridges"),
+            rivers = GetSeed(seedString, "Rivers"),
+            lakes = GetSeed(seedString, "Lakes"),
+            vegetation = GetSeed(seedString, "Vegetation"),
+            moisture = GetSeed(seedString, "Moisture"),
+            temperature = GetSeed(seedString, "Temperature"),
+            resourcePatches = GetSeed(seedString, "ResourcePatches")
+        };
     }
 
 

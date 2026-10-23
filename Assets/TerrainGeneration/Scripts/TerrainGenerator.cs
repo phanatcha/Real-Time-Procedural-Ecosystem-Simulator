@@ -79,6 +79,17 @@ public class TerrainGenerator : MonoBehaviour
         originalHeightMapSettings;
 
 
+    private VegetationSettings
+        originalVegetationSettings;
+
+
+    // The generated world's copy of the environment definitions,
+    // with moisture, temperature and resource patches moved by its
+    // world seed. Null until terrain is generated.
+    private EnvironmentDefinitions
+        worldEnvironmentDefinitions;
+
+
     // Transparent water over every chunk that dips below the water level.
     // Null when TextureData has no water material.
     WaterSurface
@@ -98,6 +109,9 @@ public class TerrainGenerator : MonoBehaviour
     {
         get
         {
+            if (worldEnvironmentDefinitions != null)
+                return worldEnvironmentDefinitions;
+
             return textureSettings == null
                 ? null
                 : textureSettings.environmentDefinitions;
@@ -149,6 +163,9 @@ public class TerrainGenerator : MonoBehaviour
     {
         originalHeightMapSettings =
             heightMapSettings;
+
+        originalVegetationSettings =
+            vegetationSettings;
 
         CacheChunkLayer();
     }
@@ -529,8 +546,34 @@ public class TerrainGenerator : MonoBehaviour
     // TERRAIN GENERATION
     // ---------------------------------------------------------
 
+    // Generates the world for a world seed. The base terrain,
+    // ridges, rivers, lakes, vegetation, moisture, temperature and
+    // resource patches all take their seeds from it.
+    public void GenerateTerrain(
+        WorldSeeds seeds)
+    {
+        GenerateTerrain(
+            seeds.terrain,
+            seeds
+        );
+    }
+
+
+    // Replaces only the base terrain seed. Everything else keeps
+    // the seeds in the settings assets.
     public void GenerateTerrain(
         int terrainSeed)
+    {
+        GenerateTerrain(
+            terrainSeed,
+            null
+        );
+    }
+
+
+    private void GenerateTerrain(
+        int terrainSeed,
+        WorldSeeds? seeds)
     {
         Debug.Log(
             $"Generating terrain with seed: " +
@@ -546,11 +589,26 @@ public class TerrainGenerator : MonoBehaviour
         CacheChunkLayer();
 
 
-        // Runtime copy.
+        // Runtime copies, so seeds never change the settings assets.
         heightMapSettings =
             Instantiate(
                 originalHeightMapSettings
             );
+
+        vegetationSettings =
+            originalVegetationSettings == null
+                ? null
+                : Instantiate(originalVegetationSettings);
+
+        EnvironmentDefinitions sharedDefinitions =
+            textureSettings == null
+                ? null
+                : textureSettings.environmentDefinitions;
+
+        worldEnvironmentDefinitions =
+            sharedDefinitions == null
+                ? null
+                : Instantiate(sharedDefinitions);
 
 
         // Apply deterministic terrain seed.
@@ -560,11 +618,21 @@ public class TerrainGenerator : MonoBehaviour
                 terrainSeed;
 
 
+        if (seeds.HasValue)
+        {
+            seeds.Value.ApplyTo(heightMapSettings);
+            seeds.Value.ApplyTo(vegetationSettings);
+            seeds.Value.ApplyTo(worldEnvironmentDefinitions);
+        }
+
+
         EnsureEnvironmentSampler();
 
 
+        // The shader draws bogs from the same moisture as the world.
         textureSettings.ApplyToMaterial(
-            mapMaterial
+            mapMaterial,
+            worldEnvironmentDefinitions
         );
 
 

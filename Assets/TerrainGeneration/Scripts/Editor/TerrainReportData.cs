@@ -14,7 +14,8 @@ public enum TerrainReportStage
     FinalHeight,
     BeforeErosion,
     ErosionChange,
-    DropletFlow
+    DropletFlow,
+    ValleyMask
 }
 
 public sealed class TerrainReportData : IDisposable
@@ -33,7 +34,8 @@ public sealed class TerrainReportData : IDisposable
         "08  Final heightmap",
         "11  Height before hydraulic erosion",
         "12  Erosion and deposition change",
-        "13  Accumulated droplet flow"
+        "13  Accumulated droplet flow",
+        "15  Valley carving mask"
     };
 
     public static readonly string[] StageDescriptions =
@@ -44,11 +46,12 @@ public sealed class TerrainReportData : IDisposable
         "Actual river carving weight. White = strongest carving; black = no carving.",
         "Actual lake carving weight. White = strongest carving; black = no carving.",
         "World-space height subtraction mask. Black when falloff is disabled.",
-        "Height after ridge blending, river/lake carving and falloff, before the height curve.",
+        "Height after ridge blending, falloff and valley/river/lake carving, before the height curve.",
         "Final world height after the height curve, multiplier and optional hydraulic erosion. This drives the 3D meshes.",
         "The same terrain before hydraulic erosion, on the same fixed height scale as the final heightmap.",
         "Actual final minus original height. Blue = erosion, orange = deposition, white = unchanged. Units and symmetric color range are recorded in the captions.",
-        "Accumulated water-weighted droplet visits, log-scaled relative to the whole bake. This is a flow-path diagnostic, not water depth or river discharge."
+        "Accumulated water-weighted droplet visits, log-scaled relative to the whole bake. This is a flow-path diagnostic, not water depth or river discharge.",
+        "Actual valley carving weight. White = flat valley floor; the grey edges are the walls; black = no valley."
     };
 
     public sealed class Chunk
@@ -158,6 +161,7 @@ public sealed class TerrainReportData : IDisposable
                             data.Maps[(int)TerrainReportStage.RidgeBlend][atlasX, atlasY] = result.heightAfterRidges;
                             data.Maps[(int)TerrainReportStage.RiverMask][atlasX, atlasY] = result.riverStrength;
                             data.Maps[(int)TerrainReportStage.LakeMask][atlasX, atlasY] = result.lakeStrength;
+                            data.Maps[(int)TerrainReportStage.ValleyMask][atlasX, atlasY] = result.valleyStrength;
                             data.Maps[(int)TerrainReportStage.Falloff][atlasX, atlasY] = result.falloff;
                             data.Maps[(int)TerrainReportStage.ShapedHeight][atlasX, atlasY] = result.normalizedHeightInput;
                             data.Maps[(int)TerrainReportStage.FinalHeight][atlasX, atlasY] = result.height;

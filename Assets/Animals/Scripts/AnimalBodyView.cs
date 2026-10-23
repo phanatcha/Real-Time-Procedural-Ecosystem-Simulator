@@ -26,6 +26,10 @@ public class AnimalBodyView : MonoBehaviour
     MeshFilter partsFilter;
     MeshRenderer partsRenderer;
 
+    // True once the legs have been fitted to the height the agent holds the body at. Until then nothing else
+    // should move the body up or down (SeekFood waits before floating it in water).
+    public bool HasMeasuredLift => !enabled || genome == null;
+
     [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
     static void ResetCaches()
     {

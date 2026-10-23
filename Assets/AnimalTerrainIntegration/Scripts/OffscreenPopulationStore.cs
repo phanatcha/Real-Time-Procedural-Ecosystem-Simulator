@@ -77,7 +77,8 @@ public struct OffscreenEcologyRules
     // energy each one uses.
     public float CarryingCapacity(OffscreenSample sample, float plantEnergyPerSecond, float celsius)
     {
-        float digested = harvestEfficiency * plantEnergyPerSecond * PlantDigestion(sample.DietAffinity);
+        float digested = harvestEfficiency * plantEnergyPerSecond * PlantDigestion(sample.DietAffinity) *
+                         sample.plantDigestionMultiplier;
         return digested / EnergyUse(sample, celsius);
     }
 
@@ -109,9 +110,11 @@ public sealed class OffscreenSample
     // Energy used per second at a comfortable temperature, measured on the live animal.
     public readonly float baseEnergyUse;
     public readonly int generation;
-    // Comfort range after body parts, which change the inherited tolerances.
+    // Comfort range after body parts and perks, which change the inherited tolerances.
     public readonly float comfortMinimum;
     public readonly float comfortMaximum;
+    // Below 1 for a scavenger gut, which digests plants worse.
+    public readonly float plantDigestionMultiplier;
 
     public float DietAffinity => genome[AnimalGene.DietAffinity];
 
@@ -122,9 +125,13 @@ public sealed class OffscreenSample
         this.generation = Mathf.Max(0, generation);
 
         BodyPlanEffects effects = AnimalBodyPlan.Evaluate(genome);
+        PerkEffects perks = AnimalPerks.Evaluate(genome);
         float preferred = genome[AnimalGene.PreferredTemperature];
-        comfortMinimum = preferred - Mathf.Max(0f, genome[AnimalGene.ColdTolerance] + effects.coldToleranceChange);
-        comfortMaximum = preferred + Mathf.Max(0f, genome[AnimalGene.HeatTolerance] + effects.heatToleranceChange);
+        comfortMinimum = preferred - Mathf.Max(0f, genome[AnimalGene.ColdTolerance] + effects.coldToleranceChange +
+                                                   perks.coldToleranceChange);
+        comfortMaximum = preferred + Mathf.Max(0f, genome[AnimalGene.HeatTolerance] + effects.heatToleranceChange +
+                                                   perks.heatToleranceChange);
+        plantDigestionMultiplier = perks.plantDigestionMultiplier;
     }
 }
 

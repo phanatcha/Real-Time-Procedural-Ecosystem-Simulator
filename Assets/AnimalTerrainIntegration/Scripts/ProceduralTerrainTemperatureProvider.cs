@@ -19,8 +19,21 @@ public sealed class ProceduralTerrainTemperatureProvider : TemperatureProvider
             : terrainWorld.TryGetSample(worldPosition, out environment);
         if (!sampled || !environment.isValid) return false;
 
+        // Over water the sample describes the bed, which reads warmer the deeper it lies because temperature
+        // falls with height. An animal in the water feels the surface, so use the temperature at water level.
+        float normalizedTemperature = environment.temperature;
+        EnvironmentDefinitions definitions = terrainWorld.Sampler != null
+            ? terrainWorld.Sampler.EnvironmentDefinitions
+            : null;
+        if (environment.isWater && definitions != null)
+        {
+            normalizedTemperature = definitions.SampleTemperature(
+                new Vector2(worldPosition.x, worldPosition.z),
+                definitions.ShorelineThreshold);
+        }
+
         temperatureCelsius = NormalizedToCelsius(
-            environment.temperature,
+            normalizedTemperature,
             coldestTemperatureCelsius,
             warmestTemperatureCelsius);
         return IsFinite(temperatureCelsius);

@@ -18,6 +18,8 @@ public class EcosystemHud : MonoBehaviour
         public float bulk;
         public float height;
         public float lifespan;
+        public float sexualDrive;
+        public float harmfulMutations;
     }
 
     // Each species' average traits when it was first seen, to show how far it has drifted since.
@@ -37,6 +39,7 @@ public class EcosystemHud : MonoBehaviour
     private readonly int[] animalsWithPart = new int[ShownParts.Length];
     private readonly float[] partSizeTotals = new float[ShownParts.Length];
     private string bodySummary = "";
+    private string swimmingSummary = "";
     private string bodySummarySpecies;
     private float nextBodySummaryTime;
 
@@ -120,31 +123,44 @@ public class EcosystemHud : MonoBehaviour
 
         text.Append($"<b>Simulated time</b> {FormatDuration(simulatedSeconds)}\n");
 
-        string ceiling = manager.populationCeiling > 0 ? $" / {manager.populationCeiling} ceiling" : "";
-        string atCeiling = manager.IsAtPopulationCeiling ? " <color=#ffd060>(births paused)</color>" : "";
-        string plants = foodSpawner != null ? $"    <b>Plants</b> {foodSpawner.ShownPlantCount} shown" : "";
+        bool seaCeiling = manager.seaPopulationCeiling > 0;
+        string ceiling = manager.populationCeiling <= 0 ? ""
+            : seaCeiling ? $" / ceilings {manager.populationCeiling} on land, {manager.seaPopulationCeiling} in water"
+            : $" / {manager.populationCeiling} ceiling";
+        bool landPaused = manager.IsAtPopulationCeiling;
+        bool seaPaused = seaCeiling && manager.IsAtSeaPopulationCeiling;
+        string paused = landPaused && (seaPaused || !seaCeiling) ? "births paused"
+            : landPaused ? "births paused on land"
+            : seaPaused ? "births paused in water" : null;
+        string atCeiling = paused != null ? $" <color=#ffd060>({paused})</color>" : "";
+        string plants = foodSpawner != null ? $"    <b>Plants</b> {foodSpawner.ShownPlantCount} shown{DescribeSeaPlants()}" : "";
         string tiles = habitatNavigation != null ? $"    <b>Walkable tiles</b> {habitatNavigation.NavigableTileCount}" : "";
         string offscreen = manager.OffscreenPopulation != null ? $"    <b>Off-screen</b> {manager.OffscreenTotal}" : "";
-        text.Append($"<b>Animals</b> {manager.TotalPopulation}{ceiling}{atCeiling}{offscreen}{plants}{tiles}\n");
+        string water = WaterAccess.HasWater ? $"    <b>In water</b> {DescribeAnimalsInWater(manager)}" : "";
+        text.Append($"<b>Animals</b> {manager.TotalPopulation}{ceiling}{atCeiling}{offscreen}{water}{plants}{tiles}\n");
 
         int speciesEver = 0;
         int extinct = 0;
         int births = 0;
         int mutatedBirths = 0;
+        int sexualBirths = 0;
         foreach (SpeciesTelemetryRecord record in manager.Telemetry.Values)
         {
             speciesEver++;
             if (record.extinctionTime >= 0f) extinct++;
             births += record.reproductionEvents;
             mutatedBirths += record.mutatedOffspring;
+            sexualBirths += record.sexualOffspring;
         }
 
-        string mutationShare = births > 0 ? $" ({100f * mutatedBirths / births:0}% carried mutations)" : "";
-        text.Append($"<b>Births</b> {births}{mutationShare}    <b>Generation</b> " +
+        string birthShares = births > 0
+            ? $" ({100f * sexualBirths / births:0}% from two parents, {100f * mutatedBirths / births:0}% carried mutations)"
+            : "";
+        text.Append($"<b>Births</b> {births}{birthShares}    <b>Generation</b> " +
                     $"{manager.AverageGeneration:0.0} on average, newest {manager.HighestGeneration}\n");
         text.Append($"<b>Species</b> {manager.SpeciesAliveCount} alive, {speciesEver} ever, {extinct} extinct    " +
                     $"(a group splits off once it is {manager.speciationThreshold:0.###} apart genetically, " +
-                    "typically after 40-50 generations)\n");
+                    "typically after 50-60 generations)\n");
 
         AppendLargestSpecies(manager);
         return text.ToString().TrimEnd();
@@ -170,7 +186,9 @@ public class EcosystemHud : MonoBehaviour
             diet = record.dietAffinity,
             bulk = record.bodyBulk,
             height = record.bodyHeight,
-            lifespan = record.maxLifespan
+            lifespan = record.maxLifespan,
+            sexualDrive = record.sexualDrive,
+            harmfulMutations = record.harmfulMutations
         };
         if (!traitsWhenFirstSeen.TryGetValue(largest, out Traits first))
         {
@@ -183,11 +201,40 @@ public class EcosystemHud : MonoBehaviour
         text.Append($"   diet {Describe(now.diet, record.dietRange, now.diet - first.diet)}   " +
                     $"bulk {Describe(now.bulk, record.bodyBulkRange, now.bulk - first.bulk)}   " +
                     $"height {Describe(now.height, record.bodyHeightRange, now.height - first.height)}   " +
-                    $"lifespan {now.lifespan:0}s {Signed(now.lifespan - first.lifespan, "0")}");
+                    $"lifespan {now.lifespan:0}s {Signed(now.lifespan - first.lifespan, "0")}   " +
+                    $"sexual drive {now.sexualDrive:0.00} {Signed(now.sexualDrive - first.sexualDrive, "0.00")}");
+        text.Append($"\n   harmful mutations: {now.harmfulMutations:0.0} " +
+                    $"{Signed(now.harmfulMutations - first.harmfulMutations, "0.0")}");
+        text.Append($"\n   perks: {AnimalPerks.DescribeShares(record.perkShares)}");
         text.Append($"\n   body parts: {DescribeBodyParts(manager, largest)}");
+        text.Append($"\n   swimming ability: {swimmingSummary}");
     }
 
-    // Share of the species' animals carrying each part, with the average size of those parts (0-1).
+    // How many of the shown plants are in the sea, and how many sea plants have been eaten in this world.
+    string DescribeSeaPlants()
+    {
+        if (!foodSpawner.growSeaFood || !WaterAccess.HasWater) return "";
+
+        return $" ({foodSpawner.ShownSeaPlantCount} in the sea, {foodSpawner.SeaPlantsEaten} sea plants eaten)";
+    }
+
+    static string DescribeAnimalsInWater(SpeciesManager manager)
+    {
+        int inWater = 0;
+        int inDeadZones = 0;
+        foreach (SeekFood animal in manager.ActiveAgents)
+        {
+            if (animal == null || !animal.IsInWater) continue;
+
+            inWater++;
+            if (animal.IsInDeadZone) inDeadZones++;
+        }
+
+        return inDeadZones > 0 ? $"{inWater} ({inDeadZones} in dead zones)" : inWater.ToString();
+    }
+
+    // Share of the species' animals carrying each part, with the average size of those parts (0-1). Also
+    // refreshes the species' swimming summary.
     string DescribeBodyParts(SpeciesManager manager, string species)
     {
         if (species == bodySummarySpecies && Time.unscaledTime < nextBodySummaryTime)
@@ -200,6 +247,8 @@ public class EcosystemHud : MonoBehaviour
         System.Array.Clear(animalsWithPart, 0, animalsWithPart.Length);
         System.Array.Clear(partSizeTotals, 0, partSizeTotals.Length);
         int members = 0;
+        int deepWaterSwimmers = 0;
+        float swimmingAbilityTotal = 0f;
         foreach (SeekFood animal in manager.ActiveAgents)
         {
             AnimalGenome genome = animal != null ? animal.Genome : null;
@@ -209,6 +258,8 @@ public class EcosystemHud : MonoBehaviour
             }
 
             members++;
+            swimmingAbilityTotal += animal.SwimmingAbility;
+            if (animal.CanSwimDeepWater) deepWaterSwimmers++;
             for (int part = 0; part < ShownParts.Length; part++)
             {
                 float largest = 0f;
@@ -238,6 +289,9 @@ public class EcosystemHud : MonoBehaviour
         }
 
         bodySummary = summary.Length > 0 ? summary.ToString() : "none yet, still a plain capsule";
+        swimmingSummary = members > 0
+            ? $"{swimmingAbilityTotal / members:0.00} on average, {100f * deepWaterSwimmers / members:0}% can swim in deep water"
+            : "";
         return bodySummary;
     }
 

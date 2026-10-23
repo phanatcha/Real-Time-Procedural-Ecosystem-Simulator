@@ -37,7 +37,7 @@ public sealed class HabitatAnalysisWindow : EditorWindow
     sealed class SeedResult
     {
         public string seedText;
-        public int terrainSeed;
+        public WorldSeeds worldSeeds;
         public HabitatAnalysis analysis;
         public Texture2D map;
     }
@@ -49,6 +49,7 @@ public sealed class HabitatAnalysisWindow : EditorWindow
         public string source;
         public string[] seeds;
         public int[] terrainSeeds;
+        public WorldSeeds[] worldSeeds;
         public float sampleSpacing;
         public float cellSize;
         public Vector2 requestedStart;
@@ -225,20 +226,22 @@ public sealed class HabitatAnalysisWindow : EditorWindow
                 int index = i;
                 string seedText = seedList[i];
                 HeightMapSettings heights = Instantiate(heightSettings);
+                EnvironmentDefinitions environment = Instantiate(environmentDefinitions);
                 try
                 {
-                    // The same seed the seed screen gives the terrain, so the analysis matches the game's world.
-                    int terrainSeed = SeedManager.GetSeed(seedText, "Terrain");
-                    heights.noiseSettings.seed = terrainSeed;
+                    // The same seeds the seed screen gives the world, so the analysis matches the game's world.
+                    WorldSeeds worldSeeds = SeedManager.GetWorldSeeds(seedText);
+                    worldSeeds.ApplyTo(heights);
+                    worldSeeds.ApplyTo(environment);
                     TerrainEnvironmentSampler sampler =
-                        new TerrainEnvironmentSampler(heights, meshSettings, environmentDefinitions, vegetationSettings);
+                        new TerrainEnvironmentSampler(heights, meshSettings, environment, vegetationSettings);
                     HabitatAnalysis analysis = HabitatAnalysis.Run(sampler, requirements, sampleSpacing, start, cellSize,
                         progress => EditorUtility.DisplayCancelableProgressBar("Habitat analysis",
                             $"Seed {index + 1} of {seedList.Count}: {seedText}", (index + progress) / seedList.Count));
                     results.Add(new SeedResult
                     {
                         seedText = seedText,
-                        terrainSeed = terrainSeed,
+                        worldSeeds = worldSeeds,
                         analysis = analysis,
                         map = BuildMap(analysis)
                     });
@@ -247,6 +250,7 @@ public sealed class HabitatAnalysisWindow : EditorWindow
                 {
                     HydraulicErosionCache.Invalidate(heights);
                     DestroyImmediate(heights);
+                    DestroyImmediate(environment);
                 }
             }
 
@@ -411,7 +415,7 @@ public sealed class HabitatAnalysisWindow : EditorWindow
             float squareKilometres = analysis.SampleArea / 1000000f;
             csv.AppendLine(string.Format(CultureInfo.InvariantCulture,
                 "{0},{1},{2:0.##},{3:0.###},{4:0.###},{5:0.###},{6:0.###},{7:0.##},{8:0.##},{9},{10:0.##},{11:0.#},{12:0.#},{13:0.#}",
-                CsvText(result.seedText), result.terrainSeed, analysis.Spacing,
+                CsvText(result.seedText), result.worldSeeds.terrain, analysis.Spacing,
                 analysis.LandSamples * squareKilometres, analysis.WalkableSamples * squareKilometres,
                 analysis.SuitableSamples * squareKilometres, analysis.AccessibleSamples * squareKilometres,
                 analysis.Availability * 100f, analysis.Accessibility * 100f, analysis.HabitatRegionCount,
@@ -447,7 +451,8 @@ public sealed class HabitatAnalysisWindow : EditorWindow
             generatedUtc = DateTime.UtcNow.ToString("O"),
             source = sourceDescription,
             seeds = results.ConvertAll(result => result.seedText).ToArray(),
-            terrainSeeds = results.ConvertAll(result => result.terrainSeed).ToArray(),
+            terrainSeeds = results.ConvertAll(result => result.worldSeeds.terrain).ToArray(),
+            worldSeeds = results.ConvertAll(result => result.worldSeeds).ToArray(),
             sampleSpacing = sampleSpacing,
             cellSize = cellSize,
             requestedStart = start,
@@ -502,7 +507,7 @@ public sealed class HabitatAnalysisWindow : EditorWindow
         {
             text.AppendLine(string.Format(CultureInfo.InvariantCulture,
                 "- **{0}** (terrain seed {1}): availability {2:0.0}%, accessibility {3:0.0}%, {4} habitat regions.",
-                result.seedText, result.terrainSeed, result.analysis.Availability * 100f,
+                result.seedText, result.worldSeeds.terrain, result.analysis.Availability * 100f,
                 result.analysis.Accessibility * 100f, result.analysis.HabitatRegionCount));
         }
 
@@ -515,8 +520,9 @@ public sealed class HabitatAnalysisWindow : EditorWindow
         text.AppendLine("- Tall forest food is left out, because the founders cannot reach it. Seasons are not modelled.");
         text.AppendLine("- Per-cell CSV files use the off-screen population model's cells " +
                         string.Format(CultureInfo.InvariantCulture, "({0:0} m).", first.CellSize));
-        text.AppendLine("- The full settings are in settings-snapshot.json. Only the terrain noise seed changes between seeds, " +
-                        "as on the seed screen.");
+        text.AppendLine("- The full settings are in settings-snapshot.json. Only the seeds change between worlds: as on the " +
+                        "seed screen, the terrain, ridges, rivers, lakes, moisture, temperature and plant patches each " +
+                        "take theirs from the world seed (worldSeeds in the snapshot).");
         return text.ToString();
     }
 

@@ -9,7 +9,9 @@ public enum AgentDeathCause
     OldAge,
     Other,
     ColdExposure,
-    HeatExposure
+    HeatExposure,
+    // Bit a venomous animal.
+    Venom
 }
 
 // Animals kept as numbers away from the camera (see OffscreenPopulationBridge). They keep their species
@@ -50,6 +52,11 @@ public sealed class SpeciesTelemetryRecord
     public float preferredTemperature;
     public float coldTolerance;
     public float heatTolerance;
+    public float sexualDrive;
+    [Tooltip("Average number of harmful mutations carried, each adding to energy use.")]
+    public float harmfulMutations;
+    [Tooltip("Share of the living members with each perk (0-1), indexed by AnimalPerk.")]
+    public float[] perkShares = new float[AnimalGenome.PerkCount];
     public int births;
     public int deaths;
     public int starvationDeaths;
@@ -57,10 +64,13 @@ public sealed class SpeciesTelemetryRecord
     public int oldAgeDeaths;
     public int coldExposureDeaths;
     public int heatExposureDeaths;
+    public int venomDeaths;
     public int fightResponses;
     public int fleeResponses;
     public int reproductionEvents;
     public int mutatedOffspring;
+    [Tooltip("Births with two parents. The rest are clones.")]
+    public int sexualOffspring;
     public int plantMeals;
     public int meatMeals;
     public float rawPlantEnergyConsumed;
@@ -118,6 +128,11 @@ public class SpeciesManager : MonoBehaviour
     [SerializeField] private bool safetyPaused;
     [SerializeField, TextArea] private string lastSafetyPauseReason;
 
+    [Header("Perception")]
+    [Tooltip("Side of the square cells animals are filed into, in world units. An animal looking for prey, " +
+             "threats or mates only checks the animals in the cells its vision covers, not every animal.")]
+    [Min(8f)] public float perceptionCellSize = 64f;
+
     [Header("Telemetry")]
     [Tooltip("Enables individual birth and death messages. Leave off for large or fast simulations. " +
              "Speciation and extinction are always logged because they are rare.")]
@@ -136,8 +151,12 @@ public class SpeciesManager : MonoBehaviour
 
     [Header("Population Ceiling")]
     [Tooltip("Animals stop giving birth while the population is this large, so an open world stays " +
-             "affordable to simulate. Set to 0 to disable.")]
+             "affordable to simulate. Set to 0 to disable. With a sea ceiling it counts animals on land only.")]
     [Min(0)] public int populationCeiling = 400;
+    [Tooltip("A separate ceiling for animals in the water, so a crowded sea cannot stop births on land, or the " +
+             "other way round. Animals at sea are never kept as off-screen numbers, so without this they could " +
+             "fill the whole ceiling. 0 counts animals in water toward the ceiling above, as before.")]
+    [Min(0)] public int seaPopulationCeiling = 200;
 
     private int currentSpeciesIndex;
     private float telemetryTimer;
@@ -146,6 +165,8 @@ public class SpeciesManager : MonoBehaviour
     // Newborns register on their first frame, so births are counted here until then. Otherwise every
     // parent in a busy frame sees room under the ceiling and the population overshoots it.
     private int pendingBirths;
+    private int seaPopulation;
+    private int seaPopulationFrame = -1;
     private float baseFixedDeltaTime;
     private float baseMaximumDeltaTime;
     private float performanceMeasurementRealTime;
@@ -158,11 +179,17 @@ public class SpeciesManager : MonoBehaviour
     private readonly Dictionary<string, Color> speciesColors = new Dictionary<string, Color>();
     private readonly HashSet<string> assignedSpeciesNames = new HashSet<string>();
     private readonly HashSet<SeekFood> activeAgents = new HashSet<SeekFood>();
+    // The active animals by position, for FindAgentsNear.
+    private SpatialGrid<SeekFood> agentGrid;
+    private int agentGridFrame = -1;
+    private bool agentGridStale = true;
+    private float agentGridMargin;
     private readonly Dictionary<string, SpeciesTelemetryRecord> telemetry = new Dictionary<string, SpeciesTelemetryRecord>();
 
     public IReadOnlyDictionary<string, int> SpeciesPopulation => speciesPopulation;
     public IReadOnlyDictionary<string, SpeciesTelemetryRecord> Telemetry => telemetry;
     public IEnumerable<SeekFood> ActiveAgents => activeAgents;
+    public bool IsActiveAgent(SeekFood agent) => agent != null && activeAgents.Contains(agent);
     // Animals on screen. Off-screen animals are in OffscreenPopulation.
     public int TotalPopulation { get; private set; }
     public IOffscreenPopulation OffscreenPopulation { get; set; }
@@ -184,8 +211,35 @@ public class SpeciesManager : MonoBehaviour
             return count;
         }
     }
+    // Animals in the water right now, counted at most once a frame.
+    public int SeaPopulation
+    {
+        get
+        {
+            if (seaPopulationFrame != Time.frameCount)
+            {
+                seaPopulationFrame = Time.frameCount;
+                seaPopulation = 0;
+                foreach (SeekFood agent in activeAgents)
+                {
+                    if (agent != null && agent.IsInWater) seaPopulation++;
+                }
+            }
+
+            return seaPopulation;
+        }
+    }
+    // The animals populationCeiling counts: those on land while the sea has its own ceiling, otherwise all.
+    public int LandPopulation => seaPopulationCeiling > 0 ? TotalPopulation - SeaPopulation : TotalPopulation;
     public bool IsAtPopulationCeiling =>
-        populationCeiling > 0 && TotalPopulation + pendingBirths >= populationCeiling;
+        populationCeiling > 0 && LandPopulation + pendingBirths >= populationCeiling;
+    public bool IsAtSeaPopulationCeiling => seaPopulationCeiling > 0
+        ? SeaPopulation + pendingBirths >= seaPopulationCeiling
+        : IsAtPopulationCeiling;
+
+    // Whether a parent here must wait to give birth: one in the water answers to the sea's ceiling, others to the
+    // land's.
+    public bool IsAtPopulationCeilingFor(bool inWater) => inWater ? IsAtSeaPopulationCeiling : IsAtPopulationCeiling;
     // Simulated time (Time.time) when the current world's history began.
     public float WorldStartTime { get; private set; }
     // Refreshed at every species census. Founders are generation 0.
@@ -378,6 +432,7 @@ public class SpeciesManager : MonoBehaviour
     public void ResetSimulation()
     {
         activeAgents.Clear();
+        agentGridStale = true;
         speciesPopulation.Clear();
         speciesColors.Clear();
         assignedSpeciesNames.Clear();
@@ -431,12 +486,60 @@ public class SpeciesManager : MonoBehaviour
             Mathf.Clamp(brightness + Random.Range(-0.15f, 0.15f), 0.45f, 1f));
     }
 
+    // Fills results with the active animals that may be within radius of position: every one in the grid cells
+    // the radius covers. Callers still check exact distances.
+    public void FindAgentsNear(Vector3 position, float radius, List<SeekFood> results)
+    {
+        if (agentGrid == null || agentGridStale || agentGridFrame != Time.frameCount)
+        {
+            RebuildAgentGrid();
+        }
+
+        agentGrid.Query(position, radius + agentGridMargin, results);
+    }
+
+    // Animals move every frame, so the grid is rebuilt the first time it is needed in a frame, and again after
+    // animals leave.
+    void RebuildAgentGrid()
+    {
+        if (agentGrid == null || agentGrid.CellSize != Mathf.Max(8f, perceptionCellSize))
+        {
+            agentGrid = new SpatialGrid<SeekFood>(Mathf.Max(8f, perceptionCellSize));
+        }
+        else
+        {
+            agentGrid.Clear();
+        }
+
+        float fastest = 0f;
+        foreach (SeekFood agent in activeAgents)
+        {
+            if (agent == null) continue;
+
+            agentGrid.Add(agent, agent.transform.position);
+            fastest = Mathf.Max(fastest, agent.GetCurrentMovementSpeed());
+        }
+
+        // An animal can still move after the grid is built this frame, by at most a frame's travel, so searches
+        // reach that much further.
+        agentGridMargin = fastest * Time.deltaTime;
+        agentGridFrame = Time.frameCount;
+        agentGridStale = false;
+    }
+
     // countAsBirth is false for animals arriving from an off-screen population, which were counted already.
     public void RegisterAgent(SeekFood agent, bool countAsBirth = true)
     {
         if (agent == null || !activeAgents.Add(agent))
         {
             return;
+        }
+
+        // A newcomer joins this frame's grid where it stands. Animals leaving have the grid rebuilt instead.
+        if (agentGrid != null && !agentGridStale && agentGridFrame == Time.frameCount)
+        {
+            agentGrid.Add(agent, agent.transform.position);
+            agentGridMargin = Mathf.Max(agentGridMargin, agent.GetCurrentMovementSpeed() * Time.deltaTime);
         }
 
         if (pendingBirths > 0) pendingBirths--;
@@ -471,6 +574,8 @@ public class SpeciesManager : MonoBehaviour
             return;
         }
 
+        agentGridStale = true;
+
         string speciesName = agent.speciesName;
         if (speciesPopulation.ContainsKey(speciesName))
         {
@@ -483,6 +588,7 @@ public class SpeciesManager : MonoBehaviour
             if (deathCause == AgentDeathCause.OldAge) record.oldAgeDeaths++;
             if (deathCause == AgentDeathCause.ColdExposure) record.coldExposureDeaths++;
             if (deathCause == AgentDeathCause.HeatExposure) record.heatExposureDeaths++;
+            if (deathCause == AgentDeathCause.Venom) record.venomDeaths++;
             
             if (speciesPopulation[speciesName] <= 0)
             {
@@ -520,6 +626,8 @@ public class SpeciesManager : MonoBehaviour
     public void UnregisterAgentWithoutDeath(SeekFood agent)
     {
         if (agent == null || !activeAgents.Remove(agent)) return;
+
+        agentGridStale = true;
 
         string speciesName = agent.speciesName;
         if (speciesPopulation.TryGetValue(speciesName, out int population))
@@ -559,7 +667,8 @@ public class SpeciesManager : MonoBehaviour
         }
     }
 
-    public void RecordReproduction(SeekFood parent, bool offspringMutated)
+    // sexual is true for a child of two parents, counted once, for the parent it was born beside.
+    public void RecordReproduction(SeekFood parent, bool offspringMutated, bool sexual = false)
     {
         if (parent == null)
         {
@@ -572,6 +681,11 @@ public class SpeciesManager : MonoBehaviour
         if (offspringMutated)
         {
             record.mutatedOffspring++;
+        }
+
+        if (sexual)
+        {
+            record.sexualOffspring++;
         }
     }
 
@@ -750,6 +864,18 @@ public class SpeciesManager : MonoBehaviour
         record.maxStamina = Mathf.Lerp(record.maxStamina, agent.maxStamina, weight);
         record.maturityTime = Mathf.Lerp(record.maturityTime, agent.maturityTime, weight);
         record.maxLifespan = Mathf.Lerp(record.maxLifespan, agent.maxLifespan, weight);
+        record.sexualDrive = Mathf.Lerp(record.sexualDrive, agent.sexualDrive, weight);
+        record.harmfulMutations = Mathf.Lerp(record.harmfulMutations, agent.HarmfulMutations, weight);
+        if (record.perkShares == null || record.perkShares.Length != AnimalGenome.PerkCount)
+        {
+            record.perkShares = new float[AnimalGenome.PerkCount];
+        }
+
+        for (int perk = 0; perk < record.perkShares.Length; perk++)
+        {
+            record.perkShares[perk] = Mathf.Lerp(record.perkShares[perk],
+                                                 agent.HasPerk((AnimalPerk)perk) ? 1f : 0f, weight);
+        }
         if (agent.ThermalResponse != null)
         {
             record.preferredTemperature = Mathf.Lerp(record.preferredTemperature,
@@ -779,12 +905,16 @@ public class SpeciesManager : MonoBehaviour
             builder.Append($"reach={record.feedingReach:F1}, stamina={record.maxStamina:F1}, ");
             builder.Append($"maturity={record.maturityTime:F1}s, lifespan={record.maxLifespan:F1}s): ");
             builder.Append($"preferredC={record.preferredTemperature:F1}, coldTolerance={record.coldTolerance:F1}, ");
-            builder.Append($"heatTolerance={record.heatTolerance:F1}, ");
+            builder.Append($"heatTolerance={record.heatTolerance:F1}, sexualDrive={record.sexualDrive:F2}, ");
+            builder.Append($"harmfulMutations={record.harmfulMutations:F1}, ");
+            builder.Append($"perks=[{AnimalPerks.DescribeShares(record.perkShares)}], ");
             builder.Append($"living={living}, births={record.births}, deaths={record.deaths}, ");
             builder.Append($"oldAge={record.oldAgeDeaths}, ");
             builder.Append($"coldExposure={record.coldExposureDeaths}, heatExposure={record.heatExposureDeaths}, ");
+            builder.Append($"venom={record.venomDeaths}, ");
             builder.Append($"fight={record.fightResponses}, flee={record.fleeResponses}, ");
-            builder.Append($"offspring={record.reproductionEvents}, plants={record.plantMeals} ");
+            builder.Append($"offspring={record.reproductionEvents} ({record.sexualOffspring} with two parents), ");
+            builder.Append($"plants={record.plantMeals} ");
             builder.Append($"({record.digestiblePlantEnergyGained:F1} energy), meat={record.meatMeals} ");
             builder.Append($"({record.digestibleMeatEnergyGained:F1} energy), kills={record.successfulKills}");
         }

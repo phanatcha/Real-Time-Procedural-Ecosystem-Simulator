@@ -9,7 +9,7 @@ This folder is the bridge between the procedural boreal terrain and the temporar
 3. Save the scene.
 4. Enter Play mode.
 
-The demo creates three grounded cylinder founders, cube-shaped plant food, a boreal temperature provider, finite world borders, and a local runtime NavMesh. These objects are generated only in Play mode and are disposable.
+The demo creates three grounded cylinder founders, cube-shaped plant food, a boreal temperature provider, finite world borders, and a NavMesh that streams in tiles around the animals (`HabitatNavigation`). These objects are generated only in Play mode and are disposable.
 
 ## Terrain guarantees used by animals
 
@@ -58,8 +58,8 @@ if (TemperatureSystem.TryGetTemperatureAt(transform.position, out float celsius)
 `AnimalTerrainDemoBootstrap` is only a test harness. When proper animal and food prefabs are ready:
 
 1. Disable or remove `AnimalTerrainDemoBootstrap` from the scene.
-2. Keep `AnimalTerrainWorld`, `ProceduralTerrainTemperatureProvider`, `TemperatureSystem`, and `ProceduralTerrainNavMesh`.
-3. Spawn the real animal prefab only through `TryFindWalkableGround` or `ProceduralTerrainNavMesh.TryProjectToNavigation`.
+2. Keep `AnimalTerrainWorld`, `ProceduralTerrainTemperatureProvider`, `TemperatureSystem`, and `HabitatNavigation`.
+3. Spawn the real animal prefab only through `TryFindWalkableGround` or `HabitatNavigation.TryProjectToNavigation`.
 4. Keep food tagged `Food` and border triggers tagged `Border` unless the imported interaction code is refactored to avoid tags.
 5. Give terrestrial animals a `NavMeshAgent`, collider, `SeekFood` or its replacement behavior, and `AnimalTemperature`.
 

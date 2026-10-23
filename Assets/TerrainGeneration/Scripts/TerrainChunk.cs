@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using UnityEngine;
 
 public class TerrainChunk
@@ -107,6 +108,7 @@ public class TerrainChunk
     private MeshFilter treesMeshFilter;
     private MeshFilter grassMeshFilter;
     private MeshFilter rocksMeshFilter;
+    private MeshFilter bushesMeshFilter;
 
     private int vegetationLODIndex = -1;
 
@@ -598,6 +600,13 @@ public class TerrainChunk
             );
 
 
+        bushesMeshFilter =
+            AddVegetationLayer(
+                vegetationObject.transform,
+                "Bushes"
+            );
+
+
         if (previousLODIndex >= 0)
         {
             UpdateVegetationForLOD(
@@ -676,7 +685,8 @@ public class TerrainChunk
                 meshObject.transform.position,
                 out Mesh treesMesh,
                 out Mesh grassMesh,
-                out Mesh rocksMesh
+                out Mesh rocksMesh,
+                out Mesh bushesMesh
             );
 
 
@@ -703,6 +713,15 @@ public class TerrainChunk
             rocksMesh,
             "Rocks (" +
             projected.rocks.Count +
+            ")"
+        );
+
+
+        SetVegetationLayer(
+            bushesMeshFilter,
+            bushesMesh,
+            "Bushes (" +
+            projected.bushes.Count +
             ")"
         );
 
@@ -760,6 +779,18 @@ public class TerrainChunk
     {
         return
             meshObject.activeSelf;
+    }
+
+
+    // Where this chunk's berry bushes stand, so GrassField can keep its grass low around them.
+    public void CollectBushPositions(List<Vector2> output)
+    {
+        if (vegetationData == null) return;
+
+        foreach (VegetationInstance bush in vegetationData.bushes)
+        {
+            output.Add(new Vector2(bush.position.x, bush.position.z));
+        }
     }
 
 

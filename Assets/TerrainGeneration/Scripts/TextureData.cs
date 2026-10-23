@@ -24,6 +24,34 @@ public class TextureData : UpdatableData
     [Tooltip("Bogs need flat ground - same 0-1 slope scale the shader already uses for rock/snow.")]
     public float bogMaxSlope = 0.25f;
 
+    [Header("Surface Detail")]
+    [Tooltip("Noise-based detail the terrain shader paints on top of the colour layers: meadow colour patches, rock on " +
+             "ground too steep to walk, and small bumps that catch the light. No textures are tiled, so nothing repeats.")]
+    public bool enableSurfaceDetail = true;
+    [ColorUsage(false, true)]
+    [Tooltip("Colour multiplier for sunny, dry meadow patches.")]
+    public Color meadowWarm = new Color(1.1f, 1.04f, 0.8f);
+    [ColorUsage(false, true)]
+    [Tooltip("Colour multiplier for cooler, lusher meadow patches.")]
+    public Color meadowCool = new Color(0.86f, 1f, 1.04f);
+    [Tooltip("World units across a meadow colour patch.")]
+    public float meadowPatchScale = 70f;
+    [Range(0, 1)]
+    public float meadowVariation = 0.6f;
+    public Color rockTint = new Color(0.45f, 0.43f, 0.41f);
+    [Range(0, 1)]
+    [Tooltip("Slope (same 0-1 scale) where bare rock starts showing. 0.15 is about 32 degrees, the steepest ground animals walk on.")]
+    public float rockSlopeStart = 0.15f;
+    [Range(0, 1)]
+    [Tooltip("Slope where the ground is all rock.")]
+    public float rockSlopeEnd = 0.3f;
+    [Tooltip("Height in metres of each rock ledge on cliffs.")]
+    public float rockBandHeight = 1.6f;
+    [Range(0, 3)]
+    public float bumpStrength = 1f;
+    [Tooltip("Distance in metres by which fine detail has faded out; further away it would shimmer.")]
+    public float detailDistance = 300f;
+
     [Header("Erosion Streaks")]
     [Tooltip("Not simulated - a stretched noise pattern darkening steep faces to suggest water-carved rilling, since true particle erosion doesn't fit infinite chunk streaming.")]
     public bool enableErosion = true;
@@ -47,25 +75,41 @@ public class TextureData : UpdatableData
     float savedMinHeight;
     float savedMaxHeight;
 
-    public void ApplyToMaterial(Material material)
+    // definitions replaces this asset's environment definitions, for a world whose moisture is moved by its
+    // world seed (see TerrainGenerator).
+    public void ApplyToMaterial(Material material, EnvironmentDefinitions definitions = null)
     {
-        if (material == null || environmentDefinitions == null) return;
+        EnvironmentDefinitions environment = definitions != null ? definitions : environmentDefinitions;
+        if (material == null || environment == null) return;
 
         material.SetInt("layerCount", layers.Length);
         material.SetColorArray("baseColours", GetColours());
-        material.SetFloatArray("baseStartHeights", GetStartHeights());
+        material.SetFloatArray("baseStartHeights", GetStartHeights(environment));
         material.SetFloatArray("baseBlends", GetBlends());
-        material.SetFloat("normalizedWaterLevel", environmentDefinitions.ShorelineThreshold);
-        material.SetFloat("landThreshold", environmentDefinitions.LandThreshold);
+        material.SetFloat("normalizedWaterLevel", environment.ShorelineThreshold);
+        material.SetFloat("landThreshold", environment.LandThreshold);
 
         material.SetInt("enableBog", enableBog ? 1 : 0);
         material.SetColor("bogTint", bogTint);
-        material.SetFloat("moistureScale", Mathf.Max(environmentDefinitions.moistureScale, 0.01f));
-        material.SetVector("moistureOffset", environmentDefinitions.moistureOffset);
+        material.SetFloat("moistureScale", Mathf.Max(environment.moistureScale, 0.01f));
+        material.SetVector("moistureOffset", environment.moistureOffset);
         material.SetFloat("bogMoistureThreshold", bogMoistureThreshold);
         material.SetFloat("bogMinHeight", bogMinHeight);
         material.SetFloat("bogMaxHeight", bogMaxHeight);
         material.SetFloat("bogMaxSlope", bogMaxSlope);
+
+        material.SetInt("enableSurfaceDetail", enableSurfaceDetail ? 1 : 0);
+        // The meadow colours are multipliers, so they go in as they are rather than converted like a colour.
+        material.SetVector("meadowWarm", (Vector4)meadowWarm);
+        material.SetVector("meadowCool", (Vector4)meadowCool);
+        material.SetFloat("meadowPatchScale", Mathf.Max(meadowPatchScale, 1f));
+        material.SetFloat("meadowVariation", meadowVariation);
+        material.SetColor("rockTint", rockTint);
+        material.SetFloat("rockSlopeStart", rockSlopeStart);
+        material.SetFloat("rockSlopeEnd", Mathf.Max(rockSlopeEnd, rockSlopeStart + 0.01f));
+        material.SetFloat("rockBandHeight", Mathf.Max(rockBandHeight, 0.1f));
+        material.SetFloat("bumpStrength", bumpStrength);
+        material.SetFloat("detailDistance", Mathf.Max(detailDistance, 1f));
 
         material.SetInt("enableErosion", enableErosion ? 1 : 0);
         material.SetFloat("erosionSlopeThreshold", erosionSlopeThreshold);
@@ -95,12 +139,12 @@ public class TextureData : UpdatableData
         return colours;
     }
 
-    float[] GetStartHeights()
+    float[] GetStartHeights(EnvironmentDefinitions environment)
     {
         float[] heights = new float[layers.Length];
         for (int i = 0; i < layers.Length; i++)
         {
-            heights[i] = environmentDefinitions.GetBiomeStartHeight(layers[i].biome);
+            heights[i] = environment.GetBiomeStartHeight(layers[i].biome);
         }
         return heights;
     }
