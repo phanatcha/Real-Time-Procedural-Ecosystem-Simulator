@@ -1,6 +1,17 @@
 using System.Collections.Generic;
 using UnityEngine;
 
+// Norway's summer boreal flowers that GrassField scatters: forest-floor ones first, then edge and meadow ones.
+public enum BorealFlower
+{
+    Twinflower,
+    ChickweedWintergreen,
+    WoodCranesbill,
+    Globeflower,
+    Harebell,
+    Fireweed
+}
+
 // The summer forest foods ground plants are drawn as (see ForestFoodLooks). Autumn and spring ones join with seasons.
 public enum ForestFood
 {
@@ -101,30 +112,54 @@ public static class VegetationMeshBuilder
     public static Mesh BuildBerryBush(Color leafColour, Color berryColour, bool upright, System.Random rng)
     {
         MeshParts mesh = new MeshParts();
-        float spread = (upright ? 0.32f : 0.42f) * BushSize;
+        float spread = (upright ? 0.3f : 0.4f) * BushSize;
         float height = (upright ? 0.85f : 0.55f) * BushSize;
-        int clumps = 7 + rng.Next(3);
+
+        // Woody stems rising from the ground into the leaves, so it reads as a shrub standing on the ground.
+        Color wood = new Color(0.33f, 0.22f, 0.15f);
+        int stems = 3 + rng.Next(3);
+        for (int i = 0; i < stems; i++)
+        {
+            Vector3 root = Around(rng, spread * 0.35f, 0f);
+            mesh.AddCylinder(root, height * 0.45f, 0.025f * BushSize, 0.015f * BushSize, 5, wood, 0.05f);
+        }
+
+        // Leaves in a broad, darker lower tier and a smaller, brighter crown, so the outline is a clear dome.
+        int clumps = 8 + rng.Next(3);
         Vector3[] centres = new Vector3[clumps];
         Vector3[] radii = new Vector3[clumps];
         for (int i = 0; i < clumps; i++)
         {
-            // The first clump crowns the middle; the rest ring it lower down, so the bush is a dome.
-            float radius = ((upright ? 0.2f : 0.24f) + 0.08f * Next(rng)) * BushSize;
-            centres[i] = i == 0 ? new Vector3(0f, height - radius * 0.6f, 0f)
-                                : Around(rng, spread, height * (0.3f + 0.45f * Next(rng)));
-            radii[i] = new Vector3(radius, radius * 0.85f, radius);
-            mesh.AddClump(centres[i], radii[i], leafColour * (0.9f + 0.2f * Next(rng)), 0.3f, 0, rng);
+            bool crown = i < 3;
+            float radius = ((crown ? 0.17f : upright ? 0.19f : 0.23f) + 0.07f * Next(rng)) * BushSize;
+            centres[i] = crown ? Around(rng, spread * 0.35f, height * (0.72f + 0.15f * Next(rng)))
+                               : Around(rng, spread, height * (0.4f + 0.2f * Next(rng)));
+            radii[i] = new Vector3(radius, radius * 0.8f, radius);
+            Color shade = leafColour * (crown ? 1.1f : 0.85f) * (0.92f + 0.16f * Next(rng));
+            mesh.AddClump(centres[i], radii[i], shade, 0.3f, 0, rng);
         }
 
-        int berries = 26 + rng.Next(12);
-        float berrySize = (upright ? 0.05f : 0.042f) * BushSize;
+        // Leafy sprigs poking out of the lower tier break up the outline.
+        int sprigs = 5 + rng.Next(3);
+        for (int i = 0; i < sprigs; i++)
+        {
+            int clump = 3 + rng.Next(clumps - 3);
+            float angle = Next(rng) * Mathf.PI * 2f;
+            Vector3 outward = new Vector3(Mathf.Cos(angle), 0f, Mathf.Sin(angle));
+            mesh.AddLeaf(centres[clump] + outward * (radii[clump].x * 0.8f), outward, 0.18f * BushSize, 0.07f * BushSize,
+                         0.06f * BushSize, leafColour * 1.15f, 0.35f);
+        }
+
+        // Berries on the outer and upper faces, large and bright enough to read against the leaves.
+        int berries = 30 + rng.Next(11);
+        float berrySize = (upright ? 0.065f : 0.055f) * BushSize;
         for (int i = 0; i < berries; i++)
         {
             int clump = rng.Next(clumps);
-            Vector3 outward = new Vector3(Next(rng) - 0.5f, Next(rng) * 0.9f - 0.15f, Next(rng) - 0.5f).normalized;
-            Vector3 position = centres[clump] + Vector3.Scale(outward, radii[clump]) * 1.02f;
+            Vector3 outward = new Vector3(Next(rng) - 0.5f, Next(rng) * 0.8f + 0.1f, Next(rng) - 0.5f).normalized;
+            Vector3 position = centres[clump] + Vector3.Scale(outward, radii[clump]) * 1.04f;
             float size = berrySize * (0.85f + 0.3f * Next(rng));
-            mesh.AddBerry(position, size, upright ? 1.25f : 1f, berryColour * (0.85f + 0.3f * Next(rng)));
+            mesh.AddBerry(position, size, upright ? 1.25f : 1f, berryColour * (0.9f + 0.2f * Next(rng)));
         }
 
         return mesh.Build();
@@ -227,6 +262,165 @@ public static class VegetationMeshBuilder
         return new Vector3(Mathf.Cos(angle) * distance, height, Mathf.Sin(angle) * distance);
     }
 
+    // GrassField's grass tuft. Its vertex colours are codes, not colours: red is how far up the blade a vertex is (0
+    // at the root, 1 at the tip), which the Custom/Grass Field shader turns into the grass colours. Alpha is
+    // flexibility, as everywhere else.
+    // A soft clump of a few wide blades fanning out from the middle: coarse enough to sit with the low-poly trees. Its blades are lit as if they
+    // faced straight up, like the ground they grow from, so a meadow reads as one soft surface rather than as
+    // separate dark blades.
+    public static Mesh BuildGrassTuft(System.Random rng)
+    {
+        MeshParts mesh = new MeshParts();
+        int blades = 7 + rng.Next(3);
+        for (int i = 0; i < blades; i++)
+        {
+            Vector3 root = Around(rng, 0.2f, 0f);
+            Vector3 lean = root.sqrMagnitude > 0.0001f ? root.normalized : Vector3.forward;
+            float twist = (Next(rng) - 0.5f) * 0.8f;
+            lean = Quaternion.Euler(0f, twist * Mathf.Rad2Deg, 0f) * lean;
+            mesh.AddBlade(root, lean, 0.3f + 0.2f * Next(rng), 0.16f, Color.black, Color.red, 1f);
+        }
+
+        return mesh.Build();
+    }
+
+    // One of Norway's summer boreal flowers, standing on the origin, in its own colours. Like the berries, they are
+    // drawn about twice life size so they read from the camera.
+    public static Mesh BuildFlower(BorealFlower kind, System.Random rng)
+    {
+        MeshParts mesh = new MeshParts();
+        Color stem = new Color(0.27f, 0.42f, 0.17f);
+        Color leaf = new Color(0.25f, 0.45f, 0.17f);
+        switch (kind)
+        {
+            // Twinflower (linnea): a forked stalk with a pair of small pink nodding bells over round leaves.
+            case BorealFlower.Twinflower:
+            {
+                for (int i = 0; i < 4; i++)
+                {
+                    float angle = (i + 0.4f * Next(rng)) * Mathf.PI * 0.5f;
+                    mesh.AddLeaf(Vector3.up * 0.01f, new Vector3(Mathf.Cos(angle), 0f, Mathf.Sin(angle)), 0.06f, 0.05f,
+                                 0.01f, leaf * 0.85f, 0.2f);
+                }
+
+                float height = 0.17f + 0.04f * Next(rng);
+                mesh.AddCylinder(Vector3.zero, height, 0.004f, 0.004f, 3, stem, 0.4f);
+                Color pink = new Color(0.98f, 0.68f, 0.8f);
+                for (int side = -1; side <= 1; side += 2)
+                {
+                    Vector3 fork = Vector3.up * height + new Vector3(side * 0.025f, 0f, 0f);
+                    mesh.AddBell(fork, new Vector3(side * 0.35f, -1f, 0f), 0.045f, 0.028f, pink, 0.5f);
+                }
+
+                break;
+            }
+            // Chickweed wintergreen (skogstjerne): a white seven-pointed star above a ring of glossy leaves.
+            case BorealFlower.ChickweedWintergreen:
+            {
+                float height = 0.2f + 0.05f * Next(rng);
+                mesh.AddCylinder(Vector3.zero, height, 0.004f, 0.004f, 3, stem, 0.35f);
+                for (int i = 0; i < 6; i++)
+                {
+                    float angle = i / 6f * Mathf.PI * 2f;
+                    mesh.AddLeaf(Vector3.up * (height * 0.6f), new Vector3(Mathf.Cos(angle), 0f, Mathf.Sin(angle)), 0.09f,
+                                 0.035f, 0.015f, leaf, 0.3f);
+                }
+
+                mesh.AddFlower(Vector3.up * height, 0.045f, new Color(0.98f, 0.98f, 0.96f), new Color(0.95f, 0.88f, 0.45f), 7);
+                break;
+            }
+            // Wood cranesbill (skogstorkenebb): a leafy plant whose stem branches into several violet flowers.
+            case BorealFlower.WoodCranesbill:
+            {
+                for (int i = 0; i < 5; i++)
+                {
+                    float angle = (i + 0.3f * Next(rng)) / 5f * Mathf.PI * 2f;
+                    mesh.AddLeaf(Vector3.up * 0.08f, new Vector3(Mathf.Cos(angle), 0f, Mathf.Sin(angle)), 0.12f, 0.09f,
+                                 0.03f, leaf, 0.3f);
+                }
+
+                Color violet = new Color(0.56f, 0.36f, 0.86f);
+                int flowers = 3 + rng.Next(2);
+                for (int i = 0; i < flowers; i++)
+                {
+                    Vector3 head = Around(rng, 0.09f, 0.34f + 0.12f * Next(rng));
+                    mesh.AddCylinder(Vector3.zero, head.y, 0.005f, 0.004f, 3, stem, 0.4f);
+                    mesh.AddCylinder(new Vector3(0f, head.y * 0.7f, 0f), head.y * 0.3f, 0.004f, 0.004f, 3, stem, 0.5f);
+                    mesh.AddFlower(head, 0.05f, violet * (0.92f + 0.16f * Next(rng)), new Color(0.92f, 0.86f, 0.96f));
+                }
+
+                break;
+            }
+            // Globeflower (ballblom): a round yellow head on a tall stem over deeply cut leaves.
+            case BorealFlower.Globeflower:
+            {
+                for (int i = 0; i < 4; i++)
+                {
+                    float angle = (i + 0.3f * Next(rng)) * Mathf.PI * 0.5f;
+                    mesh.AddLeaf(Vector3.up * 0.06f, new Vector3(Mathf.Cos(angle), 0f, Mathf.Sin(angle)), 0.13f, 0.1f,
+                                 0.04f, leaf, 0.3f);
+                }
+
+                float height = 0.5f + 0.1f * Next(rng);
+                mesh.AddCylinder(Vector3.zero, height, 0.007f, 0.006f, 4, stem, 0.45f);
+                mesh.AddClump(Vector3.up * (height + 0.035f), new Vector3(0.05f, 0.055f, 0.05f),
+                              new Color(1f, 0.8f, 0.16f), 0.5f, 1, rng);
+                break;
+            }
+            // Harebell (blåklokke): thin stems with blue bells nodding at their tips.
+            case BorealFlower.Harebell:
+            {
+                Color blue = new Color(0.45f, 0.5f, 0.96f);
+                int stems = 2 + rng.Next(2);
+                for (int i = 0; i < stems; i++)
+                {
+                    Vector3 root = Around(rng, 0.05f, 0f);
+                    float height = 0.3f + 0.12f * Next(rng);
+                    float angle = Next(rng) * Mathf.PI * 2f;
+                    Vector3 lean = new Vector3(Mathf.Cos(angle), 0f, Mathf.Sin(angle));
+                    mesh.AddBlade(root, lean, height * 0.6f, 0.012f, leaf * 0.8f, leaf);
+                    mesh.AddCylinder(root, height, 0.003f, 0.003f, 3, stem, 0.5f);
+                    mesh.AddBell(root + Vector3.up * height, lean * 0.6f + Vector3.down, 0.05f, 0.035f, blue, 0.6f);
+                }
+
+                break;
+            }
+            // Fireweed (geitrams): a tall stem with narrow leaves and a spike of magenta flowers, buds at the tip.
+            default:
+            {
+                float height = 0.85f + 0.2f * Next(rng);
+                mesh.AddCylinder(Vector3.zero, height, 0.009f, 0.006f, 4, stem * 0.9f + new Color(0.1f, 0f, 0f), 0.4f);
+                for (int i = 0; i < 6; i++)
+                {
+                    float angle = i * 2.4f;
+                    mesh.AddLeaf(Vector3.up * (height * (0.15f + i * 0.08f)), new Vector3(Mathf.Cos(angle), 0f, Mathf.Sin(angle)),
+                                 0.13f, 0.03f, 0.03f, leaf, 0.35f);
+                }
+
+                Color magenta = new Color(0.86f, 0.3f, 0.68f);
+                int florets = 9 + rng.Next(4);
+                for (int i = 0; i < florets; i++)
+                {
+                    float t = i / (float)florets;
+                    float angle = i * 2.4f;
+                    Vector3 position = new Vector3(Mathf.Cos(angle) * 0.04f, height * (0.62f + 0.33f * t), Mathf.Sin(angle) * 0.04f);
+                    if (t < 0.7f)
+                    {
+                        mesh.AddFlower(position, 0.035f, magenta * (0.92f + 0.16f * Next(rng)), new Color(0.95f, 0.85f, 0.92f), 4);
+                    }
+                    else
+                    {
+                        mesh.AddBerry(position, 0.012f, 1.6f, magenta * 0.7f);
+                    }
+                }
+
+                break;
+            }
+        }
+
+        return mesh.Build();
+    }
+
     // A clump of curved, tapering blades, dark at the root where it meets the ground and bright at the tips.
     public static Mesh BuildGrassClump(Color colourA, Color colourB, System.Random rng)
     {
@@ -239,7 +433,7 @@ public static class VegetationMeshBuilder
             Vector3 root = new Vector3(Mathf.Cos(angle) * spread, 0f, Mathf.Sin(angle) * spread);
             float facing = (float)rng.NextDouble() * Mathf.PI * 2f;
             Vector3 lean = new Vector3(Mathf.Cos(facing), 0f, Mathf.Sin(facing));
-            float height = 0.35f + (float)rng.NextDouble() * 0.4f;
+            float height = 0.5f + (float)rng.NextDouble() * 0.55f;
             Color tip = Color.Lerp(colourA, colourB, 0.5f + 0.5f * (float)rng.NextDouble()) * 1.35f
                         + new Color(0.05f, 0.05f, 0f);
             mesh.AddBlade(root, lean, height, 0.075f, colourA * 0.7f, tip);
@@ -424,13 +618,13 @@ public static class VegetationMeshBuilder
             }
         }
 
-        // A small flat flower facing up: five rounded petals around a coloured centre.
-        public void AddFlower(Vector3 centre, float radius, Color petals, Color middle)
+        // A small flat flower facing up: petals (five unless told otherwise) around a coloured centre.
+        public void AddFlower(Vector3 centre, float radius, Color petals, Color middle, int petalCount = 5)
         {
             Vector3 pivot = centre - Vector3.up * 2f;
             int heart = Add(centre + Vector3.up * (radius * 0.1f), middle, 0.3f, pivot, 0.8f);
             int start = vertices.Count;
-            const int points = 10;
+            int points = petalCount * 2;
             for (int i = 0; i < points; i++)
             {
                 float angle = i / (float)points * Mathf.PI * 2f;
@@ -441,6 +635,32 @@ public static class VegetationMeshBuilder
             for (int i = 0; i < points; i++)
             {
                 Triangle(heart, start + i, start + (i + 1) % points, centre - Vector3.up);
+            }
+        }
+
+        // A bell flower hanging from top along direction: a cone that widens to a mouth with five pointed lobes,
+        // paler inside.
+        public void AddBell(Vector3 top, Vector3 direction, float length, float mouthRadius, Color colour, float flexibility)
+        {
+            Vector3 axis = direction.normalized;
+            Vector3 side = Vector3.Cross(axis, Mathf.Abs(axis.y) > 0.9f ? Vector3.right : Vector3.up).normalized;
+            Vector3 across = Vector3.Cross(axis, side);
+            Vector3 middle = top + axis * (length * 0.5f);
+            int apex = Add(top, colour * 0.8f, flexibility, middle, 0.6f);
+            int start = vertices.Count;
+            const int points = 10;
+            for (int i = 0; i < points; i++)
+            {
+                float angle = i / (float)points * Mathf.PI * 2f;
+                float reach = i % 2 == 0 ? mouthRadius : mouthRadius * 0.8f;
+                float flare = i % 2 == 0 ? length * 1.1f : length;
+                Vector3 position = top + axis * flare + (side * Mathf.Cos(angle) + across * Mathf.Sin(angle)) * reach;
+                Add(position, i % 2 == 0 ? colour * 1.15f : colour, flexibility, middle, 0.6f);
+            }
+
+            for (int i = 0; i < points; i++)
+            {
+                Triangle(apex, start + i, start + (i + 1) % points, middle - axis * length);
             }
         }
 
@@ -485,7 +705,8 @@ public static class VegetationMeshBuilder
         }
 
         // A blade of grass in three segments, curving away from its root and narrowing to a point.
-        public void AddBlade(Vector3 root, Vector3 lean, float height, float width, Color rootColour, Color tipColour)
+        public void AddBlade(Vector3 root, Vector3 lean, float height, float width, Color rootColour, Color tipColour,
+                             float softness = 0.85f)
         {
             Vector3 side = Vector3.Cross(Vector3.up, lean).normalized * (width * 0.5f);
             Vector3 pivot = root - Vector3.up * 3f;
@@ -500,14 +721,14 @@ public static class VegetationMeshBuilder
                 float flexibility = 0.6f * t;
                 if (row == segments)
                 {
-                    int tip = Add(centre, colour, flexibility, pivot, 0.85f);
+                    int tip = Add(centre, colour, flexibility, pivot, softness);
                     Triangle(previousLeft, previousRight, tip, centre - lean);
                     break;
                 }
 
                 float taper = 1f - t * 0.8f;
-                int left = Add(centre - side * taper, colour, flexibility, pivot, 0.85f);
-                int right = Add(centre + side * taper, colour, flexibility, pivot, 0.85f);
+                int left = Add(centre - side * taper, colour, flexibility, pivot, softness);
+                int right = Add(centre + side * taper, colour, flexibility, pivot, softness);
                 if (previousLeft >= 0)
                 {
                     Triangle(previousLeft, previousRight, right, centre - lean);

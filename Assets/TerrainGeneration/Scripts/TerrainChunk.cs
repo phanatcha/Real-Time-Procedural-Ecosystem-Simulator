@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using UnityEngine;
 
 public class TerrainChunk
@@ -778,6 +779,18 @@ public class TerrainChunk
     {
         return
             meshObject.activeSelf;
+    }
+
+
+    // Where this chunk's berry bushes stand, so GrassField can keep its grass low around them.
+    public void CollectBushPositions(List<Vector2> output)
+    {
+        if (vegetationData == null) return;
+
+        foreach (VegetationInstance bush in vegetationData.bushes)
+        {
+            output.Add(new Vector2(bush.position.x, bush.position.z));
+        }
     }
 
 

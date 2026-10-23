@@ -26,6 +26,9 @@ public static class VegetationGenerator
     const int RockVariants = 3;
     // Two bilberry bushes and a raspberry bush, as VegetationTemplateCache.BuildBushTemplates builds them.
     const int BushVariants = 3;
+    // Rocks and bushes aren't placed on ground steeper than this, where the terrain paints cliff rock (about 32°).
+    // shortcut: copies TextureData.rockSlopeStart's default; read it from TextureData if that gets tuned.
+    const float CliffSlope = 0.15f;
 
     public static VegetationPlacementData GeneratePlacements(
         Vector2 chunkWorldMin, Vector2 chunkWorldMax,
@@ -100,6 +103,8 @@ public static class VegetationGenerator
                     environmentSample, environmentDefinitions, settings, resourceType);
                 float densityRoll = ValueNoise.Hash21(cellOrigin + new Vector2(saltBase, 61.7f));
                 if (localDensity <= 0f || densityRoll >= localDensity) continue;
+                // Placement only: the simulation's rock density still follows settings.maxSlope.
+                if ((typeSalt == 3 || typeSalt == 4) && environmentSample.slope > CliffSlope) continue;
 
                 float variantRoll = ValueNoise.Hash21(cellOrigin + new Vector2(saltBase, 88.3f));
                 int variant = typeSalt == 4
@@ -279,7 +284,8 @@ public static class VegetationGenerator
         out Mesh treesMesh, out Mesh grassMesh, out Mesh rocksMesh, out Mesh bushesMesh)
     {
         treesMesh = CombineType(data.trees, VegetationTemplateCache.Trees, chunkOrigin);
-        grassMesh = CombineType(data.grass, VegetationTemplateCache.Grass, chunkOrigin);
+        // The old chunk grass isn't drawn any more: GrassField draws the grass. Its placements stay for the simulation.
+        grassMesh = null;
         rocksMesh = CombineType(data.rocks, VegetationTemplateCache.Rocks, chunkOrigin);
         bushesMesh = CombineType(data.bushes, VegetationTemplateCache.Bushes, chunkOrigin);
     }

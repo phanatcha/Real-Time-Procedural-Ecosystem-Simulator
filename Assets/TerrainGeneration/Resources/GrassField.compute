@@ -1,0 +1,169 @@
+// Places grass tufts and Norway's summer boreal flowers around the camera every frame, for GrassField. The grid is
+// fixed to the world, so plants stay put as the camera moves, and each cell's plant comes from a hash of the cell, so
+// the same ground always grows the same meadow. Plants outside the camera's view are skipped. Grass grows in irregular
+// clusters, shorter and sparser at their edges, with bare or mossy ground between them. Flowers grow in patches, each
+// kind where it grows in Norway: twinflower and chickweed wintergreen on the forest floor, wood
+// cranesbill at forest edges, globeflower in moist meadows, harebell in dry meadows and fireweed in clearings.
+#pragma kernel Place
+
+struct Instance
+{
+    float3 position;
+    float yaw;
+    float scale;
+    float tint;
+    float kind;
+    float padding;
+};
+
+AppendStructuredBuffer<Instance> _Grass;
+// One buffer per flower kind, in BorealFlower's order, as each is drawn with its own mesh.
+AppendStructuredBuffer<Instance> _Twinflower;
+AppendStructuredBuffer<Instance> _ChickweedWintergreen;
+AppendStructuredBuffer<Instance> _WoodCranesbill;
+AppendStructuredBuffer<Instance> _Globeflower;
+AppendStructuredBuffer<Instance> _Harebell;
+AppendStructuredBuffer<Instance> _Fireweed;
+
+// The ground around the camera, built by GrassField: r height, g how much grass the spot carries (already thinned
+// near the shore, under trees and around bushes), b tree cover, a moisture.
+Texture2D<float4> _Field;
+SamplerState sampler_linear_clamp;
+float4 _FieldRect;      // xy: world x and z of the field's corner, zw: its size in metres
+float4 _Camera;         // xyz: camera position, w: radius plants are drawn to
+float4 _Grid;           // x: cell size in metres, y: cells per side, z: grass density, w: flower chance
+
+float4 _FrustumPlanes[6];
+
+uint Hash(int2 cell, uint salt)
+{
+    uint h = ((uint)(cell.x + 32768) * 1597334677u) ^ ((uint)(cell.y + 32768) * 3812015801u) ^ (salt * 2654435761u);
+    h ^= h >> 16;
+    h *= 2246822519u;
+    h ^= h >> 13;
+    h *= 3266489917u;
+    h ^= h >> 16;
+    return h;
+}
+
+float Random(int2 cell, uint salt)
+{
+    return Hash(cell, salt) * (1.0 / 4294967296.0);
+}
+
+// Smooth 0-1 noise over the world with features about size metres across.
+float SmoothNoise(float2 position, float size, uint salt)
+{
+    float2 scaled = position / size;
+    int2 corner = int2(floor(scaled));
+    float2 f = frac(scaled);
+    float2 u = f * f * (3.0 - 2.0 * f);
+    float a = Random(corner, salt);
+    float b = Random(corner + int2(1, 0), salt);
+    float c = Random(corner + int2(0, 1), salt);
+    float d = Random(corner + int2(1, 1), salt);
+    return lerp(lerp(a, b, u.x), lerp(c, d, u.x), u.y);
+}
+
+// Two scales together give clusters with ragged, irregular edges rather than round blobs.
+float ClusterNoise(float2 position)
+{
+    return SmoothNoise(position, 7.0, 21u) * 0.65 + SmoothNoise(position, 2.5, 22u) * 0.35;
+}
+
+void AppendFlower(int kind, Instance instance)
+{
+    if (kind == 0) _Twinflower.Append(instance);
+    else if (kind == 1) _ChickweedWintergreen.Append(instance);
+    else if (kind == 2) _WoodCranesbill.Append(instance);
+    else if (kind == 3) _Globeflower.Append(instance);
+    else if (kind == 4) _Harebell.Append(instance);
+    else _Fireweed.Append(instance);
+}
+
+[numthreads(8, 8, 1)]
+void Place(uint3 id : SV_DispatchThreadID)
+{
+    uint cells = (uint)_Grid.y;
+    if (id.x >= cells || id.y >= cells) return;
+
+    float spacing = _Grid.x;
+    int2 cell = int2(floor(_Camera.xz / spacing)) - (int)(cells / 2) + int2(id.xy);
+    float2 xz = (float2(cell) + float2(Random(cell, 1u), Random(cell, 2u))) * spacing;
+
+    float along = length(xz - _Camera.xz) / _Camera.w;
+    if (along > 1.0) return;
+
+    // Fewer plants further out; the outer fifth shrinks away so the edge never pops.
+    if (Random(cell, 3u) > lerp(1.0, 0.35, saturate((along - 0.4) / 0.6))) return;
+
+    float2 uv = (xz - _FieldRect.xy) / _FieldRect.zw;
+    if (any(uv < 0.0) || any(uv > 1.0)) return;
+    float4 field = _Field.SampleLevel(sampler_linear_clamp, uv, 0);
+    float grassy = field.g;
+    float forest = field.b;
+    float wet = field.a;
+    // Land that grows anything: grass, or forest floor, where flowers grow under the trees.
+    float growing = saturate(grassy + forest * 0.6);
+    if (growing <= 0.0) return;
+
+    float3 position = float3(xz.x, field.r, xz.y);
+    [unroll]
+    for (int i = 0; i < 6; i++)
+    {
+        if (dot(_FrustumPlanes[i].xyz, position) + _FrustumPlanes[i].w < -2.0) return;
+    }
+
+    Instance instance;
+    instance.position = position;
+    instance.yaw = Random(cell, 4u) * 6.2831853;
+    instance.scale = (0.7 + 0.6 * Random(cell, 5u)) * (1.0 - smoothstep(0.8, 1.0, along));
+    instance.tint = saturate(wet * 0.7 + Random(cell, 6u) * 0.3);
+    instance.kind = 0.0;
+    instance.padding = 0.0;
+
+    float clusters = ClusterNoise(xz);
+    float patch = smoothstep(0.55, 0.78, SmoothNoise(xz, 12.0, 11u) + (clusters - 0.5) * 0.3);
+    if (Random(cell, 7u) < patch * growing * _Grid.w)
+    {
+        // How well each kind suits this spot; one is picked in proportion.
+        float open = 1.0 - forest;
+        float weights[6];
+        weights[0] = forest;
+        weights[1] = forest * 0.8;
+        weights[2] = saturate(1.0 - abs(forest - 0.35) * 3.0);
+        weights[3] = open * smoothstep(0.5, 0.75, wet);
+        weights[4] = open * (1.0 - smoothstep(0.4, 0.6, wet));
+        weights[5] = open * 0.6;
+        float total = 0.0;
+        [unroll]
+        for (int w = 0; w < 6; w++) total += weights[w];
+        if (total <= 0.0) return;
+
+        float pick = Random(cell, 8u) * total;
+        int kind = 5;
+        for (int k = 0; k < 6; k++)
+        {
+            if (pick < weights[k])
+            {
+                kind = k;
+                break;
+            }
+            pick -= weights[k];
+        }
+
+        instance.kind = kind;
+        AppendFlower(kind, instance);
+    }
+    else
+    {
+        // Grass covers about half the ground in clusters, larger where the spot carries more grass. Cluster edges
+        // are sparser and shorter, as is grass on poorer ground and inside flower patches, where flowers stand above.
+        float cluster = smoothstep(0.42, 0.6, clusters + (grassy - 0.5) * 0.25);
+        if (Random(cell, 9u) < cluster * grassy * _Grid.z)
+        {
+            instance.scale *= lerp(0.45, 1.0, cluster) * lerp(0.55, 1.0, grassy) * lerp(1.0, 0.5, patch);
+            _Grass.Append(instance);
+        }
+    }
+}

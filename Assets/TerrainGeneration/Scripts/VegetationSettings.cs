@@ -118,9 +118,10 @@ public class VegetationSettings : ScriptableObject
     public Color rockColourA = new Color(0.42f, 0.42f, 0.40f);
     public Color rockColourB = new Color(0.55f, 0.53f, 0.50f);
     [Header("Berry bush colours")]
-    public Color bushLeafColour = new Color(0.2f, 0.38f, 0.16f);
-    public Color bilberryColour = new Color(0.17f, 0.2f, 0.45f);
-    public Color raspberryColour = new Color(0.85f, 0.14f, 0.2f);
+    [Tooltip("Darker and richer than the grass, so bushes stand out from the meadow around them.")]
+    public Color bushLeafColour = new Color(0.13f, 0.31f, 0.15f);
+    public Color bilberryColour = new Color(0.3f, 0.36f, 0.85f);
+    public Color raspberryColour = new Color(0.93f, 0.16f, 0.24f);
 
     [Tooltip("Moss on the upper faces of rocks.")]
     public Color rockMossColour = new Color(0.3f, 0.42f, 0.18f);
