@@ -1,0 +1,216 @@
+// The sea's shorter waves for OceanFFT: Tessendorf's FFT ocean, the idea as in Acerola's Water project. Each patch of
+// sea is a grid of waves, one per wavenumber, its height drawn from the same JONSWAP spectrum and wind spread as the
+// Gerstner swells (WaveSpectrum). Each frame every wave moves on by its own speed, and an inverse FFT adds them all up
+// into a tiling patch: how far each point moves, the surface's slopes, and the Jacobian of the sideways movement, which
+// drops low where a crest squeezes and folds over. Foam builds up there and fades slowly, so breaking crests leave
+// streaks behind.
+#pragma kernel InitSpectrum
+#pragma kernel EvolveSpectrum
+#pragma kernel FFTRows
+#pragma kernel FFTColumns
+#pragma kernel Assemble
+
+#define SIZE 256
+#define LOG_SIZE 8
+#define PI 3.14159265
+#define GRAVITY 9.81
+
+// Texel (x, y) of the spectrum holds the wave with wavenumber (x - SIZE/2, y - SIZE/2) * 2 pi / _TileSize, which
+// travels that way across the world's x and z. xy: its complex amplitude h0, zw: unused.
+RWTexture2D<float4> _Spectrum;
+Texture2D<float4> _InitialSpectrum;
+
+// Four complex fields each, two real fields packed into every complex number (a + i b).
+Texture2D<float4> _InA;
+Texture2D<float4> _InB;
+RWTexture2D<float4> _OutA;
+RWTexture2D<float4> _OutB;
+
+// xyz: how far the point moves, w: foam. xy: the surface's slopes, z: the Jacobian minus 1.
+RWTexture2D<float4> _Displacement;
+RWTexture2D<float4> _Slopes;
+RWTexture2D<float> _Foam;
+
+float _TileSize;
+float _LowCut;          // the patch keeps waves with wavenumbers from _LowCut up to _HighCut (rad/m)
+float _HighCut;
+float _Alpha;           // JONSWAP's energy level
+float _PeakOmega;       // and peak frequency (rad/s)
+float _PeakSharpness;
+float _PeakSpread;      // cos-2s spreading's s at the peak
+float _WindAngle;       // radians, 0 is +x
+float _Spread;
+float _HeightScale;
+uint _Seed;
+float _SimulationTime;
+float _Choppiness;
+float _FoamThreshold;   // foam forms where the Jacobian is below this
+float _FoamDecay;       // share of the foam left after this frame
+
+float2 ComplexMul(float2 a, float2 b)
+{
+    return float2(a.x * b.x - a.y * b.y, a.x * b.y + a.y * b.x);
+}
+
+// i * z
+float2 TimesI(float2 z)
+{
+    return float2(-z.y, z.x);
+}
+
+// PCG hash (Jarzynski and Olano, 2020).
+uint Hash(uint value)
+{
+    uint state = value * 747796405u + 2891336453u;
+    uint word = ((state >> ((state >> 28u) + 4u)) ^ state) * 277803737u;
+    return (word >> 22u) ^ word;
+}
+
+// Two normally distributed random numbers for a texel (Box-Muller).
+float2 Gaussian2(uint2 texel)
+{
+    uint state = Hash(texel.x + SIZE * texel.y + Hash(_Seed));
+    float u = 1.0 - (state >> 8) / 16777216.0;
+    state = Hash(state);
+    float v = (state >> 8) / 16777216.0;
+    return sqrt(-2.0 * log(u)) * float2(cos(2.0 * PI * v), sin(2.0 * PI * v));
+}
+
+// Energy per unit of angular frequency (m^2 s) for a sea that is still growing under the wind; as WaveSpectrum.Jonswap.
+float Jonswap(float omega)
+{
+    float sigma = omega <= _PeakOmega ? 0.07 : 0.09;
+    float r = exp(-(omega - _PeakOmega) * (omega - _PeakOmega) / (2.0 * sigma * sigma * _PeakOmega * _PeakOmega));
+    return _Alpha * GRAVITY * GRAVITY / pow(omega, 5.0) * exp(-1.25 * pow(_PeakOmega / omega, 4.0)) * pow(_PeakSharpness, r);
+}
+
+// Share of the energy at this frequency travelling at angle (radians off the wind): the same bell curve around the
+// wind that WaveSpectrum draws the swells' directions from, wrapped round the circle so it adds up to 1.
+float Spreading(float omega, float angle)
+{
+    float s = _PeakSpread * (omega < _PeakOmega ? pow(omega / _PeakOmega, 5.0) : pow(omega / _PeakOmega, -2.5));
+    // A narrower bell than about six degrees falls between the grid's directions.
+    float width = max(sqrt(2.0 / (s + 1.0)) * _Spread, 0.1);
+    angle -= 2.0 * PI * round(angle / (2.0 * PI));
+    float sum = exp(-angle * angle / (2.0 * width * width))
+              + exp(-(angle - 2.0 * PI) * (angle - 2.0 * PI) / (2.0 * width * width))
+              + exp(-(angle + 2.0 * PI) * (angle + 2.0 * PI) / (2.0 * width * width));
+    return sum / (width * sqrt(2.0 * PI));
+}
+
+// Run when the wind changes: draws each wave's starting amplitude, and clears the foam.
+[numthreads(8, 8, 1)]
+void InitSpectrum(uint3 id : SV_DispatchThreadID)
+{
+    float deltaK = 2.0 * PI / _TileSize;
+    float2 k = ((float2)id.xy - SIZE / 2) * deltaK;
+    float kLength = length(k);
+    float2 h0 = 0.0;
+    // Row and column 0 hold the shortest wave, whose opposite isn't on the grid; leaving them empty keeps the sea real.
+    if (id.x > 0 && id.y > 0 && kLength >= _LowCut && kLength < _HighCut)
+    {
+        // The spectrum per unit of wavenumber area, S(k) = S(omega) D(theta) (d omega / dk) / k. Each wave and its
+        // opposite together carry S(k) dk^2 of the sea's height variance.
+        float omega = sqrt(GRAVITY * kLength);
+        float energy = Jonswap(omega) * Spreading(omega, atan2(k.y, k.x) - _WindAngle) * (GRAVITY / (2.0 * omega)) / kLength;
+        h0 = Gaussian2(id.xy) * (0.5 * _HeightScale * sqrt(energy) * deltaK);
+    }
+
+    _Spectrum[id.xy] = float4(h0, 0.0, 0.0);
+    _Foam[id.xy] = 0.0;
+}
+
+// Every frame: moves each wave on by its own speed (deep water, omega = sqrt(g k)) and lays out the spectra of the
+// height, the sideways movement and their slopes for the FFT.
+[numthreads(8, 8, 1)]
+void EvolveSpectrum(uint3 id : SV_DispatchThreadID)
+{
+    float2 k = ((float2)id.xy - SIZE / 2) * (2.0 * PI / _TileSize);
+    float kLength = max(length(k), 0.0001);
+    float2 h0 = _InitialSpectrum[id.xy].xy;
+    float2 h0Opposite = _InitialSpectrum[(SIZE - id.xy) % SIZE].xy;
+
+    // h(k, t) = h0(k) e^(-i omega t) + conj(h0(-k)) e^(i omega t): the wave travels along k, and adding its opposite's
+    // conjugate keeps the height real.
+    float phase = sqrt(GRAVITY * kLength) * _SimulationTime;
+    float2 forward = float2(cos(phase), -sin(phase));
+    float2 h = ComplexMul(h0, forward) + ComplexMul(float2(h0Opposite.x, -h0Opposite.y), float2(forward.x, -forward.y));
+
+    // Sideways movement leans towards the crest (i k/|k| h), so crests sharpen and troughs widen, as Gerstner waves do.
+    float2 ih = TimesI(h);
+    float2 moveX = ih * (k.x / kLength);
+    float2 moveZ = ih * (k.y / kLength);
+    float2 slopeX = ih * k.x;
+    float2 slopeZ = ih * k.y;
+    float2 moveXX = -h * (k.x * k.x / kLength);
+    float2 moveZZ = -h * (k.y * k.y / kLength);
+    float2 moveXZ = -h * (k.x * k.y / kLength);
+
+    _OutA[id.xy] = float4(moveX + TimesI(h), moveZ + TimesI(moveXZ));
+    _OutB[id.xy] = float4(slopeX + TimesI(slopeZ), moveXX + TimesI(moveZZ));
+}
+
+groupshared float4 sharedA[2][SIZE];
+groupshared float4 sharedB[2][SIZE];
+
+// An inverse FFT along one row or column, in shared memory (Stockham's ordering, so no bit reversal is needed): sums
+// F[n] e^(2 pi i n m / SIZE) over n for every m.
+void InverseFFT(uint index, uint2 texel)
+{
+    sharedA[0][index] = _InA[texel];
+    sharedB[0][index] = _InB[texel];
+    GroupMemoryBarrierWithGroupSync();
+
+    uint flag = 0;
+    [unroll]
+    for (uint step = 0; step < LOG_SIZE; step++)
+    {
+        uint span = (uint)SIZE >> (step + 1);
+        uint w = span * (index / span);
+        uint i = (w + index) & (SIZE - 1);
+        float angle = 2.0 * PI * w / SIZE;
+        float2 twiddle = float2(cos(angle), sin(angle));
+        float4 a = sharedA[flag][i + span];
+        float4 b = sharedB[flag][i + span];
+        sharedA[1 - flag][index] = sharedA[flag][i] + float4(ComplexMul(twiddle, a.xy), ComplexMul(twiddle, a.zw));
+        sharedB[1 - flag][index] = sharedB[flag][i] + float4(ComplexMul(twiddle, b.xy), ComplexMul(twiddle, b.zw));
+        flag = 1 - flag;
+        GroupMemoryBarrierWithGroupSync();
+    }
+
+    _OutA[texel] = sharedA[flag][index];
+    _OutB[texel] = sharedB[flag][index];
+}
+
+[numthreads(SIZE, 1, 1)]
+void FFTRows(uint3 id : SV_DispatchThreadID)
+{
+    InverseFFT(id.x, id.xy);
+}
+
+[numthreads(1, SIZE, 1)]
+void FFTColumns(uint3 id : SV_DispatchThreadID)
+{
+    InverseFFT(id.y, id.xy);
+}
+
+// Unpacks the transformed fields into the patch's textures and builds up its foam.
+[numthreads(8, 8, 1)]
+void Assemble(uint3 id : SV_DispatchThreadID)
+{
+    // The spectrum is centred on its texture; flipping every other texel's sign undoes that shift.
+    float flip = ((id.x + id.y) & 1) ? -1.0 : 1.0;
+    float4 a = _InA[id.xy] * flip;
+    float4 b = _InB[id.xy] * flip;
+    float lambda = _Choppiness;
+
+    // How much the surface is squeezed: 1 when flat, below 0 where a crest folds through itself.
+    float jacobian = (1.0 + lambda * b.z) * (1.0 + lambda * b.w) - lambda * lambda * a.w * a.w;
+    // Slopes of the moved surface; abs keeps them finite where it folds.
+    float2 slopes = b.xy / (1.0 + abs(lambda * b.zw));
+
+    float foam = max(_Foam[id.xy] * _FoamDecay, saturate((_FoamThreshold - jacobian) * 6.0));
+    _Foam[id.xy] = foam;
+    _Displacement[id.xy] = float4(lambda * a.x, a.y, lambda * a.z, foam);
+    _Slopes[id.xy] = float4(slopes, jacobian - 1.0, 0.0);
+}

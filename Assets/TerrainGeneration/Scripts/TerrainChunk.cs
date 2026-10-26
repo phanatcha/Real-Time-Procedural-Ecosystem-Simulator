@@ -29,6 +29,11 @@ public class TerrainChunk
         get { return meshFilter.sharedMesh; }
     }
 
+    public HeightMap HeightMap
+    {
+        get { return heightMap; }
+    }
+
     public Transform ChunkTransform
     {
         get { return meshObject.transform; }

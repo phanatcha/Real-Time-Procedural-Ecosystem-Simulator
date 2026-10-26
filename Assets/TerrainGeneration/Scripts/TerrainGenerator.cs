@@ -720,7 +720,7 @@ public class TerrainGenerator : MonoBehaviour
                 new WaterSurface(
                     textureSettings.waterMaterial,
                     WaterLevelHeight,
-                    meshSettings.meshWorldSize
+                    meshSettings
                 );
         }
     }
