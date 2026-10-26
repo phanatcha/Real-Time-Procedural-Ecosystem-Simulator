@@ -103,6 +103,11 @@ public class VegetationSettings : ScriptableObject
         maxLevelOfDetail = 1,
     };
 
+    [Tooltip("Chunks at this terrain detail level or coarser draw simpler spruces (the LOD numbers in " +
+             "TerrainGenerator's detail levels; 2 is about 200 m away).")]
+    [Min(0)]
+    public int farTreeLevelOfDetail = 2;
+
     [Header("Tree colours")]
     public Color trunkColour = new Color(0.28f, 0.19f, 0.13f);
     public Color foliageColourA = new Color(0.09f, 0.20f, 0.13f);

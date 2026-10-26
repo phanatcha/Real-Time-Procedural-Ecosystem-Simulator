@@ -683,6 +683,8 @@ public class TerrainChunk
             .BuildCombinedMeshes(
                 projected,
                 meshObject.transform.position,
+                detailLevels[lodIndex].lod >=
+                vegetationSettings.farTreeLevelOfDetail,
                 out Mesh treesMesh,
                 out Mesh grassMesh,
                 out Mesh rocksMesh,

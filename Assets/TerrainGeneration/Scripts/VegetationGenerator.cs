@@ -280,10 +280,11 @@ public static class VegetationGenerator
         return Mathf.Lerp(heightA, heightB, percent);
     }
 
-    public static void BuildCombinedMeshes(VegetationPlacementData data, Vector3 chunkOrigin,
+    public static void BuildCombinedMeshes(VegetationPlacementData data, Vector3 chunkOrigin, bool farTrees,
         out Mesh treesMesh, out Mesh grassMesh, out Mesh rocksMesh, out Mesh bushesMesh)
     {
-        treesMesh = CombineType(data.trees, VegetationTemplateCache.Trees, chunkOrigin);
+        treesMesh = CombineType(data.trees,
+            farTrees ? VegetationTemplateCache.FarTrees : VegetationTemplateCache.Trees, chunkOrigin);
         // The old chunk grass isn't drawn any more: GrassField draws the grass. Its placements stay for the simulation.
         grassMesh = null;
         rocksMesh = CombineType(data.rocks, VegetationTemplateCache.Rocks, chunkOrigin);
@@ -324,12 +325,14 @@ public static class VegetationGenerator
 public static class VegetationTemplateCache
 {
     static Mesh[] treeTemplates;
+    static Mesh[] farTreeTemplates;
     static Mesh[] grassTemplates;
     static Mesh[] rockTemplates;
     static Mesh[] bushTemplates;
     static VegetationSettings cachedFor;
 
     public static Mesh[] Trees => treeTemplates;
+    public static Mesh[] FarTrees => farTreeTemplates;
     public static Mesh[] Grass => grassTemplates;
     public static Mesh[] Rocks => rockTemplates;
     public static Mesh[] Bushes => bushTemplates;
@@ -340,7 +343,7 @@ public static class VegetationTemplateCache
 
         System.Random rng = new System.Random(settings.seed);
 
-        treeTemplates = BuildTreeTemplates(settings, rng);
+        treeTemplates = BuildTreeTemplates(settings, rng, out farTreeTemplates);
 
         grassTemplates = new Mesh[3];
         for (int i = 0; i < grassTemplates.Length; i++)
@@ -371,15 +374,25 @@ public static class VegetationTemplateCache
         };
     }
 
-    // The tree meshes VegetationGenerator's tree variants index: three Norway spruces in two shades of green.
-    public static Mesh[] BuildTreeTemplates(VegetationSettings settings, System.Random rng)
+    // The tree meshes VegetationGenerator's tree variants index: three Norway spruces in two shades of green. far gets
+    // a simpler copy of each for distant chunks, just as tall, so trees don't jump when a chunk changes detail.
+    public static Mesh[] BuildTreeTemplates(VegetationSettings settings, System.Random rng, out Mesh[] far)
     {
-        return new[]
+        Color[] foliage =
         {
-            VegetationMeshBuilder.BuildTree(settings.trunkColour, settings.foliageColourA, rng),
-            VegetationMeshBuilder.BuildTree(settings.trunkColour, settings.foliageColourB, rng),
-            VegetationMeshBuilder.BuildTree(settings.trunkColour,
-                Color.Lerp(settings.foliageColourA, settings.foliageColourB, 0.5f), rng)
+            settings.foliageColourA, settings.foliageColourB,
+            Color.Lerp(settings.foliageColourA, settings.foliageColourB, 0.5f)
         };
+        System.Random farRng = new System.Random(settings.seed + 1);
+        Mesh[] near = new Mesh[foliage.Length];
+        far = new Mesh[foliage.Length];
+        for (int i = 0; i < foliage.Length; i++)
+        {
+            float height = VegetationMeshBuilder.SpruceHeight(rng);
+            near[i] = VegetationMeshBuilder.BuildTree(settings.trunkColour, foliage[i], rng, height);
+            far[i] = VegetationMeshBuilder.BuildTree(settings.trunkColour, foliage[i], farRng, height, true);
+        }
+
+        return near;
     }
 }
