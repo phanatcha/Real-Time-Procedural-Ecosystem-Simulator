@@ -32,11 +32,13 @@ public static class VegetationMeshBuilder
 {
     // Norway spruce: tall, narrow and dark, a short bare trunk under drooping, scalloped tiers that taper to a thin
     // spike. height 0 picks one between 13 and 17 m.
-    public static Mesh BuildTree(Color trunkColour, Color foliageColour, System.Random rng, float height = 0f)
+    // far: the same spruce for distant chunks, about a fifth of the triangles: plainer tiers and a four-sided trunk.
+    public static Mesh BuildTree(Color trunkColour, Color foliageColour, System.Random rng, float height = 0f,
+                                 bool far = false)
     {
         MeshParts mesh = new MeshParts();
-        if (height <= 0f) height = 13f + (float)rng.NextDouble() * 4f;
-        mesh.AddCylinder(Vector3.zero, height * 0.6f, 0.24f, 0.12f, 8, trunkColour, 0.03f);
+        if (height <= 0f) height = SpruceHeight(rng);
+        mesh.AddCylinder(Vector3.zero, height * 0.6f, 0.24f, 0.12f, far ? 4 : 8, trunkColour, 0.03f);
 
         const int tiers = 8;
         float tierHeight = 2.7f;
@@ -49,13 +51,15 @@ public static class VegetationMeshBuilder
                                          ((float)rng.NextDouble() - 0.5f) * 0.2f);
             // Lower tiers sit in the shade of the ones above; higher ones sway more.
             Color tierColour = foliageColour * Mathf.Lerp(0.82f, 1.08f, t);
-            mesh.AddTier(centre, tierHeight, radius, tierColour, Mathf.Lerp(0.35f, 0.9f, t), rng);
+            mesh.AddTier(centre, tierHeight, radius, tierColour, Mathf.Lerp(0.35f, 0.9f, t), rng, far);
         }
 
         mesh.AddTier(new Vector3(0f, height - tierHeight * 0.85f, 0f), tierHeight * 0.85f, 0.45f,
-                     foliageColour * 1.08f, 1f, rng);
+                     foliageColour * 1.08f, 1f, rng, far);
         return mesh.Build();
     }
+
+    public static float SpruceHeight(System.Random rng) => 13f + (float)rng.NextDouble() * 4f;
 
     // Height of a spruce's lowest tier, and the radius of the tier at a fraction of the way up the tiers (0 is the
     // lowest, 1 the top). FoodSpawner uses these to hang fresh shoots on the outside of a tree.
@@ -504,9 +508,9 @@ public static class VegetationMeshBuilder
 
         // One spruce tier: a drooping skirt whose rim is scalloped into long and short points, rising to a peak.
         public void AddTier(Vector3 baseCentre, float height, float radius, Color colour, float flexibility,
-                            System.Random rng)
+                            System.Random rng, bool far = false)
         {
-            const int points = 10;
+            int points = far ? 6 : 10;
             int rimCount = points * 2;
             Vector3 pivot = baseCentre + Vector3.up * (height * 0.2f - 1.2f);
             Color rimColour = colour * 1.3f + new Color(0.03f, 0.04f, 0f);
@@ -521,6 +525,19 @@ public static class VegetationMeshBuilder
                 float droop = longPoint ? -0.35f : 0.1f;
                 Vector3 position = baseCentre + new Vector3(Mathf.Cos(angle) * reach, droop, Mathf.Sin(angle) * reach);
                 Add(position, longPoint ? rimColour : colour, flexibility, pivot, 0.7f);
+            }
+
+            // Far away the skirt runs straight from the rim to the peak, darkened to the shade of the inner band it skips.
+            if (far)
+            {
+                int peak = Add(baseCentre + Vector3.up * height, colour * 0.9f, flexibility, pivot, 0.7f);
+                Vector3 within = baseCentre + Vector3.up * height * 0.3f;
+                for (int i = 0; i < rimCount; i++)
+                {
+                    Triangle(rimStart + i, peak, rimStart + (i + 1) % rimCount, within);
+                }
+
+                return;
             }
 
             int middleStart = vertices.Count;

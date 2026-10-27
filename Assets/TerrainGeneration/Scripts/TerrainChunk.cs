@@ -29,6 +29,11 @@ public class TerrainChunk
         get { return meshFilter.sharedMesh; }
     }
 
+    public HeightMap HeightMap
+    {
+        get { return heightMap; }
+    }
+
     public Transform ChunkTransform
     {
         get { return meshObject.transform; }
@@ -683,6 +688,8 @@ public class TerrainChunk
             .BuildCombinedMeshes(
                 projected,
                 meshObject.transform.position,
+                detailLevels[lodIndex].lod >=
+                vegetationSettings.farTreeLevelOfDetail,
                 out Mesh treesMesh,
                 out Mesh grassMesh,
                 out Mesh rocksMesh,

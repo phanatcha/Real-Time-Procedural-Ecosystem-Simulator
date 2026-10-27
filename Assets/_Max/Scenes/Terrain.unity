@@ -1910,7 +1910,7 @@ MonoBehaviour:
   radius: 120
   spacing: 0.4
   grassDensity: 0.28
-  bladeHeight: 4.76
+  bladeHeight: 3
   rootColour: {r: 0.7529412, g: 0.7921569, b: 0.5647059, a: 1}
   tipColour: {r: 0.99215686, g: 1, b: 0.72156864, a: 1}
   flowerChance: 0.039

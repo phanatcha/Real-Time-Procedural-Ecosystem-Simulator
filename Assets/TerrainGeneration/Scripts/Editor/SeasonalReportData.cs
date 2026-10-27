@@ -44,7 +44,7 @@ public sealed class SeasonalReportData : IDisposable
             TerrainEnvironmentSampler sampler = new TerrainEnvironmentSampler(heights, meshes, textures.environmentDefinitions, vegetation);
             System.Random random = new System.Random(vegetation.seed);
             Mesh[][] variants = new Mesh[3][];
-            variants[0] = VegetationTemplateCache.BuildTreeTemplates(vegetation, random);
+            variants[0] = VegetationTemplateCache.BuildTreeTemplates(vegetation, random, out _);
             templates.AddRange(variants[0]);
             for (int kind = 1; kind < 3; kind++)
             {
