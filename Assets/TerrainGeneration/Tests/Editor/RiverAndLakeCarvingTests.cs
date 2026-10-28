@@ -1,3 +1,4 @@
+using Boreal.Core;
 using NUnit.Framework;
 using UnityEditor;
 using UnityEngine;
@@ -115,6 +116,35 @@ namespace Boreal.TerrainGeneration.Tests
 
             Assert.Greater(riverPoints, 0);
             Assert.Greater(lakePoints, 0);
+        }
+
+        // Two stretches of FOREST-001's coast where a river crosses a lake patch beside a valley. Lakes used to test
+        // their height range after the river had cut the ground, so along its banks one point was sunk to the lake
+        // bed and the next kept; the valley's shoulder then raised the kept ones into rows of spikes about 20 m tall
+        // standing out of the sea. Fixed, the tallest point above all four neighbours here is under 3 m.
+        [Test]
+        public void RiverBanksInsideLakesLeaveNoSpikes()
+        {
+            SeedManager.GetWorldSeeds("FOREST-001").ApplyTo(heights);
+            heights.erosionSettings.enabled = false;
+            foreach (Vector2 centre in new[] { new Vector2(-200f, 380f), new Vector2(0f, -410f) })
+            {
+                HeightMap map = HeightMapGenerator.GenerateHeightMap(121, 121, heights, centre);
+                for (int x = 1; x < 120; x++)
+                {
+                    for (int y = 1; y < 120; y++)
+                    {
+                        float here = map.values[x, y];
+                        float around = Mathf.Max(Mathf.Max(map.values[x - 1, y], map.values[x + 1, y]),
+                                                 Mathf.Max(map.values[x, y - 1], map.values[x, y + 1]));
+                        if (here > waterLevel)
+                        {
+                            Vector2 position = centre + new Vector2(x - 60.5f, 60.5f - y);
+                            Assert.Less(here - around, 8f, $"a spike stands out of the ground at {position}");
+                        }
+                    }
+                }
+            }
         }
 
         float Height(float input) => heights.heightCurve.Evaluate(input) * heights.heightMultiplier;

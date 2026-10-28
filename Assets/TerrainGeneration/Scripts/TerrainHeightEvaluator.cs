@@ -52,6 +52,7 @@ namespace Boreal.TerrainGeneration
                 noiseValue = Mathf.Clamp01(noiseValue - falloffValue);
             }
 
+            float heightBeforeRivers = noiseValue;
             float riverStrength = 0f;
             if (settings.riverSettings != null && settings.riverSettings.enabled)
             {
@@ -84,14 +85,17 @@ namespace Boreal.TerrainGeneration
                     lake.threshold,
                     lakeNoise));
                 lakeMask = lakeMask * lakeMask * (3f - 2f * lakeMask);
+                // The height range is tested before the rivers cut the ground. A river bank is part-carved, so
+                // neighbouring points there fell on opposite sides of the lowest lake height: one was sunk to the lake
+                // bed, the next kept, leaving one-point walls that the valley shoulders then raised into spikes.
                 float presence = Mathf.InverseLerp(
                     lake.minHeightPercent,
                     lake.minHeightPercent + 0.05f,
-                    noiseValue)
+                    heightBeforeRivers)
                     * (1f - Mathf.InverseLerp(
                         lake.maxHeightPercent - 0.05f,
                         lake.maxHeightPercent,
-                        noiseValue));
+                        heightBeforeRivers));
                 lakeStrength = Mathf.Clamp01(lakeMask * presence);
                 noiseValue = Mathf.Lerp(noiseValue, lake.bedLevel, lakeStrength);
             }
