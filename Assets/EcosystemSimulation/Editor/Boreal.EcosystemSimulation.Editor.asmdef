@@ -1,0 +1,21 @@
+{
+    "name": "Boreal.EcosystemSimulation.Editor",
+    "rootNamespace": "Boreal.EcosystemSimulation.Editor",
+    "references": [
+        "Boreal.AnimalTerrainIntegration",
+        "Boreal.Core",
+        "Boreal.EcosystemSimulation",
+        "Boreal.TerrainGeneration"
+    ],
+    "includePlatforms": [
+        "Editor"
+    ],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": false,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

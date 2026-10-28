@@ -1,366 +1,371 @@
 using System.Collections.Generic;
+using Boreal.Temperature;
+using Boreal.World;
 using UnityEngine;
 
-public enum FoodType
+namespace Boreal.Animals
 {
-    Plant,
-    Meat
-}
-
-public class FoodItem : MonoBehaviour
-{
-    // Food never moves once enabled, so it is filed into a coarse grid for fast nearby lookups.
-    private const float LookupCellSize = 32f;
-
-    private static readonly HashSet<FoodItem> activeItems = new HashSet<FoodItem>();
-    private static readonly Dictionary<Vector2Int, List<FoodItem>> itemsByCell =
-        new Dictionary<Vector2Int, List<FoodItem>>();
-    private static readonly int BaseColorId = Shader.PropertyToID("_BaseColor");
-    private static readonly int ColorId = Shader.PropertyToID("_Color");
-    private static readonly Color SpoiledColor = new Color(0.24f, 0.2f, 0.07f, 1f);
-
-    [Header("Food Properties")]
-    public FoodType foodType = FoodType.Plant;
-    public float nutritionValue = 50f;
-    public string sourceSpeciesName;
-
-    [Header("Accessibility")]
-    [Tooltip("Optional minimum feeding reach. Vertical height is checked automatically; use this for branches or other access difficulty.")]
-    [Min(0f)] public float requiredFeedingReach;
-    [Tooltip("How far this food sits above the ground it grows from, such as leaves up a tree. Animals walk " +
-             "to the ground below it and need enough feeding reach to eat it.")]
-    [Min(0f)] public float heightAboveGround;
-
-    public Vector3 GroundPosition => transform.position - Vector3.up * heightAboveGround;
-
-    [Header("Water")]
-    [Tooltip("The sea biome a sea plant grows in; None on land. Sea plants float at the water surface, so their " +
-             "ground position is on the water.")]
-    public SeaBiome seaBiome;
-    [Tooltip("Grows in water too deep to wade, so only animals that can swim in deep water can reach it.")]
-    public bool inDeepWater;
-
-    [Header("Plant Growth Temperature")]
-    public bool temperatureAffectsGrowth = true;
-    [Tooltip("Test tuning in Celsius, not a biological profile. Growth rises from zero to the optimal range and falls to zero above it.")]
-    public float minimumGrowthTemperature = 0f;
-    public float optimalGrowthTemperatureMin = 15f;
-    public float optimalGrowthTemperatureMax = 25f;
-    public float maximumGrowthTemperature = 45f;
-
-    [Header("Spoilage")]
-    [Tooltip("Lifetime in simulated seconds at the reference temperature. Zero means this food does not spoil.")]
-    [Min(0f)] public float referenceLifetime;
-    public bool temperatureAffectsSpoilage = true;
-    public float spoilageReferenceTemperature = 20f;
-    [Tooltip("Rate increase per 10 Celsius. The final rate is bounded by the minimum and maximum multipliers.")]
-    [Min(1f)] public float spoilageRatePerTenDegrees = 2f;
-    [Min(0.01f)] public float minimumSpoilageMultiplier = 0.25f;
-    [Min(0.01f)] public float maximumSpoilageMultiplier = 4f;
-    [Min(0.05f)] public float temperatureSampleInterval = 0.5f;
-    [Tooltip("Simulated seconds, at the reference temperature, that the food stays as spoiled once it goes off. " +
-             "Only animals with a scavenger gut can eat spoiled food. Zero removes it as soon as it goes off.")]
-    [Min(0f)] public float spoiledLifetime;
-
-    [Header("Spoilage Runtime")]
-    [SerializeField, Range(0f, 1f)] private float freshness = 1f;
-    [SerializeField] private float remainingReferenceLifetime;
-    [SerializeField] private bool spoiled;
-    [Tooltip("What is left of the spoiled stage, from 1 when the food goes off to 0 when it is gone.")]
-    [SerializeField, Range(0f, 1f)] private float spoiledRemaining;
-    [SerializeField] private bool hasLocalTemperature;
-    [SerializeField] private float localTemperatureCelsius = 20f;
-    [SerializeField] private float currentSpoilageMultiplier = 1f;
-
-    private bool consumed;
-    private float temperatureSampleTimer;
-    private bool isInLookup;
-    private Vector2Int lookupCell;
-
-    public static IEnumerable<FoodItem> ActiveItems => activeItems;
-    public static int ActiveCount => activeItems.Count;
-    public bool IsAvailable => !consumed && isActiveAndEnabled;
-    public bool IsPerishable => referenceLifetime > 0f && IsFinite(referenceLifetime);
-    public float Freshness => freshness;
-    // Gone off but still there: only animals with a scavenger gut can eat it.
-    public bool IsSpoiled => spoiled;
-    public float RemainingReferenceLifetime => remainingReferenceLifetime;
-    public float CurrentSpoilageMultiplier => currentSpoilageMultiplier;
-
-    [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
-    private static void ResetRegistry()
+    public enum FoodType
     {
-        activeItems.Clear();
-        itemsByCell.Clear();
+        Plant,
+        Meat
     }
 
-    void OnEnable()
+    public class FoodItem : MonoBehaviour
     {
-        consumed = false;
-        ResetFreshness();
-        activeItems.Add(this);
-        AddToLookup();
-    }
+        // Food never moves once enabled, so it is filed into a coarse grid for fast nearby lookups.
+        private const float LookupCellSize = 32f;
 
-    void OnDisable()
-    {
-        activeItems.Remove(this);
-        RemoveFromLookup();
-    }
+        private static readonly HashSet<FoodItem> activeItems = new HashSet<FoodItem>();
+        private static readonly Dictionary<Vector2Int, List<FoodItem>> itemsByCell =
+            new Dictionary<Vector2Int, List<FoodItem>>();
+        private static readonly int BaseColorId = Shader.PropertyToID("_BaseColor");
+        private static readonly int ColorId = Shader.PropertyToID("_Color");
+        private static readonly Color SpoiledColor = new Color(0.24f, 0.2f, 0.07f, 1f);
 
-    // Fills results with every active food item in the lookup cells overlapping the radius. Callers
-    // still check exact distances.
-    public static void FindNearby(Vector3 position, float radius, List<FoodItem> results)
-    {
-        results.Clear();
-        Vector2Int minimum = ToLookupCell(new Vector3(position.x - radius, 0f, position.z - radius));
-        Vector2Int maximum = ToLookupCell(new Vector3(position.x + radius, 0f, position.z + radius));
-        for (int cellZ = minimum.y; cellZ <= maximum.y; cellZ++)
+        [Header("Food Properties")]
+        public FoodType foodType = FoodType.Plant;
+        public float nutritionValue = 50f;
+        public string sourceSpeciesName;
+
+        [Header("Accessibility")]
+        [Tooltip("Optional minimum feeding reach. Vertical height is checked automatically; use this for branches or other access difficulty.")]
+        [Min(0f)] public float requiredFeedingReach;
+        [Tooltip("How far this food sits above the ground it grows from, such as leaves up a tree. Animals walk " +
+                 "to the ground below it and need enough feeding reach to eat it.")]
+        [Min(0f)] public float heightAboveGround;
+
+        public Vector3 GroundPosition => transform.position - Vector3.up * heightAboveGround;
+
+        [Header("Water")]
+        [Tooltip("The sea biome a sea plant grows in; None on land. Sea plants float at the water surface, so their " +
+                 "ground position is on the water.")]
+        public SeaBiome seaBiome;
+        [Tooltip("Grows in water too deep to wade, so only animals that can swim in deep water can reach it.")]
+        public bool inDeepWater;
+
+        [Header("Plant Growth Temperature")]
+        public bool temperatureAffectsGrowth = true;
+        [Tooltip("Test tuning in Celsius, not a biological profile. Growth rises from zero to the optimal range and falls to zero above it.")]
+        public float minimumGrowthTemperature = 0f;
+        public float optimalGrowthTemperatureMin = 15f;
+        public float optimalGrowthTemperatureMax = 25f;
+        public float maximumGrowthTemperature = 45f;
+
+        [Header("Spoilage")]
+        [Tooltip("Lifetime in simulated seconds at the reference temperature. Zero means this food does not spoil.")]
+        [Min(0f)] public float referenceLifetime;
+        public bool temperatureAffectsSpoilage = true;
+        public float spoilageReferenceTemperature = 20f;
+        [Tooltip("Rate increase per 10 Celsius. The final rate is bounded by the minimum and maximum multipliers.")]
+        [Min(1f)] public float spoilageRatePerTenDegrees = 2f;
+        [Min(0.01f)] public float minimumSpoilageMultiplier = 0.25f;
+        [Min(0.01f)] public float maximumSpoilageMultiplier = 4f;
+        [Min(0.05f)] public float temperatureSampleInterval = 0.5f;
+        [Tooltip("Simulated seconds, at the reference temperature, that the food stays as spoiled once it goes off. " +
+                 "Only animals with a scavenger gut can eat spoiled food. Zero removes it as soon as it goes off.")]
+        [Min(0f)] public float spoiledLifetime;
+
+        [Header("Spoilage Runtime")]
+        [SerializeField, Range(0f, 1f)] private float freshness = 1f;
+        [SerializeField] private float remainingReferenceLifetime;
+        [SerializeField] private bool spoiled;
+        [Tooltip("What is left of the spoiled stage, from 1 when the food goes off to 0 when it is gone.")]
+        [SerializeField, Range(0f, 1f)] private float spoiledRemaining;
+        [SerializeField] private bool hasLocalTemperature;
+        [SerializeField] private float localTemperatureCelsius = 20f;
+        [SerializeField] private float currentSpoilageMultiplier = 1f;
+
+        private bool consumed;
+        private float temperatureSampleTimer;
+        private bool isInLookup;
+        private Vector2Int lookupCell;
+
+        public static IEnumerable<FoodItem> ActiveItems => activeItems;
+        public static int ActiveCount => activeItems.Count;
+        public bool IsAvailable => !consumed && isActiveAndEnabled;
+        public bool IsPerishable => referenceLifetime > 0f && IsFinite(referenceLifetime);
+        public float Freshness => freshness;
+        // Gone off but still there: only animals with a scavenger gut can eat it.
+        public bool IsSpoiled => spoiled;
+        public float RemainingReferenceLifetime => remainingReferenceLifetime;
+        public float CurrentSpoilageMultiplier => currentSpoilageMultiplier;
+
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+        private static void ResetRegistry()
         {
-            for (int cellX = minimum.x; cellX <= maximum.x; cellX++)
+            activeItems.Clear();
+            itemsByCell.Clear();
+        }
+
+        void OnEnable()
+        {
+            consumed = false;
+            ResetFreshness();
+            activeItems.Add(this);
+            AddToLookup();
+        }
+
+        void OnDisable()
+        {
+            activeItems.Remove(this);
+            RemoveFromLookup();
+        }
+
+        // Fills results with every active food item in the lookup cells overlapping the radius. Callers
+        // still check exact distances.
+        public static void FindNearby(Vector3 position, float radius, List<FoodItem> results)
+        {
+            results.Clear();
+            Vector2Int minimum = ToLookupCell(new Vector3(position.x - radius, 0f, position.z - radius));
+            Vector2Int maximum = ToLookupCell(new Vector3(position.x + radius, 0f, position.z + radius));
+            for (int cellZ = minimum.y; cellZ <= maximum.y; cellZ++)
             {
-                if (itemsByCell.TryGetValue(new Vector2Int(cellX, cellZ), out List<FoodItem> items))
+                for (int cellX = minimum.x; cellX <= maximum.x; cellX++)
                 {
-                    results.AddRange(items);
+                    if (itemsByCell.TryGetValue(new Vector2Int(cellX, cellZ), out List<FoodItem> items))
+                    {
+                        results.AddRange(items);
+                    }
                 }
             }
         }
-    }
 
-    static Vector2Int ToLookupCell(Vector3 position)
-    {
-        return new Vector2Int(Mathf.FloorToInt(position.x / LookupCellSize),
-                              Mathf.FloorToInt(position.z / LookupCellSize));
-    }
-
-    void AddToLookup()
-    {
-        lookupCell = ToLookupCell(transform.position);
-        if (!itemsByCell.TryGetValue(lookupCell, out List<FoodItem> items))
+        static Vector2Int ToLookupCell(Vector3 position)
         {
-            items = new List<FoodItem>();
-            itemsByCell.Add(lookupCell, items);
+            return new Vector2Int(Mathf.FloorToInt(position.x / LookupCellSize),
+                                  Mathf.FloorToInt(position.z / LookupCellSize));
         }
 
-        items.Add(this);
-        isInLookup = true;
-    }
-
-    void RemoveFromLookup()
-    {
-        if (!isInLookup) return;
-
-        if (itemsByCell.TryGetValue(lookupCell, out List<FoodItem> items))
+        void AddToLookup()
         {
-            items.Remove(this);
-            if (items.Count == 0) itemsByCell.Remove(lookupCell);
+            lookupCell = ToLookupCell(transform.position);
+            if (!itemsByCell.TryGetValue(lookupCell, out List<FoodItem> items))
+            {
+                items = new List<FoodItem>();
+                itemsByCell.Add(lookupCell, items);
+            }
+
+            items.Add(this);
+            isInLookup = true;
         }
 
-        isInLookup = false;
-    }
-
-    public void Configure(FoodType type, float rawNutrition, string sourceSpecies = "", float lifetime = 0f,
-                          float requiredReach = 0f, float spoiledFor = 0f)
-    {
-        foodType = type;
-        nutritionValue = Mathf.Max(0f, rawNutrition);
-        sourceSpeciesName = sourceSpecies;
-        requiredFeedingReach = Mathf.Max(0f, requiredReach);
-        referenceLifetime = IsFinite(lifetime) ? Mathf.Max(0f, lifetime) : 0f;
-        spoiledLifetime = IsFinite(spoiledFor) ? Mathf.Max(0f, spoiledFor) : 0f;
-        ResetFreshness();
-    }
-
-    void Update()
-    {
-        AdvanceSpoilage(Time.deltaTime);
-    }
-
-    public void AdvanceSpoilage(float elapsed)
-    {
-        if (!IsAvailable || !IsPerishable || !IsFinite(elapsed) || elapsed <= 0f)
+        void RemoveFromLookup()
         {
-            return;
+            if (!isInLookup) return;
+
+            if (itemsByCell.TryGetValue(lookupCell, out List<FoodItem> items))
+            {
+                items.Remove(this);
+                if (items.Count == 0) itemsByCell.Remove(lookupCell);
+            }
+
+            isInLookup = false;
         }
 
-        temperatureSampleTimer -= elapsed;
-        if (temperatureSampleTimer <= 0f)
+        public void Configure(FoodType type, float rawNutrition, string sourceSpecies = "", float lifetime = 0f,
+                              float requiredReach = 0f, float spoiledFor = 0f)
         {
-            SampleTemperature();
+            foodType = type;
+            nutritionValue = Mathf.Max(0f, rawNutrition);
+            sourceSpeciesName = sourceSpecies;
+            requiredFeedingReach = Mathf.Max(0f, requiredReach);
+            referenceLifetime = IsFinite(lifetime) ? Mathf.Max(0f, lifetime) : 0f;
+            spoiledLifetime = IsFinite(spoiledFor) ? Mathf.Max(0f, spoiledFor) : 0f;
+            ResetFreshness();
         }
 
-        float decay = elapsed * currentSpoilageMultiplier;
-        if (spoiled)
+        void Update()
         {
-            spoiledRemaining = Mathf.Max(0f, spoiledRemaining - decay / spoiledLifetime);
-            if (spoiledRemaining <= 0f)
+            AdvanceSpoilage(Time.deltaTime);
+        }
+
+        public void AdvanceSpoilage(float elapsed)
+        {
+            if (!IsAvailable || !IsPerishable || !IsFinite(elapsed) || elapsed <= 0f)
+            {
+                return;
+            }
+
+            temperatureSampleTimer -= elapsed;
+            if (temperatureSampleTimer <= 0f)
+            {
+                SampleTemperature();
+            }
+
+            float decay = elapsed * currentSpoilageMultiplier;
+            if (spoiled)
+            {
+                spoiledRemaining = Mathf.Max(0f, spoiledRemaining - decay / spoiledLifetime);
+                if (spoiledRemaining <= 0f)
+                {
+                    RemoveFromSimulation();
+                }
+
+                return;
+            }
+
+            freshness = Mathf.Max(0f, freshness - decay / referenceLifetime);
+            remainingReferenceLifetime = freshness * referenceLifetime;
+            if (freshness > 0f)
+            {
+                return;
+            }
+
+            if (spoiledLifetime > 0f && IsFinite(spoiledLifetime))
+            {
+                BeginSpoiledStage();
+            }
+            else
             {
                 RemoveFromSimulation();
             }
-
-            return;
         }
 
-        freshness = Mathf.Max(0f, freshness - decay / referenceLifetime);
-        remainingReferenceLifetime = freshness * referenceLifetime;
-        if (freshness > 0f)
+        // The food has gone off: it stays for its spoiled lifetime, darker, for animals with a scavenger gut.
+        void BeginSpoiledStage()
         {
-            return;
+            spoiled = true;
+            spoiledRemaining = 1f;
+
+            MeshRenderer meshRenderer = GetComponent<MeshRenderer>();
+            if (meshRenderer == null) return;
+
+            MaterialPropertyBlock propertyBlock = new MaterialPropertyBlock();
+            meshRenderer.GetPropertyBlock(propertyBlock);
+            propertyBlock.SetColor(BaseColorId, SpoiledColor);
+            propertyBlock.SetColor(ColorId, SpoiledColor);
+            meshRenderer.SetPropertyBlock(propertyBlock);
         }
 
-        if (spoiledLifetime > 0f && IsFinite(spoiledLifetime))
+        void ResetFreshness()
         {
-            BeginSpoiledStage();
+            freshness = 1f;
+            spoiled = false;
+            spoiledRemaining = 0f;
+            remainingReferenceLifetime = IsPerishable ? referenceLifetime : 0f;
+            SampleTemperature();
         }
-        else
+
+        void SampleTemperature()
         {
+            temperatureSampleTimer = Mathf.Max(0.05f, FiniteOr(temperatureSampleInterval, 0.5f));
+            hasLocalTemperature = temperatureAffectsSpoilage && IsPerishable &&
+                TemperatureSystem.TryGetTemperatureAt(transform.position, out localTemperatureCelsius);
+            currentSpoilageMultiplier = hasLocalTemperature ? EvaluateSpoilageMultiplier(localTemperatureCelsius) : 1f;
+        }
+
+        public float EvaluateGrowthMultiplier(float temperatureCelsius)
+        {
+            if (!temperatureAffectsGrowth || foodType != FoodType.Plant || !IsFinite(temperatureCelsius))
+            {
+                return 1f;
+            }
+
+            float minimum = FiniteOr(minimumGrowthTemperature, 0f);
+            float maximum = Mathf.Max(minimum + 0.01f, FiniteOr(maximumGrowthTemperature, 45f));
+            float optimalMin = Mathf.Clamp(FiniteOr(optimalGrowthTemperatureMin, 15f), minimum, maximum);
+            float optimalMax = Mathf.Clamp(FiniteOr(optimalGrowthTemperatureMax, 25f), optimalMin, maximum);
+            if (temperatureCelsius <= minimum || temperatureCelsius >= maximum)
+            {
+                return 0f;
+            }
+
+            if (temperatureCelsius < optimalMin)
+            {
+                return Mathf.InverseLerp(minimum, optimalMin, temperatureCelsius);
+            }
+
+            return temperatureCelsius <= optimalMax ? 1f :
+                1f - Mathf.InverseLerp(optimalMax, maximum, temperatureCelsius);
+        }
+
+        public float EvaluateSpoilageMultiplier(float temperatureCelsius)
+        {
+            if (!temperatureAffectsSpoilage || !IsFinite(temperatureCelsius))
+            {
+                return 1f;
+            }
+
+            float minimum = Mathf.Clamp(FiniteOr(minimumSpoilageMultiplier, 0.25f), 0.01f, 1f);
+            float maximum = Mathf.Max(1f, FiniteOr(maximumSpoilageMultiplier, 4f));
+            float factor = Mathf.Max(1f, FiniteOr(spoilageRatePerTenDegrees, 2f));
+            float exponent = (temperatureCelsius - FiniteOr(spoilageReferenceTemperature, 20f)) / 10f;
+            return Mathf.Clamp(Mathf.Pow(factor, exponent), minimum, maximum);
+        }
+
+        static bool IsFinite(float value)
+        {
+            return !float.IsNaN(value) && !float.IsInfinity(value);
+        }
+
+        static float FiniteOr(float value, float fallback)
+        {
+            return IsFinite(value) ? value : fallback;
+        }
+
+        public bool TryConsume(out float nutrition, out FoodType consumedType)
+        {
+            nutrition = 0f;
+            consumedType = foodType;
+            if (!IsAvailable)
+            {
+                return false;
+            }
+
+            nutrition = nutritionValue;
             RemoveFromSimulation();
+            return true;
         }
-    }
 
-    // The food has gone off: it stays for its spoiled lifetime, darker, for animals with a scavenger gut.
-    void BeginSpoiledStage()
-    {
-        spoiled = true;
-        spoiledRemaining = 1f;
-
-        MeshRenderer meshRenderer = GetComponent<MeshRenderer>();
-        if (meshRenderer == null) return;
-
-        MaterialPropertyBlock propertyBlock = new MaterialPropertyBlock();
-        meshRenderer.GetPropertyBlock(propertyBlock);
-        propertyBlock.SetColor(BaseColorId, SpoiledColor);
-        propertyBlock.SetColor(ColorId, SpoiledColor);
-        meshRenderer.SetPropertyBlock(propertyBlock);
-    }
-
-    void ResetFreshness()
-    {
-        freshness = 1f;
-        spoiled = false;
-        spoiledRemaining = 0f;
-        remainingReferenceLifetime = IsPerishable ? referenceLifetime : 0f;
-        SampleTemperature();
-    }
-
-    void SampleTemperature()
-    {
-        temperatureSampleTimer = Mathf.Max(0.05f, FiniteOr(temperatureSampleInterval, 0.5f));
-        hasLocalTemperature = temperatureAffectsSpoilage && IsPerishable &&
-            TemperatureSystem.TryGetTemperatureAt(transform.position, out localTemperatureCelsius);
-        currentSpoilageMultiplier = hasLocalTemperature ? EvaluateSpoilageMultiplier(localTemperatureCelsius) : 1f;
-    }
-
-    public float EvaluateGrowthMultiplier(float temperatureCelsius)
-    {
-        if (!temperatureAffectsGrowth || foodType != FoodType.Plant || !IsFinite(temperatureCelsius))
+        void RemoveFromSimulation()
         {
-            return 1f;
+            consumed = true;
+            activeItems.Remove(this);
+            gameObject.SetActive(false);
+            Destroy(gameObject);
         }
 
-        float minimum = FiniteOr(minimumGrowthTemperature, 0f);
-        float maximum = Mathf.Max(minimum + 0.01f, FiniteOr(maximumGrowthTemperature, 45f));
-        float optimalMin = Mathf.Clamp(FiniteOr(optimalGrowthTemperatureMin, 15f), minimum, maximum);
-        float optimalMax = Mathf.Clamp(FiniteOr(optimalGrowthTemperatureMax, 25f), optimalMin, maximum);
-        if (temperatureCelsius <= minimum || temperatureCelsius >= maximum)
+        public bool TryConsume(out float nutrition)
         {
-            return 0f;
+            return TryConsume(out nutrition, out _);
         }
 
-        if (temperatureCelsius < optimalMin)
+        // spoiledLifetime is how long the carcass stays as spoiled meat for scavengers once it goes off.
+        public static FoodItem CreateCarcass(Vector3 position, float rawNutrition, string sourceSpecies,
+                                             float lifetime, float scale, float spoiledLifetime = 0f)
         {
-            return Mathf.InverseLerp(minimum, optimalMin, temperatureCelsius);
+            if (rawNutrition <= 0f)
+            {
+                return null;
+            }
+
+            GameObject carcass = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+            carcass.name = $"Carcass_{sourceSpecies}";
+            WildlifeLayer.Apply(carcass);
+            carcass.tag = "Food";
+            carcass.transform.position = position;
+            carcass.transform.localScale = Vector3.one * Mathf.Max(0.1f, scale);
+
+            Collider collider = carcass.GetComponent<Collider>();
+            collider.isTrigger = true;
+
+            Rigidbody rigidbody = carcass.AddComponent<Rigidbody>();
+            rigidbody.isKinematic = true;
+            rigidbody.useGravity = false;
+
+            FoodItem foodItem = carcass.AddComponent<FoodItem>();
+            foodItem.Configure(FoodType.Meat, rawNutrition, sourceSpecies, lifetime, spoiledFor: spoiledLifetime);
+
+            MeshRenderer renderer = carcass.GetComponent<MeshRenderer>();
+            MaterialPropertyBlock propertyBlock = new MaterialPropertyBlock();
+            renderer.GetPropertyBlock(propertyBlock);
+            Color carcassColor = new Color(0.45f, 0.08f, 0.05f, 1f);
+            propertyBlock.SetColor(BaseColorId, carcassColor);
+            propertyBlock.SetColor(ColorId, carcassColor);
+            renderer.SetPropertyBlock(propertyBlock);
+
+            return foodItem;
         }
-
-        return temperatureCelsius <= optimalMax ? 1f :
-            1f - Mathf.InverseLerp(optimalMax, maximum, temperatureCelsius);
-    }
-
-    public float EvaluateSpoilageMultiplier(float temperatureCelsius)
-    {
-        if (!temperatureAffectsSpoilage || !IsFinite(temperatureCelsius))
-        {
-            return 1f;
-        }
-
-        float minimum = Mathf.Clamp(FiniteOr(minimumSpoilageMultiplier, 0.25f), 0.01f, 1f);
-        float maximum = Mathf.Max(1f, FiniteOr(maximumSpoilageMultiplier, 4f));
-        float factor = Mathf.Max(1f, FiniteOr(spoilageRatePerTenDegrees, 2f));
-        float exponent = (temperatureCelsius - FiniteOr(spoilageReferenceTemperature, 20f)) / 10f;
-        return Mathf.Clamp(Mathf.Pow(factor, exponent), minimum, maximum);
-    }
-
-    static bool IsFinite(float value)
-    {
-        return !float.IsNaN(value) && !float.IsInfinity(value);
-    }
-
-    static float FiniteOr(float value, float fallback)
-    {
-        return IsFinite(value) ? value : fallback;
-    }
-
-    public bool TryConsume(out float nutrition, out FoodType consumedType)
-    {
-        nutrition = 0f;
-        consumedType = foodType;
-        if (!IsAvailable)
-        {
-            return false;
-        }
-
-        nutrition = nutritionValue;
-        RemoveFromSimulation();
-        return true;
-    }
-
-    void RemoveFromSimulation()
-    {
-        consumed = true;
-        activeItems.Remove(this);
-        gameObject.SetActive(false);
-        Destroy(gameObject);
-    }
-
-    public bool TryConsume(out float nutrition)
-    {
-        return TryConsume(out nutrition, out _);
-    }
-
-    // spoiledLifetime is how long the carcass stays as spoiled meat for scavengers once it goes off.
-    public static FoodItem CreateCarcass(Vector3 position, float rawNutrition, string sourceSpecies,
-                                         float lifetime, float scale, float spoiledLifetime = 0f)
-    {
-        if (rawNutrition <= 0f)
-        {
-            return null;
-        }
-
-        GameObject carcass = GameObject.CreatePrimitive(PrimitiveType.Sphere);
-        carcass.name = $"Carcass_{sourceSpecies}";
-        WildlifeLayer.Apply(carcass);
-        carcass.tag = "Food";
-        carcass.transform.position = position;
-        carcass.transform.localScale = Vector3.one * Mathf.Max(0.1f, scale);
-
-        Collider collider = carcass.GetComponent<Collider>();
-        collider.isTrigger = true;
-
-        Rigidbody rigidbody = carcass.AddComponent<Rigidbody>();
-        rigidbody.isKinematic = true;
-        rigidbody.useGravity = false;
-
-        FoodItem foodItem = carcass.AddComponent<FoodItem>();
-        foodItem.Configure(FoodType.Meat, rawNutrition, sourceSpecies, lifetime, spoiledFor: spoiledLifetime);
-
-        MeshRenderer renderer = carcass.GetComponent<MeshRenderer>();
-        MaterialPropertyBlock propertyBlock = new MaterialPropertyBlock();
-        renderer.GetPropertyBlock(propertyBlock);
-        Color carcassColor = new Color(0.45f, 0.08f, 0.05f, 1f);
-        propertyBlock.SetColor(BaseColorId, carcassColor);
-        propertyBlock.SetColor(ColorId, carcassColor);
-        renderer.SetPropertyBlock(propertyBlock);
-
-        return foodItem;
     }
 }

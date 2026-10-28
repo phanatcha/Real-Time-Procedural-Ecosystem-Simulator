@@ -1,398 +1,401 @@
 using System.Collections.Generic;
 using UnityEngine;
 
-public struct VegetationInstance
+namespace Boreal.TerrainGeneration
 {
-    public int variantIndex;
-    public Vector3 position;
-    public Quaternion rotation;
-    public float yawDegrees;
-    public float scale;
-}
-
-public class VegetationPlacementData
-{
-    public List<VegetationInstance> trees = new List<VegetationInstance>();
-    public List<VegetationInstance> grass = new List<VegetationInstance>();
-    public List<VegetationInstance> rocks = new List<VegetationInstance>();
-    public List<VegetationInstance> bushes = new List<VegetationInstance>();
-}
-
-public static class VegetationGenerator
-{
-    // Three Norway spruces, as VegetationTemplateCache.BuildTreeTemplates builds them.
-    const int TreeVariants = 3;
-    const int GrassVariants = 3;
-    const int RockVariants = 3;
-    // Two bilberry bushes and a raspberry bush, as VegetationTemplateCache.BuildBushTemplates builds them.
-    const int BushVariants = 3;
-    // Rocks and bushes aren't placed on ground steeper than this, where the terrain paints cliff rock (about 32°).
-    // shortcut: copies TextureData.rockSlopeStart's default; read it from TextureData if that gets tuned.
-    const float CliffSlope = 0.15f;
-
-    public static VegetationPlacementData GeneratePlacements(
-        Vector2 chunkWorldMin, Vector2 chunkWorldMax,
-        HeightMap heightMap, float terrainMinHeight, float terrainMaxHeight,
-        VegetationSettings vegSettings, EnvironmentDefinitions environmentDefinitions,
-        int numVertsPerLine, float meshScale)
+    public struct VegetationInstance
     {
-        VegetationPlacementData data = new VegetationPlacementData();
-        if (vegSettings == null || environmentDefinitions == null) return data;
-
-        Vector2 chunkWorldCentre = (chunkWorldMin + chunkWorldMax) * 0.5f;
-
-        GenerateType(vegSettings.trees, EnvironmentResourceType.Tree, data.trees, TreeVariants, 1,
-            chunkWorldMin, chunkWorldMax, heightMap, terrainMinHeight, terrainMaxHeight,
-            environmentDefinitions, vegSettings.seed, chunkWorldCentre, numVertsPerLine, meshScale);
-        GenerateType(vegSettings.grass, EnvironmentResourceType.Grass, data.grass, GrassVariants, 2,
-            chunkWorldMin, chunkWorldMax, heightMap, terrainMinHeight, terrainMaxHeight,
-            environmentDefinitions, vegSettings.seed, chunkWorldCentre, numVertsPerLine, meshScale);
-        GenerateType(vegSettings.rocks, EnvironmentResourceType.Rock, data.rocks, RockVariants, 3,
-            chunkWorldMin, chunkWorldMax, heightMap, terrainMinHeight, terrainMaxHeight,
-            environmentDefinitions, vegSettings.seed, chunkWorldCentre, numVertsPerLine, meshScale);
-        // Bushes grow where grass does, so they share its patches.
-        GenerateType(vegSettings.bushes, EnvironmentResourceType.Grass, data.bushes, BushVariants, 4,
-            chunkWorldMin, chunkWorldMax, heightMap, terrainMinHeight, terrainMaxHeight,
-            environmentDefinitions, vegSettings.seed, chunkWorldCentre, numVertsPerLine, meshScale);
-
-        return data;
+        public int variantIndex;
+        public Vector3 position;
+        public Quaternion rotation;
+        public float yawDegrees;
+        public float scale;
     }
 
-    static void GenerateType(VegetationTypeSettings settings, EnvironmentResourceType resourceType,
-        List<VegetationInstance> output, int variantCount, int typeSalt,
-        Vector2 chunkWorldMin, Vector2 chunkWorldMax, HeightMap heightMap,
-        float terrainMinHeight, float terrainMaxHeight, EnvironmentDefinitions environmentDefinitions,
-        int seed, Vector2 chunkWorldCentre, int numVertsPerLine, float meshScale)
+    public class VegetationPlacementData
     {
-        if (settings == null || !settings.enabled) return;
+        public List<VegetationInstance> trees = new List<VegetationInstance>();
+        public List<VegetationInstance> grass = new List<VegetationInstance>();
+        public List<VegetationInstance> rocks = new List<VegetationInstance>();
+        public List<VegetationInstance> bushes = new List<VegetationInstance>();
+    }
 
-        float cellSize = Mathf.Max(settings.cellSize, 0.5f);
-        int gxMin = Mathf.FloorToInt(chunkWorldMin.x / cellSize) - 1;
-        int gxMax = Mathf.CeilToInt(chunkWorldMax.x / cellSize) + 1;
-        int gzMin = Mathf.FloorToInt(chunkWorldMin.y / cellSize) - 1;
-        int gzMax = Mathf.CeilToInt(chunkWorldMax.y / cellSize) + 1;
+    public static class VegetationGenerator
+    {
+        // Three Norway spruces, as VegetationTemplateCache.BuildTreeTemplates builds them.
+        const int TreeVariants = 3;
+        const int GrassVariants = 3;
+        const int RockVariants = 3;
+        // Two bilberry bushes and a raspberry bush, as VegetationTemplateCache.BuildBushTemplates builds them.
+        const int BushVariants = 3;
+        // Rocks and bushes aren't placed on ground steeper than this, where the terrain paints cliff rock (about 32°).
+        // shortcut: copies TextureData.rockSlopeStart's default; read it from TextureData if that gets tuned.
+        const float CliffSlope = 0.15f;
 
-        // The seed moves the points the hashes below read by up to 235 m, in 1024 steps. Hash21 loses precision
-        // far from the origin, and world seeds use the whole int range, so seed * 13.7 would line plants up in rows.
-        float saltBase = (seed & 1023) * 0.2293f + typeSalt * 91.3f;
-
-        for (int gx = gxMin; gx <= gxMax; gx++)
+        public static VegetationPlacementData GeneratePlacements(
+            Vector2 chunkWorldMin, Vector2 chunkWorldMax,
+            HeightMap heightMap, float terrainMinHeight, float terrainMaxHeight,
+            VegetationSettings vegSettings, EnvironmentDefinitions environmentDefinitions,
+            int numVertsPerLine, float meshScale)
         {
-            for (int gz = gzMin; gz <= gzMax; gz++)
+            VegetationPlacementData data = new VegetationPlacementData();
+            if (vegSettings == null || environmentDefinitions == null) return data;
+
+            Vector2 chunkWorldCentre = (chunkWorldMin + chunkWorldMax) * 0.5f;
+
+            GenerateType(vegSettings.trees, EnvironmentResourceType.Tree, data.trees, TreeVariants, 1,
+                chunkWorldMin, chunkWorldMax, heightMap, terrainMinHeight, terrainMaxHeight,
+                environmentDefinitions, vegSettings.seed, chunkWorldCentre, numVertsPerLine, meshScale);
+            GenerateType(vegSettings.grass, EnvironmentResourceType.Grass, data.grass, GrassVariants, 2,
+                chunkWorldMin, chunkWorldMax, heightMap, terrainMinHeight, terrainMaxHeight,
+                environmentDefinitions, vegSettings.seed, chunkWorldCentre, numVertsPerLine, meshScale);
+            GenerateType(vegSettings.rocks, EnvironmentResourceType.Rock, data.rocks, RockVariants, 3,
+                chunkWorldMin, chunkWorldMax, heightMap, terrainMinHeight, terrainMaxHeight,
+                environmentDefinitions, vegSettings.seed, chunkWorldCentre, numVertsPerLine, meshScale);
+            // Bushes grow where grass does, so they share its patches.
+            GenerateType(vegSettings.bushes, EnvironmentResourceType.Grass, data.bushes, BushVariants, 4,
+                chunkWorldMin, chunkWorldMax, heightMap, terrainMinHeight, terrainMaxHeight,
+                environmentDefinitions, vegSettings.seed, chunkWorldCentre, numVertsPerLine, meshScale);
+
+            return data;
+        }
+
+        static void GenerateType(VegetationTypeSettings settings, EnvironmentResourceType resourceType,
+            List<VegetationInstance> output, int variantCount, int typeSalt,
+            Vector2 chunkWorldMin, Vector2 chunkWorldMax, HeightMap heightMap,
+            float terrainMinHeight, float terrainMaxHeight, EnvironmentDefinitions environmentDefinitions,
+            int seed, Vector2 chunkWorldCentre, int numVertsPerLine, float meshScale)
+        {
+            if (settings == null || !settings.enabled) return;
+
+            float cellSize = Mathf.Max(settings.cellSize, 0.5f);
+            int gxMin = Mathf.FloorToInt(chunkWorldMin.x / cellSize) - 1;
+            int gxMax = Mathf.CeilToInt(chunkWorldMax.x / cellSize) + 1;
+            int gzMin = Mathf.FloorToInt(chunkWorldMin.y / cellSize) - 1;
+            int gzMax = Mathf.CeilToInt(chunkWorldMax.y / cellSize) + 1;
+
+            // The seed moves the points the hashes below read by up to 235 m, in 1024 steps. Hash21 loses precision
+            // far from the origin, and world seeds use the whole int range, so seed * 13.7 would line plants up in rows.
+            float saltBase = (seed & 1023) * 0.2293f + typeSalt * 91.3f;
+
+            for (int gx = gxMin; gx <= gxMax; gx++)
             {
-                Vector2 cellOrigin = new Vector2(gx * cellSize, gz * cellSize);
+                for (int gz = gzMin; gz <= gzMax; gz++)
+                {
+                    Vector2 cellOrigin = new Vector2(gx * cellSize, gz * cellSize);
 
-                float hx = ValueNoise.Hash21(cellOrigin + new Vector2(saltBase, 7.11f));
-                float hz = ValueNoise.Hash21(cellOrigin + new Vector2(saltBase, 33.9f));
-                Vector2 worldPos = cellOrigin + new Vector2(hx, hz) * cellSize;
+                    float hx = ValueNoise.Hash21(cellOrigin + new Vector2(saltBase, 7.11f));
+                    float hz = ValueNoise.Hash21(cellOrigin + new Vector2(saltBase, 33.9f));
+                    Vector2 worldPos = cellOrigin + new Vector2(hx, hz) * cellSize;
 
-                if (worldPos.x < chunkWorldMin.x || worldPos.x >= chunkWorldMax.x ||
-                    worldPos.y < chunkWorldMin.y || worldPos.y >= chunkWorldMax.y)
+                    if (worldPos.x < chunkWorldMin.x || worldPos.x >= chunkWorldMax.x ||
+                        worldPos.y < chunkWorldMin.y || worldPos.y >= chunkWorldMax.y)
+                    {
+                        continue;
+                    }
+
+                    if (!EnvironmentSampler.TrySampleBase(worldPos, heightMap, terrainMinHeight, terrainMaxHeight,
+                        environmentDefinitions, chunkWorldCentre, numVertsPerLine, meshScale,
+                        out EnvironmentSample environmentSample))
+                    {
+                        continue;
+                    }
+
+                    float localDensity = EnvironmentSampler.GetResourceDensity(
+                        environmentSample, environmentDefinitions, settings, resourceType);
+                    float densityRoll = ValueNoise.Hash21(cellOrigin + new Vector2(saltBase, 61.7f));
+                    if (localDensity <= 0f || densityRoll >= localDensity) continue;
+                    // Placement only: the simulation's rock density still follows settings.maxSlope.
+                    if ((typeSalt == 3 || typeSalt == 4) && environmentSample.slope > CliffSlope) continue;
+
+                    float variantRoll = ValueNoise.Hash21(cellOrigin + new Vector2(saltBase, 88.3f));
+                    int variant = typeSalt == 4
+                        ? ChooseBushVariant(environmentSample, variantRoll)
+                        : Mathf.Clamp(Mathf.FloorToInt(variantRoll * variantCount), 0, variantCount - 1);
+                    float rotRoll = ValueNoise.Hash21(cellOrigin + new Vector2(saltBase, 5.5f));
+                    float scaleRoll = ValueNoise.Hash21(cellOrigin + new Vector2(saltBase, 44.4f));
+
+                    Quaternion spin = Quaternion.Euler(0, rotRoll * 360f, 0);
+                    Quaternion slopeAlign = Quaternion.FromToRotation(Vector3.up, environmentSample.surfaceNormal);
+                    Quaternion surfaceRotation = Quaternion.Slerp(Quaternion.identity, slopeAlign, settings.surfaceAlignment);
+
+                    output.Add(new VegetationInstance
+                    {
+                        variantIndex = variant,
+                        position = new Vector3(worldPos.x, environmentSample.height - settings.groundSink, worldPos.y),
+                        rotation = surfaceRotation * spin,
+                        yawDegrees = rotRoll * 360f,
+                        scale = Mathf.Lerp(settings.minScale, settings.maxScale, scaleRoll),
+                    });
+                }
+            }
+        }
+
+        // Bilberry carpets the moist forest floor; raspberry takes drier, sunnier ground. Returns 0 or 1 for a bilberry
+        // bush and 2 for a raspberry bush.
+        static int ChooseBushVariant(EnvironmentSample sample, float roll)
+        {
+            float raspberry = Mathf.Lerp(0.75f, 0.1f, Mathf.InverseLerp(0.3f, 0.65f, sample.moisture));
+            if (roll < raspberry) return 2;
+            return roll < raspberry + (1f - raspberry) * 0.5f ? 0 : 1;
+        }
+
+        public static VegetationPlacementData ProjectPlacementsToLOD(
+            VegetationPlacementData source, HeightMap heightMap,
+            float terrainMinHeight, float terrainMaxHeight,
+            VegetationSettings vegSettings, EnvironmentDefinitions environmentDefinitions,
+            Vector2 chunkWorldCentre,
+            int numVertsPerLine, float meshScale, int levelOfDetail)
+        {
+            VegetationPlacementData projected = new VegetationPlacementData();
+            if (vegSettings == null || environmentDefinitions == null) return projected;
+
+            ProjectTypeToLOD(source.trees, projected.trees, vegSettings.trees, heightMap,
+                terrainMinHeight, terrainMaxHeight, environmentDefinitions,
+                chunkWorldCentre, numVertsPerLine, meshScale, levelOfDetail);
+            ProjectTypeToLOD(source.grass, projected.grass, vegSettings.grass, heightMap,
+                terrainMinHeight, terrainMaxHeight, environmentDefinitions,
+                chunkWorldCentre, numVertsPerLine, meshScale, levelOfDetail);
+            ProjectTypeToLOD(source.rocks, projected.rocks, vegSettings.rocks, heightMap,
+                terrainMinHeight, terrainMaxHeight, environmentDefinitions,
+                chunkWorldCentre, numVertsPerLine, meshScale, levelOfDetail);
+            ProjectTypeToLOD(source.bushes, projected.bushes, vegSettings.bushes, heightMap,
+                terrainMinHeight, terrainMaxHeight, environmentDefinitions,
+                chunkWorldCentre, numVertsPerLine, meshScale, levelOfDetail);
+
+            return projected;
+        }
+
+        static void ProjectTypeToLOD(
+            List<VegetationInstance> source, List<VegetationInstance> output,
+            VegetationTypeSettings settings, HeightMap heightMap,
+            float terrainMinHeight, float terrainMaxHeight, EnvironmentDefinitions environmentDefinitions,
+            Vector2 chunkWorldCentre, int numVertsPerLine, float meshScale, int levelOfDetail)
+        {
+            if (settings == null || levelOfDetail > settings.maxLevelOfDetail) return;
+
+            for (int i = 0; i < source.Count; i++)
+            {
+                VegetationInstance instance = source[i];
+                Vector2 worldPos = new Vector2(instance.position.x, instance.position.z);
+                if (!SampleTerrainLOD(worldPos, heightMap, chunkWorldCentre, numVertsPerLine,
+                    meshScale, levelOfDetail, out float worldY, out Vector3 normal))
                 {
                     continue;
                 }
 
-                if (!EnvironmentSampler.TrySampleBase(worldPos, heightMap, terrainMinHeight, terrainMaxHeight,
-                    environmentDefinitions, chunkWorldCentre, numVertsPerLine, meshScale,
-                    out EnvironmentSample environmentSample))
-                {
-                    continue;
-                }
+                float heightPercent = Mathf.InverseLerp(terrainMinHeight, terrainMaxHeight, worldY);
+                if (!environmentDefinitions.SupportsTerrestrialVegetation(heightPercent)) continue;
+                if (heightPercent + 0.0001f < settings.minHeightPercent) continue;
 
-                float localDensity = EnvironmentSampler.GetResourceDensity(
-                    environmentSample, environmentDefinitions, settings, resourceType);
-                float densityRoll = ValueNoise.Hash21(cellOrigin + new Vector2(saltBase, 61.7f));
-                if (localDensity <= 0f || densityRoll >= localDensity) continue;
-                // Placement only: the simulation's rock density still follows settings.maxSlope.
-                if ((typeSalt == 3 || typeSalt == 4) && environmentSample.slope > CliffSlope) continue;
-
-                float variantRoll = ValueNoise.Hash21(cellOrigin + new Vector2(saltBase, 88.3f));
-                int variant = typeSalt == 4
-                    ? ChooseBushVariant(environmentSample, variantRoll)
-                    : Mathf.Clamp(Mathf.FloorToInt(variantRoll * variantCount), 0, variantCount - 1);
-                float rotRoll = ValueNoise.Hash21(cellOrigin + new Vector2(saltBase, 5.5f));
-                float scaleRoll = ValueNoise.Hash21(cellOrigin + new Vector2(saltBase, 44.4f));
-
-                Quaternion spin = Quaternion.Euler(0, rotRoll * 360f, 0);
-                Quaternion slopeAlign = Quaternion.FromToRotation(Vector3.up, environmentSample.surfaceNormal);
+                Quaternion spin = Quaternion.Euler(0f, instance.yawDegrees, 0f);
+                Quaternion slopeAlign = Quaternion.FromToRotation(Vector3.up, normal);
                 Quaternion surfaceRotation = Quaternion.Slerp(Quaternion.identity, slopeAlign, settings.surfaceAlignment);
 
-                output.Add(new VegetationInstance
-                {
-                    variantIndex = variant,
-                    position = new Vector3(worldPos.x, environmentSample.height - settings.groundSink, worldPos.y),
-                    rotation = surfaceRotation * spin,
-                    yawDegrees = rotRoll * 360f,
-                    scale = Mathf.Lerp(settings.minScale, settings.maxScale, scaleRoll),
-                });
+                instance.position.y = worldY - settings.groundSink;
+                instance.rotation = surfaceRotation * spin;
+                output.Add(instance);
             }
         }
-    }
 
-    // Bilberry carpets the moist forest floor; raspberry takes drier, sunnier ground. Returns 0 or 1 for a bilberry
-    // bush and 2 for a raspberry bush.
-    static int ChooseBushVariant(EnvironmentSample sample, float roll)
-    {
-        float raspberry = Mathf.Lerp(0.75f, 0.1f, Mathf.InverseLerp(0.3f, 0.65f, sample.moisture));
-        if (roll < raspberry) return 2;
-        return roll < raspberry + (1f - raspberry) * 0.5f ? 0 : 1;
-    }
-
-    public static VegetationPlacementData ProjectPlacementsToLOD(
-        VegetationPlacementData source, HeightMap heightMap,
-        float terrainMinHeight, float terrainMaxHeight,
-        VegetationSettings vegSettings, EnvironmentDefinitions environmentDefinitions,
-        Vector2 chunkWorldCentre,
-        int numVertsPerLine, float meshScale, int levelOfDetail)
-    {
-        VegetationPlacementData projected = new VegetationPlacementData();
-        if (vegSettings == null || environmentDefinitions == null) return projected;
-
-        ProjectTypeToLOD(source.trees, projected.trees, vegSettings.trees, heightMap,
-            terrainMinHeight, terrainMaxHeight, environmentDefinitions,
-            chunkWorldCentre, numVertsPerLine, meshScale, levelOfDetail);
-        ProjectTypeToLOD(source.grass, projected.grass, vegSettings.grass, heightMap,
-            terrainMinHeight, terrainMaxHeight, environmentDefinitions,
-            chunkWorldCentre, numVertsPerLine, meshScale, levelOfDetail);
-        ProjectTypeToLOD(source.rocks, projected.rocks, vegSettings.rocks, heightMap,
-            terrainMinHeight, terrainMaxHeight, environmentDefinitions,
-            chunkWorldCentre, numVertsPerLine, meshScale, levelOfDetail);
-        ProjectTypeToLOD(source.bushes, projected.bushes, vegSettings.bushes, heightMap,
-            terrainMinHeight, terrainMaxHeight, environmentDefinitions,
-            chunkWorldCentre, numVertsPerLine, meshScale, levelOfDetail);
-
-        return projected;
-    }
-
-    static void ProjectTypeToLOD(
-        List<VegetationInstance> source, List<VegetationInstance> output,
-        VegetationTypeSettings settings, HeightMap heightMap,
-        float terrainMinHeight, float terrainMaxHeight, EnvironmentDefinitions environmentDefinitions,
-        Vector2 chunkWorldCentre, int numVertsPerLine, float meshScale, int levelOfDetail)
-    {
-        if (settings == null || levelOfDetail > settings.maxLevelOfDetail) return;
-
-        for (int i = 0; i < source.Count; i++)
+        static bool SampleTerrainLOD(Vector2 worldPos, HeightMap heightMap, Vector2 chunkWorldCentre,
+            int numVertsPerLine, float meshScale, int levelOfDetail,
+            out float worldY, out Vector3 normal)
         {
-            VegetationInstance instance = source[i];
-            Vector2 worldPos = new Vector2(instance.position.x, instance.position.z);
-            if (!SampleTerrainLOD(worldPos, heightMap, chunkWorldCentre, numVertsPerLine,
-                meshScale, levelOfDetail, out float worldY, out Vector3 normal))
+            float halfWorldSize = (numVertsPerLine - 3) * meshScale * 0.5f;
+            float fi = (worldPos.x - chunkWorldCentre.x + halfWorldSize) / meshScale + 1f;
+            float fj = (chunkWorldCentre.y + halfWorldSize - worldPos.y) / meshScale + 1f;
+            int lastMainIndex = numVertsPerLine - 3;
+
+            if (fi < 1f || fi > numVertsPerLine - 2f || fj < 1f || fj > numVertsPerLine - 2f)
             {
-                continue;
+                worldY = 0f;
+                normal = Vector3.up;
+                return false;
             }
 
-            float heightPercent = Mathf.InverseLerp(terrainMinHeight, terrainMaxHeight, worldY);
-            if (!environmentDefinitions.SupportsTerrestrialVegetation(heightPercent)) continue;
-            if (heightPercent + 0.0001f < settings.minHeightPercent) continue;
+            int skipIncrement = levelOfDetail == 0 ? 1 : levelOfDetail * 2;
+            bool edgeCell = fi < 2f || fi >= lastMainIndex || fj < 2f || fj >= lastMainIndex;
+            int x0;
+            int y0;
+            int increment;
 
-            Quaternion spin = Quaternion.Euler(0f, instance.yawDegrees, 0f);
-            Quaternion slopeAlign = Quaternion.FromToRotation(Vector3.up, normal);
-            Quaternion surfaceRotation = Quaternion.Slerp(Quaternion.identity, slopeAlign, settings.surfaceAlignment);
+            if (edgeCell)
+            {
+                x0 = Mathf.Clamp(Mathf.FloorToInt(fi), 1, lastMainIndex);
+                y0 = Mathf.Clamp(Mathf.FloorToInt(fj), 1, lastMainIndex);
+                increment = 1;
+            }
+            else
+            {
+                x0 = 2 + Mathf.FloorToInt((fi - 2f) / skipIncrement) * skipIncrement;
+                y0 = 2 + Mathf.FloorToInt((fj - 2f) / skipIncrement) * skipIncrement;
+                x0 = Mathf.Min(x0, lastMainIndex - skipIncrement);
+                y0 = Mathf.Min(y0, lastMainIndex - skipIncrement);
+                increment = skipIncrement;
+            }
 
-            instance.position.y = worldY - settings.groundSink;
-            instance.rotation = surfaceRotation * spin;
-            output.Add(instance);
+            int x1 = x0 + increment;
+            int y1 = y0 + increment;
+            float tx = Mathf.Clamp01((fi - x0) / increment);
+            float tz = Mathf.Clamp01((fj - y0) / increment);
+            float h00 = GetLODVertexHeight(heightMap.values, x0, y0, numVertsPerLine, skipIncrement);
+            float h10 = GetLODVertexHeight(heightMap.values, x1, y0, numVertsPerLine, skipIncrement);
+            float h01 = GetLODVertexHeight(heightMap.values, x0, y1, numVertsPerLine, skipIncrement);
+            float h11 = GetLODVertexHeight(heightMap.values, x1, y1, numVertsPerLine, skipIncrement);
+            float span = increment * meshScale;
+            Vector3 a = new Vector3(0f, h00, 0f);
+
+            if (tz >= tx)
+            {
+                worldY = (1f - tz) * h00 + tx * h11 + (tz - tx) * h01;
+                Vector3 d = new Vector3(span, h11, -span);
+                Vector3 c = new Vector3(0f, h01, -span);
+                normal = Vector3.Cross(d - a, c - a).normalized;
+            }
+            else
+            {
+                worldY = (1f - tx) * h00 + (tx - tz) * h10 + tz * h11;
+                Vector3 b = new Vector3(span, h10, 0f);
+                Vector3 d = new Vector3(span, h11, -span);
+                normal = Vector3.Cross(b - a, d - a).normalized;
+            }
+
+            return true;
+        }
+
+        static float GetLODVertexHeight(float[,] heights, int x, int y, int numVertsPerLine, int skipIncrement)
+        {
+            bool isMeshEdgeVertex = y == 1 || y == numVertsPerLine - 2 || x == 1 || x == numVertsPerLine - 2;
+            bool isMainVertex = (x - 2) % skipIncrement == 0 && (y - 2) % skipIncrement == 0 && !isMeshEdgeVertex;
+            bool isEdgeConnectionVertex = (y == 2 || y == numVertsPerLine - 3 || x == 2 || x == numVertsPerLine - 3)
+                && !isMeshEdgeVertex && !isMainVertex;
+
+            if (!isEdgeConnectionVertex) return heights[x, y];
+
+            bool isVertical = x == 2 || x == numVertsPerLine - 3;
+            int distanceFromA = ((isVertical ? y : x) - 2) % skipIncrement;
+            int distanceFromB = skipIncrement - distanceFromA;
+            float percent = distanceFromA / (float)skipIncrement;
+            float heightA = heights[isVertical ? x : x - distanceFromA, isVertical ? y - distanceFromA : y];
+            float heightB = heights[isVertical ? x : x + distanceFromB, isVertical ? y + distanceFromB : y];
+            return Mathf.Lerp(heightA, heightB, percent);
+        }
+
+        public static void BuildCombinedMeshes(VegetationPlacementData data, Vector3 chunkOrigin, bool farTrees,
+            out Mesh treesMesh, out Mesh grassMesh, out Mesh rocksMesh, out Mesh bushesMesh)
+        {
+            treesMesh = CombineType(data.trees,
+                farTrees ? VegetationTemplateCache.FarTrees : VegetationTemplateCache.Trees, chunkOrigin);
+            // The old chunk grass isn't drawn any more: GrassField draws the grass. Its placements stay for the simulation.
+            grassMesh = null;
+            rocksMesh = CombineType(data.rocks, VegetationTemplateCache.Rocks, chunkOrigin);
+            bushesMesh = CombineType(data.bushes, VegetationTemplateCache.Bushes, chunkOrigin);
+        }
+
+        static Mesh CombineType(List<VegetationInstance> instances, Mesh[] templates, Vector3 chunkOrigin)
+        {
+            if (instances.Count == 0 || templates == null) return null;
+
+            CombineInstance[] combines = new CombineInstance[instances.Count];
+            for (int i = 0; i < instances.Count; i++)
+            {
+                VegetationInstance inst = instances[i];
+                combines[i].mesh = templates[inst.variantIndex];
+                combines[i].transform = Matrix4x4.TRS(
+                    inst.position - chunkOrigin,
+                    inst.rotation,
+                    Vector3.one * inst.scale);
+            }
+
+            int totalVertexCount = 0;
+            for (int i = 0; i < combines.Length; i++)
+            {
+                totalVertexCount += combines[i].mesh.vertexCount;
+            }
+
+            Mesh combined = new Mesh();
+            combined.indexFormat = totalVertexCount > 65535
+                ? UnityEngine.Rendering.IndexFormat.UInt32
+                : UnityEngine.Rendering.IndexFormat.UInt16;
+            combined.CombineMeshes(combines, true, true);
+            combined.RecalculateBounds();
+            return combined;
         }
     }
 
-    static bool SampleTerrainLOD(Vector2 worldPos, HeightMap heightMap, Vector2 chunkWorldCentre,
-        int numVertsPerLine, float meshScale, int levelOfDetail,
-        out float worldY, out Vector3 normal)
+    public static class VegetationTemplateCache
     {
-        float halfWorldSize = (numVertsPerLine - 3) * meshScale * 0.5f;
-        float fi = (worldPos.x - chunkWorldCentre.x + halfWorldSize) / meshScale + 1f;
-        float fj = (chunkWorldCentre.y + halfWorldSize - worldPos.y) / meshScale + 1f;
-        int lastMainIndex = numVertsPerLine - 3;
+        static Mesh[] treeTemplates;
+        static Mesh[] farTreeTemplates;
+        static Mesh[] grassTemplates;
+        static Mesh[] rockTemplates;
+        static Mesh[] bushTemplates;
+        static VegetationSettings cachedFor;
 
-        if (fi < 1f || fi > numVertsPerLine - 2f || fj < 1f || fj > numVertsPerLine - 2f)
+        public static Mesh[] Trees => treeTemplates;
+        public static Mesh[] FarTrees => farTreeTemplates;
+        public static Mesh[] Grass => grassTemplates;
+        public static Mesh[] Rocks => rockTemplates;
+        public static Mesh[] Bushes => bushTemplates;
+
+        public static void EnsureBuilt(VegetationSettings settings)
         {
-            worldY = 0f;
-            normal = Vector3.up;
-            return false;
+            if (treeTemplates != null && cachedFor == settings) return;
+
+            System.Random rng = new System.Random(settings.seed);
+
+            treeTemplates = BuildTreeTemplates(settings, rng, out farTreeTemplates);
+
+            grassTemplates = new Mesh[3];
+            for (int i = 0; i < grassTemplates.Length; i++)
+            {
+                grassTemplates[i] = VegetationMeshBuilder.BuildGrassClump(settings.grassColourA, settings.grassColourB, rng);
+            }
+
+            rockTemplates = new Mesh[3];
+            for (int i = 0; i < rockTemplates.Length; i++)
+            {
+                rockTemplates[i] = VegetationMeshBuilder.BuildRock(settings.rockColourA, settings.rockColourB,
+                    settings.rockMossColour, rng);
+            }
+
+            bushTemplates = BuildBushTemplates(settings, rng);
+
+            cachedFor = settings;
         }
 
-        int skipIncrement = levelOfDetail == 0 ? 1 : levelOfDetail * 2;
-        bool edgeCell = fi < 2f || fi >= lastMainIndex || fj < 2f || fj >= lastMainIndex;
-        int x0;
-        int y0;
-        int increment;
-
-        if (edgeCell)
+        // The berry bushes VegetationGenerator's bush variants index: two bilberry bushes and a raspberry bush.
+        public static Mesh[] BuildBushTemplates(VegetationSettings settings, System.Random rng)
         {
-            x0 = Mathf.Clamp(Mathf.FloorToInt(fi), 1, lastMainIndex);
-            y0 = Mathf.Clamp(Mathf.FloorToInt(fj), 1, lastMainIndex);
-            increment = 1;
-        }
-        else
-        {
-            x0 = 2 + Mathf.FloorToInt((fi - 2f) / skipIncrement) * skipIncrement;
-            y0 = 2 + Mathf.FloorToInt((fj - 2f) / skipIncrement) * skipIncrement;
-            x0 = Mathf.Min(x0, lastMainIndex - skipIncrement);
-            y0 = Mathf.Min(y0, lastMainIndex - skipIncrement);
-            increment = skipIncrement;
+            return new[]
+            {
+                VegetationMeshBuilder.BuildBerryBush(settings.bushLeafColour, settings.bilberryColour, false, rng),
+                VegetationMeshBuilder.BuildBerryBush(settings.bushLeafColour, settings.bilberryColour, false, rng),
+                VegetationMeshBuilder.BuildBerryBush(settings.bushLeafColour, settings.raspberryColour, true, rng)
+            };
         }
 
-        int x1 = x0 + increment;
-        int y1 = y0 + increment;
-        float tx = Mathf.Clamp01((fi - x0) / increment);
-        float tz = Mathf.Clamp01((fj - y0) / increment);
-        float h00 = GetLODVertexHeight(heightMap.values, x0, y0, numVertsPerLine, skipIncrement);
-        float h10 = GetLODVertexHeight(heightMap.values, x1, y0, numVertsPerLine, skipIncrement);
-        float h01 = GetLODVertexHeight(heightMap.values, x0, y1, numVertsPerLine, skipIncrement);
-        float h11 = GetLODVertexHeight(heightMap.values, x1, y1, numVertsPerLine, skipIncrement);
-        float span = increment * meshScale;
-        Vector3 a = new Vector3(0f, h00, 0f);
-
-        if (tz >= tx)
+        // The tree meshes VegetationGenerator's tree variants index: three Norway spruces in two shades of green. far gets
+        // a simpler copy of each for distant chunks, just as tall, so trees don't jump when a chunk changes detail.
+        public static Mesh[] BuildTreeTemplates(VegetationSettings settings, System.Random rng, out Mesh[] far)
         {
-            worldY = (1f - tz) * h00 + tx * h11 + (tz - tx) * h01;
-            Vector3 d = new Vector3(span, h11, -span);
-            Vector3 c = new Vector3(0f, h01, -span);
-            normal = Vector3.Cross(d - a, c - a).normalized;
+            Color[] foliage =
+            {
+                settings.foliageColourA, settings.foliageColourB,
+                Color.Lerp(settings.foliageColourA, settings.foliageColourB, 0.5f)
+            };
+            System.Random farRng = new System.Random(settings.seed + 1);
+            Mesh[] near = new Mesh[foliage.Length];
+            far = new Mesh[foliage.Length];
+            for (int i = 0; i < foliage.Length; i++)
+            {
+                float height = VegetationMeshBuilder.SpruceHeight(rng);
+                near[i] = VegetationMeshBuilder.BuildTree(settings.trunkColour, foliage[i], rng, height);
+                far[i] = VegetationMeshBuilder.BuildTree(settings.trunkColour, foliage[i], farRng, height, true);
+            }
+
+            return near;
         }
-        else
-        {
-            worldY = (1f - tx) * h00 + (tx - tz) * h10 + tz * h11;
-            Vector3 b = new Vector3(span, h10, 0f);
-            Vector3 d = new Vector3(span, h11, -span);
-            normal = Vector3.Cross(b - a, d - a).normalized;
-        }
-
-        return true;
-    }
-
-    static float GetLODVertexHeight(float[,] heights, int x, int y, int numVertsPerLine, int skipIncrement)
-    {
-        bool isMeshEdgeVertex = y == 1 || y == numVertsPerLine - 2 || x == 1 || x == numVertsPerLine - 2;
-        bool isMainVertex = (x - 2) % skipIncrement == 0 && (y - 2) % skipIncrement == 0 && !isMeshEdgeVertex;
-        bool isEdgeConnectionVertex = (y == 2 || y == numVertsPerLine - 3 || x == 2 || x == numVertsPerLine - 3)
-            && !isMeshEdgeVertex && !isMainVertex;
-
-        if (!isEdgeConnectionVertex) return heights[x, y];
-
-        bool isVertical = x == 2 || x == numVertsPerLine - 3;
-        int distanceFromA = ((isVertical ? y : x) - 2) % skipIncrement;
-        int distanceFromB = skipIncrement - distanceFromA;
-        float percent = distanceFromA / (float)skipIncrement;
-        float heightA = heights[isVertical ? x : x - distanceFromA, isVertical ? y - distanceFromA : y];
-        float heightB = heights[isVertical ? x : x + distanceFromB, isVertical ? y + distanceFromB : y];
-        return Mathf.Lerp(heightA, heightB, percent);
-    }
-
-    public static void BuildCombinedMeshes(VegetationPlacementData data, Vector3 chunkOrigin, bool farTrees,
-        out Mesh treesMesh, out Mesh grassMesh, out Mesh rocksMesh, out Mesh bushesMesh)
-    {
-        treesMesh = CombineType(data.trees,
-            farTrees ? VegetationTemplateCache.FarTrees : VegetationTemplateCache.Trees, chunkOrigin);
-        // The old chunk grass isn't drawn any more: GrassField draws the grass. Its placements stay for the simulation.
-        grassMesh = null;
-        rocksMesh = CombineType(data.rocks, VegetationTemplateCache.Rocks, chunkOrigin);
-        bushesMesh = CombineType(data.bushes, VegetationTemplateCache.Bushes, chunkOrigin);
-    }
-
-    static Mesh CombineType(List<VegetationInstance> instances, Mesh[] templates, Vector3 chunkOrigin)
-    {
-        if (instances.Count == 0 || templates == null) return null;
-
-        CombineInstance[] combines = new CombineInstance[instances.Count];
-        for (int i = 0; i < instances.Count; i++)
-        {
-            VegetationInstance inst = instances[i];
-            combines[i].mesh = templates[inst.variantIndex];
-            combines[i].transform = Matrix4x4.TRS(
-                inst.position - chunkOrigin,
-                inst.rotation,
-                Vector3.one * inst.scale);
-        }
-
-        int totalVertexCount = 0;
-        for (int i = 0; i < combines.Length; i++)
-        {
-            totalVertexCount += combines[i].mesh.vertexCount;
-        }
-
-        Mesh combined = new Mesh();
-        combined.indexFormat = totalVertexCount > 65535
-            ? UnityEngine.Rendering.IndexFormat.UInt32
-            : UnityEngine.Rendering.IndexFormat.UInt16;
-        combined.CombineMeshes(combines, true, true);
-        combined.RecalculateBounds();
-        return combined;
-    }
-}
-
-public static class VegetationTemplateCache
-{
-    static Mesh[] treeTemplates;
-    static Mesh[] farTreeTemplates;
-    static Mesh[] grassTemplates;
-    static Mesh[] rockTemplates;
-    static Mesh[] bushTemplates;
-    static VegetationSettings cachedFor;
-
-    public static Mesh[] Trees => treeTemplates;
-    public static Mesh[] FarTrees => farTreeTemplates;
-    public static Mesh[] Grass => grassTemplates;
-    public static Mesh[] Rocks => rockTemplates;
-    public static Mesh[] Bushes => bushTemplates;
-
-    public static void EnsureBuilt(VegetationSettings settings)
-    {
-        if (treeTemplates != null && cachedFor == settings) return;
-
-        System.Random rng = new System.Random(settings.seed);
-
-        treeTemplates = BuildTreeTemplates(settings, rng, out farTreeTemplates);
-
-        grassTemplates = new Mesh[3];
-        for (int i = 0; i < grassTemplates.Length; i++)
-        {
-            grassTemplates[i] = VegetationMeshBuilder.BuildGrassClump(settings.grassColourA, settings.grassColourB, rng);
-        }
-
-        rockTemplates = new Mesh[3];
-        for (int i = 0; i < rockTemplates.Length; i++)
-        {
-            rockTemplates[i] = VegetationMeshBuilder.BuildRock(settings.rockColourA, settings.rockColourB,
-                settings.rockMossColour, rng);
-        }
-
-        bushTemplates = BuildBushTemplates(settings, rng);
-
-        cachedFor = settings;
-    }
-
-    // The berry bushes VegetationGenerator's bush variants index: two bilberry bushes and a raspberry bush.
-    public static Mesh[] BuildBushTemplates(VegetationSettings settings, System.Random rng)
-    {
-        return new[]
-        {
-            VegetationMeshBuilder.BuildBerryBush(settings.bushLeafColour, settings.bilberryColour, false, rng),
-            VegetationMeshBuilder.BuildBerryBush(settings.bushLeafColour, settings.bilberryColour, false, rng),
-            VegetationMeshBuilder.BuildBerryBush(settings.bushLeafColour, settings.raspberryColour, true, rng)
-        };
-    }
-
-    // The tree meshes VegetationGenerator's tree variants index: three Norway spruces in two shades of green. far gets
-    // a simpler copy of each for distant chunks, just as tall, so trees don't jump when a chunk changes detail.
-    public static Mesh[] BuildTreeTemplates(VegetationSettings settings, System.Random rng, out Mesh[] far)
-    {
-        Color[] foliage =
-        {
-            settings.foliageColourA, settings.foliageColourB,
-            Color.Lerp(settings.foliageColourA, settings.foliageColourB, 0.5f)
-        };
-        System.Random farRng = new System.Random(settings.seed + 1);
-        Mesh[] near = new Mesh[foliage.Length];
-        far = new Mesh[foliage.Length];
-        for (int i = 0; i < foliage.Length; i++)
-        {
-            float height = VegetationMeshBuilder.SpruceHeight(rng);
-            near[i] = VegetationMeshBuilder.BuildTree(settings.trunkColour, foliage[i], rng, height);
-            far[i] = VegetationMeshBuilder.BuildTree(settings.trunkColour, foliage[i], farRng, height, true);
-        }
-
-        return near;
     }
 }

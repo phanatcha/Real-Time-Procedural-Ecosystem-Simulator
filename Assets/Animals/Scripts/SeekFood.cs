@@ -1,2311 +1,2316 @@
 using System.Collections.Generic;
+using Boreal.TerrainGeneration;
+using Boreal.World;
 using UnityEngine;
 using UnityEngine.AI;
 using UnityEngine.Serialization;
 
-[DisallowMultipleComponent]
-[RequireComponent(typeof(NavMeshAgent), typeof(MeshRenderer))]
-public class SeekFood : MonoBehaviour, IEcosystemMaterializationLifecycle
+namespace Boreal.Animals
 {
-    private NavMeshAgent agent;
-    private AnimalDecisionPolicy decisionPolicy;
-    private AnimalTemperature thermalResponse;
-    private AnimalGenome genome;
-    private FoodItem currentFoodTarget;
-    private SeekFood currentPreyTarget;
-    private SeekFood currentFleeThreat;
-    private Vector3 currentFleeDirection;
-    // The partner this animal is heading for or courting.
-    private SeekFood currentMate;
-
-    [Header("Species Identity")]
-    public string speciesName = "A";
-    public Color speciesColor = Color.white;
-
-    [Header("Survival Stats")]
-    public float currentEnergy = 50f;
-    public float maxEnergy = 150f;
-
-    [Header("Health Stats")]
-    public float maxHealth = 100f;
-    public float currentHealth;
-
-    [Header("Metabolism & Starvation")]
-    [FormerlySerializedAs("energyDrainPerSecond")]
-    [Min(0f)] public float baseEnergyDrainPerSecond = 1f;
-    [Min(0f)] public float starvationDamagePerSecond = 5f;
-
-    [Header("Metabolic Trait Tradeoffs")]
-    [Min(0f)] public float speedMetabolicWeight = 0.4f;
-    [Min(0f)] public float strengthMetabolicWeight = 0.2f;
-    [FormerlySerializedAs("bodySizeMetabolicWeight")]
-    [Min(0f)] public float bodyMassMetabolicWeight = 0.3f;
-    [Min(0f)] public float visionMetabolicWeight = 0.2f;
-    [Min(0f)] public float energyCapacityMetabolicWeight = 0.2f;
-    [Min(0f)] public float staminaCapacityMetabolicWeight = 0.2f;
-    [Min(0f)] public float healthMetabolicWeight = 0.2f;
-    [Min(0f)] public float minimumMetabolicMultiplier = 0.25f;
-    [Min(0f)] public float maximumMetabolicMultiplier = 4f;
-
-    [Header("Founder Trait Reference (0 = Capture at Birth)")]
-    [SerializeField, Min(0f)] private float referenceMoveSpeed;
-    [SerializeField, Min(0f)] private float referenceStrength;
-    [FormerlySerializedAs("referenceBodySize")]
-    [SerializeField, Min(0f)] private float referenceBodyBulk;
-    [SerializeField, Min(0f)] private float referenceBodyHeight;
-    [SerializeField, Min(0f)] private float referenceVisionRadius;
-    [SerializeField, Min(0f)] private float referenceMaxEnergy;
-    [SerializeField, Min(0f)] private float referenceMaxStamina;
-    [SerializeField, Min(0f)] private float referenceMaxHealth;
-    [SerializeField] private Vector3 referenceLocalScale;
-    [SerializeField, Min(0f)] private float referenceAgentRadius;
-    [SerializeField, Min(0f)] private float referenceAgentHeight;
-    [SerializeField, Min(0f)] private float referenceAgentBaseOffset;
-    [SerializeField, Min(0f)] private float referenceAgentStoppingDistance;
-    [SerializeField, Tooltip("Calculated metabolic drain after applying all trait tradeoffs.")]
-    private float currentEnergyDrainPerSecond = 1f;
-
-    [Header("Dietary Genetics")]
-    [Tooltip("0 = herbivore specialist, 0.5 = omnivore, 1 = carnivore specialist.")]
-    [Range(0f, 1f)] public float dietAffinity = 0.5f;
-    [Tooltip("Minimum efficiency retained for the non-specialized food type.")]
-    [Range(0f, 1f)] public float minimumDietEfficiency = 0.2f;
-
-    [Header("Agent Traits")]
-    public float visionRadius = 100f;
-    public float moveSpeed = 24f;
-    [FormerlySerializedAs("attackDamage")]
-    [Tooltip("Damage dealt per successful attack and the main offensive combat-power trait.")]
-    [Min(0f)] public float strength = 25f;
-
-    [Header("Body Proportions")]
-    [FormerlySerializedAs("bodySize")]
-    [Tooltip("Heritable horizontal build. This scales the animal along the X and Z axes.")]
-    [Min(0.01f)] public float bodyBulk = 1f;
-    [FormerlySerializedAs("minimumBodySize")]
-    [Min(0.01f)] public float minimumBodyBulk = 0.6f;
-    [FormerlySerializedAs("maximumBodySize")]
-    [Min(0.01f)] public float maximumBodyBulk = 1.8f;
-    [Tooltip("Heritable vertical build. This scales the animal along the Y axis and determines feeding reach.")]
-    [Min(0.01f)] public float bodyHeight = 1f;
-    [Min(0.01f)] public float minimumBodyHeight = 0.6f;
-    [Min(0.01f)] public float maximumBodyHeight = 2.2f;
-    [Tooltip("How much vertical growth contributes to estimated body mass. Bulk always contributes fully.")]
-    [Range(0f, 1f)] public float heightMassContribution = 0.35f;
-    [Tooltip("Vertical feeding reach at body height 1.0, in world units.")]
-    [Min(0f)] public float baseFeedingReach = 15f;
-
-    [Header("Stamina")]
-    [Min(0.01f)] public float maxStamina = 100f;
-    [Min(0f)] public float currentStamina;
-    [Min(0f)] public float staminaRecoveryPerSecond = 8f;
-    [Min(0f)] public float attackStaminaCost = 10f;
-    [Min(0f)] public float fleeStaminaCostPerSecond = 15f;
-    [Min(1f)] public float fleeSpeedMultiplier = 1.35f;
-    [Range(0.1f, 1f)] public float exhaustedSpeedMultiplier = 0.65f;
-
-    [Header("Life Cycle")]
-    [Tooltip("Simulated seconds from birth before this animal can reproduce.")]
-    [InspectorName("Maturity Time (Simulated Seconds)")]
-    [Min(0f)] public float maturityTime = 30f;
-    [SerializeField, Min(0f), Tooltip("Current age in simulated seconds.")]
-    [InspectorName("Current Age (Simulated Seconds)")]
-    private float currentAge;
-    [Tooltip("Simulated seconds this animal can live before dying of old age.")]
-    [InspectorName("Maximum Lifespan (Simulated Seconds)")]
-    [Min(0.01f)] public float maxLifespan = 200f;
-
-    [Header("Behavior Settings")]
-    public float actionTimer = 5f;
-    public float wanderRadius = 50f;
-    [FormerlySerializedAs("foodSearchInterval")]
-    [Min(0.05f)] public float decisionInterval = 0.25f;
-    [Tooltip("Real-time CPU safeguard. Perception scans will not run more often than this even during fast-forward.")]
-    [Min(0f)] public float minimumDecisionIntervalRealSeconds = 0.05f;
-    [Tooltip("Allows food to be consumed by distance as well as trigger contact, preventing skipped meals during fast-forward.")]
-    [Min(0.1f)] public float foodInteractionRange = 15f;
-    [Tooltip("Longest real-time interval allowed between useful pursuit path refreshes.")]
-    [Min(0.02f)] public float preyPathRefreshIntervalRealSeconds = 0.1f;
-    [Tooltip("Desired maximum simulated seconds between pursuit path refreshes.")]
-    [Min(0.1f)] public float preyPathRefreshIntervalSimulatedSeconds = 2f;
-    [Tooltip("Hard CPU safeguard for pursuit path refreshes, even at extreme simulation speeds.")]
-    [Min(0.02f)] public float minimumPreyPathRefreshIntervalRealSeconds = 0.05f;
-    [Tooltip("A moving prey must shift at least this far before its existing path is refreshed.")]
-    [Min(0f)] public float preyPathTargetMovementThreshold = 5f;
-    [Tooltip("Abandon a voluntary hunt after this much simulated time without landing an attack.")]
-    [Min(0.1f)] public float maximumUnproductiveHuntDuration = 10f;
-    [Tooltip("Abandon a voluntary hunt when energy falls below this fraction of maximum energy.")]
-    [Range(0f, 1f)] public float minimumHuntEnergyFraction = 0.15f;
-    [Tooltip("How long an abandoned prey is ignored as a voluntary hunting target.")]
-    [Min(0.1f)] public float failedHuntCooldown = 8f;
-    [Tooltip("Give up on a plant or carcass after chasing it for this many simulated seconds without eating it.")]
-    [Min(0.1f)] public float maximumFoodChaseDuration = 20f;
-    [Tooltip("Simulated seconds that food the animal could not get to (across water, up a cliff) is ignored.")]
-    [Min(0.1f)] public float unreachableFoodMemory = 30f;
-
-    [Header("Predation")]
-    [Min(0f)] public float attackEnergyCost = 2f;
-    [Min(0.01f)] public float attackCooldown = 1f;
-    [Tooltip("Maximum overdue attacks that can be resolved in one rendered frame during fast-forward.")]
-    [Min(1)] public int maximumCatchUpAttacksPerFrame = 4;
-    [Min(0.1f)] public float attackRange = 15f;
-    [Tooltip("Fraction of attack range used as the NavMesh stopping distance. This prevents two combatants from trying to occupy the same point.")]
-    [Range(0.1f, 0.95f)] public float attackApproachRangeFraction = 0.8f;
-    [Min(0.1f)] public float fleeDistance = 80f;
-    [Min(0.1f)] public float fleeDuration = 3f;
-    [Tooltip("How long an attacker remains recognized as a threat after dealing damage.")]
-    [Min(0.1f)] public float threatMemoryDuration = 5f;
-    public bool allowCannibalism;
-    [Tooltip("Prevents predation between parents, children, and siblings, including mutated offspring assigned to a new species.")]
-    public bool avoidCloseKinPredation = true;
-    [Range(0f, 1f)] public float carcassEnergyTransferEfficiency = 0.75f;
-    [Tooltip("Meat in the body itself, as energy per unit of body mass, on top of whatever energy the animal had " +
-             "stored. Without it a starved animal would leave no carcass, which makes meat scarce and meat-eating " +
-             "hard to evolve.")]
-    [Min(0f)] public float carcassBodyEnergy = 50f;
-    [Min(1f)] public float carcassLifetime = 120f;
-    [Tooltip("Simulated seconds a carcass stays as spoiled meat once it goes off. Only animals with a scavenger " +
-             "gut can eat it.")]
-    [Min(0f)] public float carcassSpoiledLifetime = 60f;
-    [Min(0.1f)] public float carcassScale = 6f;
-
-    [Header("Reproduction")]
-    [Range(0f, 1f)] public float reproductionThreshold = 0.95f;
-    [Tooltip("Simulated seconds after giving birth before this animal can reproduce again. Without it, " +
-             "every meal can become a birth and populations explode.")]
-    [Min(0f)] public float reproductionCooldown = 60f;
-    [Range(0f, 100f)] public float mutationChance = 5f;
-    [Min(0f)] public float mutationMagnitude = 0.1f;
-
-    [Header("Mutation Load")]
-    [Tooltip("Percent chance per birth that the child gains a harmful mutation. A clone keeps all of its " +
-             "parent's; a child of two parents inherits each of each parent's with a 50% chance, so sexual " +
-             "lineages can shed them while cloning lineages only gain them (Muller's ratchet).")]
-    [Range(0f, 100f)] public float harmfulMutationChance = 10f;
-    [Tooltip("How much each harmful mutation adds to energy use: 0.02 adds 2% per mutation.")]
-    [Min(0f)] public float harmfulMutationEnergyCost = 0.02f;
-    [SerializeField, Tooltip("Harmful mutations this animal carries, for reference.")]
-    private int harmfulMutations;
-
-    [Header("Perks")]
-    [Tooltip("Percent chance per birth that each perk (thick fur, venom, camouflage, regeneration, scavenger gut) " +
-             "turns on or off. AnimalPerks describes what each does and costs.")]
-    [Range(0f, 100f)] public float perkFlipChance = 1f;
-    [SerializeField, Tooltip("This animal's perks, for reference.")]
-    private string perks;
-
-    [Header("Mating")]
-    [Tooltip("Inherited. Below 0.15 the animal only clones itself; above 0.85 it only mates; in between it looks " +
-             "for a mate for up to this many times Mate Search Seconds Per Drive, then clones if it finds nobody.")]
-    [Range(0f, 1f)] public float sexualDrive = 0.5f;
-    [Tooltip("Simulated seconds of looking for a mate per unit of sexual drive, before cloning instead.")]
-    [Min(0f)] public float mateSearchSecondsPerDrive = 20f;
-    [Tooltip("A partner must have at least this fraction of its maximum energy, and an animal looking for a mate " +
-             "gives up once it falls below it.")]
-    [Range(0f, 1f)] public float minimumMateEnergyFraction = 0.6f;
-    [Tooltip("Simulated seconds two animals court before a child can be born. Neither moves or reacts to " +
-             "threats meanwhile; an attack on either ends the courtship.")]
-    [Min(0f)] public float courtshipDuration = 2f;
-    [Tooltip("Fraction of its energy each parent gives a child of two parents. A clone gets half its one " +
-             "parent's energy.")]
-    [Range(0f, 1f)] public float matingEnergyShare = 0.25f;
-    [Tooltip("Fertility fades from this fraction of the species threshold (in genetic distance) to none at the " +
-             "threshold, so animals about to split into separate species rarely interbreed.")]
-    [Range(0f, 1f)] public float fertilityFadeStart = 0.5f;
-
-    [Header("Body Plan")]
-    [Tooltip("How body parts sprout, grow, shrink and turn into other parts at birth.")]
-    public BodyPlanMutation bodyPlanMutation = BodyPlanMutation.Default;
-    [Tooltip("How far a full-size leg pair lifts the body off the ground at body height 1, in world units. " +
-             "Standing taller also raises the animal's feeding reach.")]
-    [Min(0f)] public float fullLegLength = 1.6f;
-    [SerializeField, Tooltip("This animal's body parts and their sizes (0-1), for reference.")]
-    private string bodyPlan;
-
-    [Header("Water")]
-    [Tooltip("How fast the animal moves and how much energy it uses in water. Its swimming ability comes from " +
-             "its body: mostly fins, a little from long legs.")]
-    public WaterMovement waterMovement = WaterMovement.Default;
-    [SerializeField, Tooltip("This animal's swimming ability (0-1), for reference.")]
-    private float swimmingAbility;
-
-    public AnimalTemperature ThermalResponse => thermalResponse;
-    public AnimalGenome Genome => genome;
-    public float CurrentEnergyDrainPerSecond => currentEnergyDrainPerSecond *
-        (thermalResponse != null ? thermalResponse.EnergyDrainMultiplier : 1f) *
-        (inWater ? waterMovement.EnergyMultiplier(bodyEffects.swimmingAbility) : 1f) *
-        (inDeadZone ? SeaBiomeMap.CurrentRules.deadZoneEnergyCost : 1f);
-    public float SwimmingAbility => bodyEffects.swimmingAbility;
-    public bool CanSwimDeepWater => waterMovement.CanSwimDeepWater(bodyEffects.swimmingAbility);
-    public bool IsInWater => inWater;
-    public bool IsInDeadZone => inDeadZone;
-    public float CurrentAge => currentAge;
-    public int Generation => generation;
-    public int HarmfulMutations => harmfulMutations;
-    public bool HasPerk(AnimalPerk perk) => genome != null && genome.IsValid && genome.HasPerk(perk);
-    public bool CanEatSpoiledFood => perkEffects.canEatSpoiledFood;
-    // How far other animals can spot this one, as a fraction of their vision: camouflage hides it, except while
-    // it flees.
-    public float Visibility => currentState == State.Fleeing ? 1f : perkEffects.visibility;
-    public float RemainingLifespan => Mathf.Max(0f, maxLifespan - currentAge);
-    public float AgeFraction => maxLifespan <= Mathf.Epsilon
-        ? 1f
-        : Mathf.Clamp01(currentAge / maxLifespan);
-    public float HealthFraction => currentHealth / Mathf.Max(0.01f, maxHealth);
-    public float StaminaFraction => currentStamina / Mathf.Max(0.01f, maxStamina);
-    // A neck adds reach on top of the body's own; legs add it by lifting the whole animal.
-    public float FeedingReach => Mathf.Max(0f, baseFeedingReach) * Mathf.Max(0.01f, bodyHeight) +
-                                 bodyEffects.extraFeedingReach;
-    public float CurrentFoodInteractionRange => foodInteractionRange * Mathf.Max(0.01f, bodyBulk);
-    public float CurrentAttackRange => attackRange * Mathf.Max(0.01f, bodyBulk);
-    // Includes the weight of body parts, which also feeds the carcass and the metabolism.
-    public float BodyMassFactor
+    [DisallowMultipleComponent]
+    [RequireComponent(typeof(NavMeshAgent), typeof(MeshRenderer))]
+    public class SeekFood : MonoBehaviour, IEcosystemMaterializationLifecycle
     {
-        get
+        private NavMeshAgent agent;
+        private AnimalDecisionPolicy decisionPolicy;
+        private AnimalTemperature thermalResponse;
+        private AnimalGenome genome;
+        private FoodItem currentFoodTarget;
+        private SeekFood currentPreyTarget;
+        private SeekFood currentFleeThreat;
+        private Vector3 currentFleeDirection;
+        // The partner this animal is heading for or courting.
+        private SeekFood currentMate;
+
+        [Header("Species Identity")]
+        public string speciesName = "A";
+        public Color speciesColor = Color.white;
+
+        [Header("Survival Stats")]
+        public float currentEnergy = 50f;
+        public float maxEnergy = 150f;
+
+        [Header("Health Stats")]
+        public float maxHealth = 100f;
+        public float currentHealth;
+
+        [Header("Metabolism & Starvation")]
+        [FormerlySerializedAs("energyDrainPerSecond")]
+        [Min(0f)] public float baseEnergyDrainPerSecond = 1f;
+        [Min(0f)] public float starvationDamagePerSecond = 5f;
+
+        [Header("Metabolic Trait Tradeoffs")]
+        [Min(0f)] public float speedMetabolicWeight = 0.4f;
+        [Min(0f)] public float strengthMetabolicWeight = 0.2f;
+        [FormerlySerializedAs("bodySizeMetabolicWeight")]
+        [Min(0f)] public float bodyMassMetabolicWeight = 0.3f;
+        [Min(0f)] public float visionMetabolicWeight = 0.2f;
+        [Min(0f)] public float energyCapacityMetabolicWeight = 0.2f;
+        [Min(0f)] public float staminaCapacityMetabolicWeight = 0.2f;
+        [Min(0f)] public float healthMetabolicWeight = 0.2f;
+        [Min(0f)] public float minimumMetabolicMultiplier = 0.25f;
+        [Min(0f)] public float maximumMetabolicMultiplier = 4f;
+
+        [Header("Founder Trait Reference (0 = Capture at Birth)")]
+        [SerializeField, Min(0f)] private float referenceMoveSpeed;
+        [SerializeField, Min(0f)] private float referenceStrength;
+        [FormerlySerializedAs("referenceBodySize")]
+        [SerializeField, Min(0f)] private float referenceBodyBulk;
+        [SerializeField, Min(0f)] private float referenceBodyHeight;
+        [SerializeField, Min(0f)] private float referenceVisionRadius;
+        [SerializeField, Min(0f)] private float referenceMaxEnergy;
+        [SerializeField, Min(0f)] private float referenceMaxStamina;
+        [SerializeField, Min(0f)] private float referenceMaxHealth;
+        [SerializeField] private Vector3 referenceLocalScale;
+        [SerializeField, Min(0f)] private float referenceAgentRadius;
+        [SerializeField, Min(0f)] private float referenceAgentHeight;
+        [SerializeField, Min(0f)] private float referenceAgentBaseOffset;
+        [SerializeField, Min(0f)] private float referenceAgentStoppingDistance;
+        [SerializeField, Tooltip("Calculated metabolic drain after applying all trait tradeoffs.")]
+        private float currentEnergyDrainPerSecond = 1f;
+
+        [Header("Dietary Genetics")]
+        [Tooltip("0 = herbivore specialist, 0.5 = omnivore, 1 = carnivore specialist.")]
+        [Range(0f, 1f)] public float dietAffinity = 0.5f;
+        [Tooltip("Minimum efficiency retained for the non-specialized food type.")]
+        [Range(0f, 1f)] public float minimumDietEfficiency = 0.2f;
+
+        [Header("Agent Traits")]
+        public float visionRadius = 100f;
+        public float moveSpeed = 24f;
+        [FormerlySerializedAs("attackDamage")]
+        [Tooltip("Damage dealt per successful attack and the main offensive combat-power trait.")]
+        [Min(0f)] public float strength = 25f;
+
+        [Header("Body Proportions")]
+        [FormerlySerializedAs("bodySize")]
+        [Tooltip("Heritable horizontal build. This scales the animal along the X and Z axes.")]
+        [Min(0.01f)] public float bodyBulk = 1f;
+        [FormerlySerializedAs("minimumBodySize")]
+        [Min(0.01f)] public float minimumBodyBulk = 0.6f;
+        [FormerlySerializedAs("maximumBodySize")]
+        [Min(0.01f)] public float maximumBodyBulk = 1.8f;
+        [Tooltip("Heritable vertical build. This scales the animal along the Y axis and determines feeding reach.")]
+        [Min(0.01f)] public float bodyHeight = 1f;
+        [Min(0.01f)] public float minimumBodyHeight = 0.6f;
+        [Min(0.01f)] public float maximumBodyHeight = 2.2f;
+        [Tooltip("How much vertical growth contributes to estimated body mass. Bulk always contributes fully.")]
+        [Range(0f, 1f)] public float heightMassContribution = 0.35f;
+        [Tooltip("Vertical feeding reach at body height 1.0, in world units.")]
+        [Min(0f)] public float baseFeedingReach = 15f;
+
+        [Header("Stamina")]
+        [Min(0.01f)] public float maxStamina = 100f;
+        [Min(0f)] public float currentStamina;
+        [Min(0f)] public float staminaRecoveryPerSecond = 8f;
+        [Min(0f)] public float attackStaminaCost = 10f;
+        [Min(0f)] public float fleeStaminaCostPerSecond = 15f;
+        [Min(1f)] public float fleeSpeedMultiplier = 1.35f;
+        [Range(0.1f, 1f)] public float exhaustedSpeedMultiplier = 0.65f;
+
+        [Header("Life Cycle")]
+        [Tooltip("Simulated seconds from birth before this animal can reproduce.")]
+        [InspectorName("Maturity Time (Simulated Seconds)")]
+        [Min(0f)] public float maturityTime = 30f;
+        [SerializeField, Min(0f), Tooltip("Current age in simulated seconds.")]
+        [InspectorName("Current Age (Simulated Seconds)")]
+        private float currentAge;
+        [Tooltip("Simulated seconds this animal can live before dying of old age.")]
+        [InspectorName("Maximum Lifespan (Simulated Seconds)")]
+        [Min(0.01f)] public float maxLifespan = 200f;
+
+        [Header("Behavior Settings")]
+        public float actionTimer = 5f;
+        public float wanderRadius = 50f;
+        [FormerlySerializedAs("foodSearchInterval")]
+        [Min(0.05f)] public float decisionInterval = 0.25f;
+        [Tooltip("Real-time CPU safeguard. Perception scans will not run more often than this even during fast-forward.")]
+        [Min(0f)] public float minimumDecisionIntervalRealSeconds = 0.05f;
+        [Tooltip("Allows food to be consumed by distance as well as trigger contact, preventing skipped meals during fast-forward.")]
+        [Min(0.1f)] public float foodInteractionRange = 15f;
+        [Tooltip("Longest real-time interval allowed between useful pursuit path refreshes.")]
+        [Min(0.02f)] public float preyPathRefreshIntervalRealSeconds = 0.1f;
+        [Tooltip("Desired maximum simulated seconds between pursuit path refreshes.")]
+        [Min(0.1f)] public float preyPathRefreshIntervalSimulatedSeconds = 2f;
+        [Tooltip("Hard CPU safeguard for pursuit path refreshes, even at extreme simulation speeds.")]
+        [Min(0.02f)] public float minimumPreyPathRefreshIntervalRealSeconds = 0.05f;
+        [Tooltip("A moving prey must shift at least this far before its existing path is refreshed.")]
+        [Min(0f)] public float preyPathTargetMovementThreshold = 5f;
+        [Tooltip("Abandon a voluntary hunt after this much simulated time without landing an attack.")]
+        [Min(0.1f)] public float maximumUnproductiveHuntDuration = 10f;
+        [Tooltip("Abandon a voluntary hunt when energy falls below this fraction of maximum energy.")]
+        [Range(0f, 1f)] public float minimumHuntEnergyFraction = 0.15f;
+        [Tooltip("How long an abandoned prey is ignored as a voluntary hunting target.")]
+        [Min(0.1f)] public float failedHuntCooldown = 8f;
+        [Tooltip("Give up on a plant or carcass after chasing it for this many simulated seconds without eating it.")]
+        [Min(0.1f)] public float maximumFoodChaseDuration = 20f;
+        [Tooltip("Simulated seconds that food the animal could not get to (across water, up a cliff) is ignored.")]
+        [Min(0.1f)] public float unreachableFoodMemory = 30f;
+
+        [Header("Predation")]
+        [Min(0f)] public float attackEnergyCost = 2f;
+        [Min(0.01f)] public float attackCooldown = 1f;
+        [Tooltip("Maximum overdue attacks that can be resolved in one rendered frame during fast-forward.")]
+        [Min(1)] public int maximumCatchUpAttacksPerFrame = 4;
+        [Min(0.1f)] public float attackRange = 15f;
+        [Tooltip("Fraction of attack range used as the NavMesh stopping distance. This prevents two combatants from trying to occupy the same point.")]
+        [Range(0.1f, 0.95f)] public float attackApproachRangeFraction = 0.8f;
+        [Min(0.1f)] public float fleeDistance = 80f;
+        [Min(0.1f)] public float fleeDuration = 3f;
+        [Tooltip("How long an attacker remains recognized as a threat after dealing damage.")]
+        [Min(0.1f)] public float threatMemoryDuration = 5f;
+        public bool allowCannibalism;
+        [Tooltip("Prevents predation between parents, children, and siblings, including mutated offspring assigned to a new species.")]
+        public bool avoidCloseKinPredation = true;
+        [Range(0f, 1f)] public float carcassEnergyTransferEfficiency = 0.75f;
+        [Tooltip("Meat in the body itself, as energy per unit of body mass, on top of whatever energy the animal had " +
+                 "stored. Without it a starved animal would leave no carcass, which makes meat scarce and meat-eating " +
+                 "hard to evolve.")]
+        [Min(0f)] public float carcassBodyEnergy = 50f;
+        [Min(1f)] public float carcassLifetime = 120f;
+        [Tooltip("Simulated seconds a carcass stays as spoiled meat once it goes off. Only animals with a scavenger " +
+                 "gut can eat it.")]
+        [Min(0f)] public float carcassSpoiledLifetime = 60f;
+        [Min(0.1f)] public float carcassScale = 6f;
+
+        [Header("Reproduction")]
+        [Range(0f, 1f)] public float reproductionThreshold = 0.95f;
+        [Tooltip("Simulated seconds after giving birth before this animal can reproduce again. Without it, " +
+                 "every meal can become a birth and populations explode.")]
+        [Min(0f)] public float reproductionCooldown = 60f;
+        [Range(0f, 100f)] public float mutationChance = 5f;
+        [Min(0f)] public float mutationMagnitude = 0.1f;
+
+        [Header("Mutation Load")]
+        [Tooltip("Percent chance per birth that the child gains a harmful mutation. A clone keeps all of its " +
+                 "parent's; a child of two parents inherits each of each parent's with a 50% chance, so sexual " +
+                 "lineages can shed them while cloning lineages only gain them (Muller's ratchet).")]
+        [Range(0f, 100f)] public float harmfulMutationChance = 10f;
+        [Tooltip("How much each harmful mutation adds to energy use: 0.02 adds 2% per mutation.")]
+        [Min(0f)] public float harmfulMutationEnergyCost = 0.02f;
+        [SerializeField, Tooltip("Harmful mutations this animal carries, for reference.")]
+        private int harmfulMutations;
+
+        [Header("Perks")]
+        [Tooltip("Percent chance per birth that each perk (thick fur, venom, camouflage, regeneration, scavenger gut) " +
+                 "turns on or off. AnimalPerks describes what each does and costs.")]
+        [Range(0f, 100f)] public float perkFlipChance = 1f;
+        [SerializeField, Tooltip("This animal's perks, for reference.")]
+        private string perks;
+
+        [Header("Mating")]
+        [Tooltip("Inherited. Below 0.15 the animal only clones itself; above 0.85 it only mates; in between it looks " +
+                 "for a mate for up to this many times Mate Search Seconds Per Drive, then clones if it finds nobody.")]
+        [Range(0f, 1f)] public float sexualDrive = 0.5f;
+        [Tooltip("Simulated seconds of looking for a mate per unit of sexual drive, before cloning instead.")]
+        [Min(0f)] public float mateSearchSecondsPerDrive = 20f;
+        [Tooltip("A partner must have at least this fraction of its maximum energy, and an animal looking for a mate " +
+                 "gives up once it falls below it.")]
+        [Range(0f, 1f)] public float minimumMateEnergyFraction = 0.6f;
+        [Tooltip("Simulated seconds two animals court before a child can be born. Neither moves or reacts to " +
+                 "threats meanwhile; an attack on either ends the courtship.")]
+        [Min(0f)] public float courtshipDuration = 2f;
+        [Tooltip("Fraction of its energy each parent gives a child of two parents. A clone gets half its one " +
+                 "parent's energy.")]
+        [Range(0f, 1f)] public float matingEnergyShare = 0.25f;
+        [Tooltip("Fertility fades from this fraction of the species threshold (in genetic distance) to none at the " +
+                 "threshold, so animals about to split into separate species rarely interbreed.")]
+        [Range(0f, 1f)] public float fertilityFadeStart = 0.5f;
+
+        [Header("Body Plan")]
+        [Tooltip("How body parts sprout, grow, shrink and turn into other parts at birth.")]
+        public BodyPlanMutation bodyPlanMutation = BodyPlanMutation.Default;
+        [Tooltip("How far a full-size leg pair lifts the body off the ground at body height 1, in world units. " +
+                 "Standing taller also raises the animal's feeding reach.")]
+        [Min(0f)] public float fullLegLength = 1.6f;
+        [SerializeField, Tooltip("This animal's body parts and their sizes (0-1), for reference.")]
+        private string bodyPlan;
+
+        [Header("Water")]
+        [Tooltip("How fast the animal moves and how much energy it uses in water. Its swimming ability comes from " +
+                 "its body: mostly fins, a little from long legs.")]
+        public WaterMovement waterMovement = WaterMovement.Default;
+        [SerializeField, Tooltip("This animal's swimming ability (0-1), for reference.")]
+        private float swimmingAbility;
+
+        public AnimalTemperature ThermalResponse => thermalResponse;
+        public AnimalGenome Genome => genome;
+        public float CurrentEnergyDrainPerSecond => currentEnergyDrainPerSecond *
+            (thermalResponse != null ? thermalResponse.EnergyDrainMultiplier : 1f) *
+            (inWater ? waterMovement.EnergyMultiplier(bodyEffects.swimmingAbility) : 1f) *
+            (inDeadZone ? SeaBiomeMap.CurrentRules.deadZoneEnergyCost : 1f);
+        public float SwimmingAbility => bodyEffects.swimmingAbility;
+        public bool CanSwimDeepWater => waterMovement.CanSwimDeepWater(bodyEffects.swimmingAbility);
+        public bool IsInWater => inWater;
+        public bool IsInDeadZone => inDeadZone;
+        public float CurrentAge => currentAge;
+        public int Generation => generation;
+        public int HarmfulMutations => harmfulMutations;
+        public bool HasPerk(AnimalPerk perk) => genome != null && genome.IsValid && genome.HasPerk(perk);
+        public bool CanEatSpoiledFood => perkEffects.canEatSpoiledFood;
+        // How far other animals can spot this one, as a fraction of their vision: camouflage hides it, except while
+        // it flees.
+        public float Visibility => currentState == State.Fleeing ? 1f : perkEffects.visibility;
+        public float RemainingLifespan => Mathf.Max(0f, maxLifespan - currentAge);
+        public float AgeFraction => maxLifespan <= Mathf.Epsilon
+            ? 1f
+            : Mathf.Clamp01(currentAge / maxLifespan);
+        public float HealthFraction => currentHealth / Mathf.Max(0.01f, maxHealth);
+        public float StaminaFraction => currentStamina / Mathf.Max(0.01f, maxStamina);
+        // A neck adds reach on top of the body's own; legs add it by lifting the whole animal.
+        public float FeedingReach => Mathf.Max(0f, baseFeedingReach) * Mathf.Max(0.01f, bodyHeight) +
+                                     bodyEffects.extraFeedingReach;
+        public float CurrentFoodInteractionRange => foodInteractionRange * Mathf.Max(0.01f, bodyBulk);
+        public float CurrentAttackRange => attackRange * Mathf.Max(0.01f, bodyBulk);
+        // Includes the weight of body parts, which also feeds the carcass and the metabolism.
+        public float BodyMassFactor
         {
-            float bulk = Mathf.Max(0.01f, bodyBulk);
-            float heightFactor = Mathf.Lerp(1f, Mathf.Max(0.01f, bodyHeight),
-                                            Mathf.Clamp01(heightMassContribution));
-            return bulk * bulk * heightFactor * (1f + bodyEffects.partsMass);
+            get
+            {
+                float bulk = Mathf.Max(0.01f, bodyBulk);
+                float heightFactor = Mathf.Lerp(1f, Mathf.Max(0.01f, bodyHeight),
+                                                Mathf.Clamp01(heightMassContribution));
+                return bulk * bulk * heightFactor * (1f + bodyEffects.partsMass);
+            }
         }
-    }
-    public float BodyPartsMass => bodyEffects.partsMass;
-    // How far the longest legs lift the body off the ground, in world units.
-    public float LegLift => Mathf.Max(0f, fullLegLength) * bodyEffects.longestLegs * Mathf.Max(0.01f, bodyHeight);
-    // A carcass holds the body's own meat plus the energy the animal had stored, scaled by its mass. Hunters
-    // weigh prey by the same amount, so even a starving animal is worth its meat.
-    public float EstimatedCarcassRawEnergy => (Mathf.Max(0f, carcassBodyEnergy) + Mathf.Max(0f, currentEnergy)) *
-                                               carcassEnergyTransferEfficiency *
-                                               BodyMassFactor;
-    public bool IsAlive => !isDying && currentHealth > 0f && isActiveAndEnabled;
-    public bool IsMature => currentAge >= Mathf.Max(0f, maturityTime);
-    public float MaturityProgress => maturityTime <= Mathf.Epsilon
-        ? 1f
-        : Mathf.Clamp01(currentAge / maturityTime);
-    public string DietClassification => ClassifyDiet(dietAffinity);
-    // Whether this animal would court a partner now: mature, fed enough, able to mate, rested since its last
-    // birth, and not fleeing, fighting or already courting.
-    public bool IsAvailableAsMate => IsAlive && IsMature && MatingRules.CanMate(sexualDrive) &&
-                                     reproductionCooldownTimer <= 0f &&
-                                     currentEnergy >= maxEnergy * minimumMateEnergyFraction &&
-                                     currentState != State.Fleeing && currentState != State.Fighting &&
-                                     currentState != State.Escaping && currentState != State.Courting;
+        public float BodyPartsMass => bodyEffects.partsMass;
+        // How far the longest legs lift the body off the ground, in world units.
+        public float LegLift => Mathf.Max(0f, fullLegLength) * bodyEffects.longestLegs * Mathf.Max(0.01f, bodyHeight);
+        // A carcass holds the body's own meat plus the energy the animal had stored, scaled by its mass. Hunters
+        // weigh prey by the same amount, so even a starving animal is worth its meat.
+        public float EstimatedCarcassRawEnergy => (Mathf.Max(0f, carcassBodyEnergy) + Mathf.Max(0f, currentEnergy)) *
+                                                   carcassEnergyTransferEfficiency *
+                                                   BodyMassFactor;
+        public bool IsAlive => !isDying && currentHealth > 0f && isActiveAndEnabled;
+        public bool IsMature => currentAge >= Mathf.Max(0f, maturityTime);
+        public float MaturityProgress => maturityTime <= Mathf.Epsilon
+            ? 1f
+            : Mathf.Clamp01(currentAge / maturityTime);
+        public string DietClassification => ClassifyDiet(dietAffinity);
+        // Whether this animal would court a partner now: mature, fed enough, able to mate, rested since its last
+        // birth, and not fleeing, fighting or already courting.
+        public bool IsAvailableAsMate => IsAlive && IsMature && MatingRules.CanMate(sexualDrive) &&
+                                         reproductionCooldownTimer <= 0f &&
+                                         currentEnergy >= maxEnergy * minimumMateEnergyFraction &&
+                                         currentState != State.Fleeing && currentState != State.Fighting &&
+                                         currentState != State.Escaping && currentState != State.Courting;
 
-    public static string ClassifyDiet(float affinity)
-    {
-        return affinity < 1f / 3f ? "Herbivore" :
-               affinity > 2f / 3f ? "Carnivore" : "Omnivore";
-    }
-
-    // Simulated seconds for the body to settle into the water or rise out of it.
-    private const float FloatTransitionSeconds = 0.5f;
-    // How near a dead zone's NavMesh a swimmer must be to count as in it, in world units.
-    private const float DeadZoneProbeRadius = 1f;
-    // A child that can't swim, born to a parent out in deep water, is placed on the nearest ground or shallow
-    // water within this distance. With none that close, the birth waits this many simulated seconds.
-    private const float NonSwimmerBirthSearchRadius = 60f;
-    private const float PostponedBirthDelay = 5f;
-    // Simulated seconds a partner the animal couldn't reach, or courted without a child, is passed over.
-    private const float AvoidedMateMemory = 30f;
-    // SpeciesManager's default, for fertility when there is no SpeciesManager.
-    private const float DefaultSpeciationThreshold = 0.03f;
-
-    private static readonly int BaseColorId = Shader.PropertyToID("_BaseColor");
-    private static readonly int ColorId = Shader.PropertyToID("_Color");
-
-    private float timer;
-    private float decisionTimer;
-    private float decisionRealTimeCooldown;
-    private float preyPathRefreshTimer;
-    private float attackCooldownTimer;
-    private float reproductionCooldownTimer;
-    [SerializeField, Tooltip("Founders are generation 0; each child is one more than its parent.")]
-    private int generation;
-    private SeekFood lastPreyPathTarget;
-    private Vector3 lastPreyPathDestination;
-    private bool hasPreyPathDestination;
-    private SeekFood temporarilyAvoidedPrey;
-    private float failedHuntCooldownTimer;
-    private float unproductiveHuntTimer;
-    private float foodChaseTimer;
-    private BodyPlanEffects bodyEffects = BodyPlanEffects.None;
-    private PerkEffects perkEffects = PerkEffects.None;
-    private AnimalBodyView bodyView;
-    // Speed from the genes alone, before body parts adjust it. Speed in water is based on it, since legs and
-    // fins work differently there.
-    private float geneMoveSpeed;
-    private bool inWater;
-    private bool inDeadZone;
-    // The agent's offset standing on land and floating with the body half under water, and how far between
-    // the two the body is (0 = standing, 1 = floating).
-    private float standingBaseOffset;
-    private float floatingBaseOffset;
-    private float floatAmount;
-    private bool registeredWithSpeciesManager;
-    private bool isDying;
-    private AgentDeathCause deathCause = AgentDeathCause.Other;
-    private SeekFood firstParent;
-    private SeekFood secondParent;
-    // Set when this animal comes from an off-screen population instead of being born.
-    private bool fromOffscreenPopulation;
-    // Ready to breed, the animal looks for a mate until it finds one, gives up or clones itself instead. The
-    // animal that reaches its partner leads the courtship and decides whether a child is born.
-    private bool seekingMate;
-    private float mateSearchTimer;
-    private float mateChaseTimer;
-    private float courtshipTimer;
-    private bool leadsCourtship;
-    private readonly List<ThreatMemory> rememberedThreats = new List<ThreatMemory>();
-    // Food this animal recently failed to get to, ignored until the simulated time stored with it.
-    private readonly List<UnreachableFood> unreachableFood = new List<UnreachableFood>();
-    // Partners passed over until the simulated time stored with them.
-    private readonly List<AvoidedMate> avoidedMates = new List<AvoidedMate>();
-    // Shared scratch list for perception; animals only update on the main thread.
-    private static readonly List<FoodItem> nearbyFood = new List<FoodItem>();
-    private static readonly List<SeekFood> nearbyAnimals = new List<SeekFood>();
-
-    private sealed class ThreatMemory
-    {
-        public SeekFood attacker;
-        public float timeRemaining;
-    }
-
-    private struct UnreachableFood
-    {
-        public FoodItem food;
-        public float retryTime;
-    }
-
-    private struct AvoidedMate
-    {
-        public SeekFood mate;
-        public float retryTime;
-    }
-
-    private enum State { Idling, Wandering, Chasing, Hunting, Fighting, Fleeing, Escaping, SeekingMate, Courting }
-    private State currentState = State.Wandering;
-
-    void Start()
-    {
-        agent = GetComponent<NavMeshAgent>();
-        thermalResponse = GetComponent<AnimalTemperature>();
-        if (thermalResponse == null) thermalResponse = gameObject.AddComponent<AnimalTemperature>();
-        InitializeGenome();
-        minimumBodyBulk = Mathf.Max(0.01f, minimumBodyBulk);
-        maximumBodyBulk = Mathf.Max(minimumBodyBulk, maximumBodyBulk);
-        bodyBulk = Mathf.Clamp(bodyBulk, minimumBodyBulk, maximumBodyBulk);
-        minimumBodyHeight = Mathf.Max(0.01f, minimumBodyHeight);
-        maximumBodyHeight = Mathf.Max(minimumBodyHeight, maximumBodyHeight);
-        bodyHeight = Mathf.Clamp(bodyHeight, minimumBodyHeight, maximumBodyHeight);
-        InitializeBodyProportionReferences();
-        ApplyBodyProportions();
-        ConfigureWaterAccess();
-        agent.speed = moveSpeed;
-
-        decisionPolicy = GetComponent<AnimalDecisionPolicy>();
-        if (decisionPolicy == null)
+        public static string ClassifyDiet(float affinity)
         {
-            decisionPolicy = gameObject.AddComponent<UtilityDecisionPolicy>();
+            return affinity < 1f / 3f ? "Herbivore" :
+                   affinity > 2f / 3f ? "Carnivore" : "Omnivore";
         }
 
-        timer = actionTimer;
-        decisionTimer = Random.Range(0f, Mathf.Max(0.05f, decisionInterval));
-        decisionRealTimeCooldown = Random.Range(0f, Mathf.Max(0f, minimumDecisionIntervalRealSeconds));
-        currentEnergy = Mathf.Clamp(currentEnergy, 0f, maxEnergy);
-        currentHealth = maxHealth;
-        strength = Mathf.Max(0f, strength);
-        maxStamina = Mathf.Max(0.01f, maxStamina);
-        currentStamina = maxStamina;
-        maturityTime = Mathf.Max(0f, maturityTime);
-        currentAge = Mathf.Max(0f, currentAge);
-        maxLifespan = Mathf.Max(0.01f, maxLifespan);
-        dietAffinity = Mathf.Clamp01(dietAffinity);
-        InitializeMetabolicReference();
-        RefreshMetabolicRate();
-        thermalResponse.ResetRuntimeState();
-        RefreshMovementSpeed();
+        // Simulated seconds for the body to settle into the water or rise out of it.
+        private const float FloatTransitionSeconds = 0.5f;
+        // How near a dead zone's NavMesh a swimmer must be to count as in it, in world units.
+        private const float DeadZoneProbeRadius = 1f;
+        // A child that can't swim, born to a parent out in deep water, is placed on the nearest ground or shallow
+        // water within this distance. With none that close, the birth waits this many simulated seconds.
+        private const float NonSwimmerBirthSearchRadius = 60f;
+        private const float PostponedBirthDelay = 5f;
+        // Simulated seconds a partner the animal couldn't reach, or courted without a child, is passed over.
+        private const float AvoidedMateMemory = 30f;
+        // SpeciesManager's default, for fertility when there is no SpeciesManager.
+        private const float DefaultSpeciationThreshold = 0.03f;
 
-        // Join the parent's current species in case it split off while this animal was being born.
-        if (firstParent != null && firstParent.speciesName != speciesName)
+        private static readonly int BaseColorId = Shader.PropertyToID("_BaseColor");
+        private static readonly int ColorId = Shader.PropertyToID("_Color");
+
+        private float timer;
+        private float decisionTimer;
+        private float decisionRealTimeCooldown;
+        private float preyPathRefreshTimer;
+        private float attackCooldownTimer;
+        private float reproductionCooldownTimer;
+        [SerializeField, Tooltip("Founders are generation 0; each child is one more than its parent.")]
+        private int generation;
+        private SeekFood lastPreyPathTarget;
+        private Vector3 lastPreyPathDestination;
+        private bool hasPreyPathDestination;
+        private SeekFood temporarilyAvoidedPrey;
+        private float failedHuntCooldownTimer;
+        private float unproductiveHuntTimer;
+        private float foodChaseTimer;
+        private BodyPlanEffects bodyEffects = BodyPlanEffects.None;
+        private PerkEffects perkEffects = PerkEffects.None;
+        private AnimalBodyView bodyView;
+        // Speed from the genes alone, before body parts adjust it. Speed in water is based on it, since legs and
+        // fins work differently there.
+        private float geneMoveSpeed;
+        private bool inWater;
+        private bool inDeadZone;
+        // The agent's offset standing on land and floating with the body half under water, and how far between
+        // the two the body is (0 = standing, 1 = floating).
+        private float standingBaseOffset;
+        private float floatingBaseOffset;
+        private float floatAmount;
+        private bool registeredWithSpeciesManager;
+        private bool isDying;
+        private AgentDeathCause deathCause = AgentDeathCause.Other;
+        private SeekFood firstParent;
+        private SeekFood secondParent;
+        // Set when this animal comes from an off-screen population instead of being born.
+        private bool fromOffscreenPopulation;
+        // Ready to breed, the animal looks for a mate until it finds one, gives up or clones itself instead. The
+        // animal that reaches its partner leads the courtship and decides whether a child is born.
+        private bool seekingMate;
+        private float mateSearchTimer;
+        private float mateChaseTimer;
+        private float courtshipTimer;
+        private bool leadsCourtship;
+        private readonly List<ThreatMemory> rememberedThreats = new List<ThreatMemory>();
+        // Food this animal recently failed to get to, ignored until the simulated time stored with it.
+        private readonly List<UnreachableFood> unreachableFood = new List<UnreachableFood>();
+        // Partners passed over until the simulated time stored with them.
+        private readonly List<AvoidedMate> avoidedMates = new List<AvoidedMate>();
+        // Shared scratch list for perception; animals only update on the main thread.
+        private static readonly List<FoodItem> nearbyFood = new List<FoodItem>();
+        private static readonly List<SeekFood> nearbyAnimals = new List<SeekFood>();
+
+        private sealed class ThreatMemory
         {
-            speciesName = firstParent.speciesName;
-            speciesColor = firstParent.speciesColor;
+            public SeekFood attacker;
+            public float timeRemaining;
+        }
+
+        private struct UnreachableFood
+        {
+            public FoodItem food;
+            public float retryTime;
+        }
+
+        private struct AvoidedMate
+        {
+            public SeekFood mate;
+            public float retryTime;
+        }
+
+        private enum State { Idling, Wandering, Chasing, Hunting, Fighting, Fleeing, Escaping, SeekingMate, Courting }
+        private State currentState = State.Wandering;
+
+        void Start()
+        {
+            agent = GetComponent<NavMeshAgent>();
+            thermalResponse = GetComponent<AnimalTemperature>();
+            if (thermalResponse == null) thermalResponse = gameObject.AddComponent<AnimalTemperature>();
+            InitializeGenome();
+            minimumBodyBulk = Mathf.Max(0.01f, minimumBodyBulk);
+            maximumBodyBulk = Mathf.Max(minimumBodyBulk, maximumBodyBulk);
+            bodyBulk = Mathf.Clamp(bodyBulk, minimumBodyBulk, maximumBodyBulk);
+            minimumBodyHeight = Mathf.Max(0.01f, minimumBodyHeight);
+            maximumBodyHeight = Mathf.Max(minimumBodyHeight, maximumBodyHeight);
+            bodyHeight = Mathf.Clamp(bodyHeight, minimumBodyHeight, maximumBodyHeight);
+            InitializeBodyProportionReferences();
+            ApplyBodyProportions();
+            ConfigureWaterAccess();
+            agent.speed = moveSpeed;
+
+            decisionPolicy = GetComponent<AnimalDecisionPolicy>();
+            if (decisionPolicy == null)
+            {
+                decisionPolicy = gameObject.AddComponent<UtilityDecisionPolicy>();
+            }
+
+            timer = actionTimer;
+            decisionTimer = Random.Range(0f, Mathf.Max(0.05f, decisionInterval));
+            decisionRealTimeCooldown = Random.Range(0f, Mathf.Max(0f, minimumDecisionIntervalRealSeconds));
+            currentEnergy = Mathf.Clamp(currentEnergy, 0f, maxEnergy);
+            currentHealth = maxHealth;
+            strength = Mathf.Max(0f, strength);
+            maxStamina = Mathf.Max(0.01f, maxStamina);
+            currentStamina = maxStamina;
+            maturityTime = Mathf.Max(0f, maturityTime);
+            currentAge = Mathf.Max(0f, currentAge);
+            maxLifespan = Mathf.Max(0.01f, maxLifespan);
+            dietAffinity = Mathf.Clamp01(dietAffinity);
+            InitializeMetabolicReference();
+            RefreshMetabolicRate();
+            thermalResponse.ResetRuntimeState();
+            RefreshMovementSpeed();
+
+            // Join the parent's current species in case it split off while this animal was being born.
+            if (firstParent != null && firstParent.speciesName != speciesName)
+            {
+                speciesName = firstParent.speciesName;
+                speciesColor = firstParent.speciesColor;
+                gameObject.name = $"Capsule_Species_{speciesName}";
+            }
+            ApplySpeciesColor();
+            BuildBodyView();
+
+            if (SpeciesManager.Instance != null)
+            {
+                SpeciesManager.Instance.RegisterAgent(this, countAsBirth: !fromOffscreenPopulation);
+                registeredWithSpeciesManager = true;
+            }
+        }
+
+        // Turns a copy of an animal into a member of an off-screen population that has come near the camera.
+        // Call it straight after Instantiate, before the animal's first frame, as Reproduce does for newborns.
+        // The animal keeps the copy's metabolic reference (the founders') but takes this genome, age and energy.
+        public void PrepareFromOffscreenPopulation(AnimalGenome inheritedGenome, string species, Color color,
+                                                   int animalGeneration, float age, float energyFraction)
+        {
+            genome = inheritedGenome.Clone();
+            speciesName = species;
+            speciesColor = color;
+            generation = animalGeneration;
+            currentAge = Mathf.Max(0f, age);
+            currentEnergy = Mathf.Clamp01(energyFraction) * inheritedGenome[AnimalGene.MaxEnergy];
+            firstParent = null;
+            secondParent = null;
+            fromOffscreenPopulation = true;
             gameObject.name = $"Capsule_Species_{speciesName}";
         }
-        ApplySpeciesColor();
-        BuildBodyView();
 
-        if (SpeciesManager.Instance != null)
+        void OnDestroy()
         {
-            SpeciesManager.Instance.RegisterAgent(this, countAsBirth: !fromOffscreenPopulation);
-            registeredWithSpeciesManager = true;
+            if (registeredWithSpeciesManager && SpeciesManager.Instance != null)
+            {
+                SpeciesManager.Instance.DeregisterAgent(this, deathCause);
+                registeredWithSpeciesManager = false;
+            }
         }
-    }
 
-    // Turns a copy of an animal into a member of an off-screen population that has come near the camera.
-    // Call it straight after Instantiate, before the animal's first frame, as Reproduce does for newborns.
-    // The animal keeps the copy's metabolic reference (the founders') but takes this genome, age and energy.
-    public void PrepareFromOffscreenPopulation(AnimalGenome inheritedGenome, string species, Color color,
-                                               int animalGeneration, float age, float energyFraction)
-    {
-        genome = inheritedGenome.Clone();
-        speciesName = species;
-        speciesColor = color;
-        generation = animalGeneration;
-        currentAge = Mathf.Max(0f, age);
-        currentEnergy = Mathf.Clamp01(energyFraction) * inheritedGenome[AnimalGene.MaxEnergy];
-        firstParent = null;
-        secondParent = null;
-        fromOffscreenPopulation = true;
-        gameObject.name = $"Capsule_Species_{speciesName}";
-    }
-
-    void OnDestroy()
-    {
-        if (registeredWithSpeciesManager && SpeciesManager.Instance != null)
+        public void PrepareForAbstraction()
         {
-            SpeciesManager.Instance.DeregisterAgent(this, deathCause);
+            if (!registeredWithSpeciesManager || SpeciesManager.Instance == null) return;
+            SpeciesManager.Instance.UnregisterAgentWithoutDeath(this);
             registeredWithSpeciesManager = false;
         }
-    }
 
-    public void PrepareForAbstraction()
-    {
-        if (!registeredWithSpeciesManager || SpeciesManager.Instance == null) return;
-        SpeciesManager.Instance.UnregisterAgentWithoutDeath(this);
-        registeredWithSpeciesManager = false;
-    }
-
-    void Update()
-    {
-        float deltaTime = Time.deltaTime;
-        if (isDying || deltaTime <= 0f) return;
-        float unscaledDeltaTime = Time.unscaledDeltaTime;
-        currentAge += deltaTime;
-
-        if (currentAge >= maxLifespan)
+        void Update()
         {
-            Die(AgentDeathCause.OldAge, null);
-            return;
-        }
+            float deltaTime = Time.deltaTime;
+            if (isDying || deltaTime <= 0f) return;
+            float unscaledDeltaTime = Time.unscaledDeltaTime;
+            currentAge += deltaTime;
 
-        decisionRealTimeCooldown = Mathf.Max(0f, decisionRealTimeCooldown - unscaledDeltaTime);
-        preyPathRefreshTimer = Mathf.Max(0f, preyPathRefreshTimer - unscaledDeltaTime);
-        attackCooldownTimer = attackCooldownTimer > 0f
-            ? attackCooldownTimer - deltaTime
-            : 0f;
-        reproductionCooldownTimer = Mathf.Max(0f, reproductionCooldownTimer - deltaTime);
-        UpdateThreatMemory(deltaTime);
-        UpdateFailedHuntMemory(deltaTime);
-        thermalResponse.Tick(deltaTime);
-        if (thermalResponse.ThermalDamagePerSecond > 0f)
-        {
-            currentHealth -= thermalResponse.ThermalDamagePerSecond * deltaTime;
-            if (currentHealth <= 0f)
+            if (currentAge >= maxLifespan)
             {
-                Die(thermalResponse.ColdStress > thermalResponse.HeatStress
-                    ? AgentDeathCause.ColdExposure : AgentDeathCause.HeatExposure, null);
+                Die(AgentDeathCause.OldAge, null);
                 return;
             }
-        }
-        UpdateStamina(deltaTime);
-        UpdateWater(deltaTime);
-        RefreshMovementSpeed();
 
-        if (currentEnergy > 0f)
-        {
-            currentEnergy = Mathf.Max(0f, currentEnergy - CurrentEnergyDrainPerSecond * deltaTime);
-        }
-        else
-        {
-            TakeDamage(starvationDamagePerSecond * deltaTime);
-            if (isDying)
+            decisionRealTimeCooldown = Mathf.Max(0f, decisionRealTimeCooldown - unscaledDeltaTime);
+            preyPathRefreshTimer = Mathf.Max(0f, preyPathRefreshTimer - unscaledDeltaTime);
+            attackCooldownTimer = attackCooldownTimer > 0f
+                ? attackCooldownTimer - deltaTime
+                : 0f;
+            reproductionCooldownTimer = Mathf.Max(0f, reproductionCooldownTimer - deltaTime);
+            UpdateThreatMemory(deltaTime);
+            UpdateFailedHuntMemory(deltaTime);
+            thermalResponse.Tick(deltaTime);
+            if (thermalResponse.ThermalDamagePerSecond > 0f)
             {
-                return;
-            }
-        }
-
-        // Regeneration slowly heals the animal while it has energy.
-        if (perkEffects.regenerationPerSecond > 0f && currentEnergy > 0f && currentHealth < maxHealth)
-        {
-            currentHealth = Mathf.Min(maxHealth,
-                                      currentHealth + perkEffects.regenerationPerSecond * maxHealth * deltaTime);
-        }
-
-        // Courting animals stand still and don't react to threats until the courtship ends or one is attacked.
-        if (currentState == State.Courting)
-        {
-            UpdateCourtship(deltaTime);
-            return;
-        }
-
-        UpdateBreeding(deltaTime);
-
-        if (currentState != State.Escaping && IsOutsideTerrainBounds())
-        {
-            BeginBoundaryEscape();
-            return;
-        }
-
-        if (currentState == State.Escaping)
-        {
-            UpdateEscaping(deltaTime);
-            return;
-        }
-
-        if (currentState == State.Fleeing)
-        {
-            UpdateFleeing(deltaTime);
-            return;
-        }
-
-        if (TryAbandonUnproductiveHunt(deltaTime))
-        {
-            return;
-        }
-
-        UpdateDecision(deltaTime);
-        ExecuteCurrentIntent(deltaTime);
-
-        if (currentState == State.Chasing || currentState == State.Hunting ||
-            currentState == State.Fighting || currentState == State.SeekingMate)
-        {
-            return;
-        }
-
-        UpdateIdleAndWander(deltaTime);
-    }
-
-    // Ready to breed (mature, fed up to the reproduction threshold, rested since its last birth and below the
-    // population ceiling), the animal clones itself or starts looking for a mate, as its sexual drive decides.
-    void UpdateBreeding(float deltaTime)
-    {
-        bool atPopulationCeiling = SpeciesManager.Instance != null &&
-                                   SpeciesManager.Instance.IsAtPopulationCeilingFor(inWater);
-        if (seekingMate)
-        {
-            UpdateMateSearch(deltaTime, atPopulationCeiling);
-            return;
-        }
-
-        if (!IsMature || maxEnergy <= 0f || currentEnergy < maxEnergy * reproductionThreshold ||
-            reproductionCooldownTimer > 0f || atPopulationCeiling)
-        {
-            return;
-        }
-
-        if (MatingRules.CanMate(sexualDrive))
-        {
-            seekingMate = true;
-            mateSearchTimer = 0f;
-            decisionTimer = 0f;
-        }
-        else
-        {
-            ReproduceAlone();
-        }
-    }
-
-    // The search ends when the animal can no longer breed or falls below the energy a partner needs. Out of
-    // time, it clones itself instead; animals that only mate keep looking.
-    void UpdateMateSearch(float deltaTime, bool atPopulationCeiling)
-    {
-        mateSearchTimer += deltaTime;
-        if (atPopulationCeiling || reproductionCooldownTimer > 0f ||
-            currentEnergy < maxEnergy * minimumMateEnergyFraction)
-        {
-            StopMateSearch();
-            return;
-        }
-
-        if (mateSearchTimer >= MatingRules.MateSearchTime(sexualDrive, mateSearchSecondsPerDrive))
-        {
-            StopMateSearch();
-            ReproduceAlone();
-        }
-    }
-
-    void StopMateSearch()
-    {
-        seekingMate = false;
-        mateSearchTimer = 0f;
-        if (currentState == State.SeekingMate)
-        {
-            ClearTargets();
-            currentState = State.Idling;
-            timer = actionTimer;
-            decisionTimer = 0f;
-            TryResetPath();
-        }
-    }
-
-    // Clones itself, dropping whatever it was doing.
-    void ReproduceAlone()
-    {
-        ClearTargets();
-        currentState = State.Idling;
-        timer = actionTimer;
-        Reproduce();
-        decisionTimer = 0f;
-    }
-
-    void UpdateDecision(float deltaTime)
-    {
-        bool hasFoodTarget = IsCurrentFoodTargetAvailable();
-        bool hasPreyTarget = IsViablePrey(currentPreyTarget);
-        bool targetBecameInvalid = (currentState == State.Chasing && !hasFoodTarget) ||
-                                   ((currentState == State.Hunting || currentState == State.Fighting) &&
-                                    !hasPreyTarget) ||
-                                   (currentState == State.SeekingMate && MateFertility(currentMate) <= 0f);
-        if (targetBecameInvalid)
-        {
-            ClearTargets();
-            currentState = State.Idling;
-            timer = actionTimer;
-            TryResetPath();
-        }
-
-        decisionTimer -= deltaTime;
-        if (decisionTimer > 0f || decisionRealTimeCooldown > 0f)
-        {
-            return;
-        }
-
-        AnimalPerception perception = BuildPerception();
-        AnimalDecision decision = decisionPolicy != null
-            ? decisionPolicy.Decide(this, perception)
-            : new AnimalDecision(AgentIntent.Wander);
-        ApplyDecision(decision);
-        decisionTimer = Mathf.Max(0.05f, decisionInterval);
-        decisionRealTimeCooldown = Mathf.Max(0f, minimumDecisionIntervalRealSeconds);
-    }
-
-    AnimalPerception BuildPerception()
-    {
-        AnimalPerception perception = new AnimalPerception
-        {
-            nearestPlantDistance = Mathf.Infinity,
-            nearestMeatDistance = Mathf.Infinity,
-            nearestPreyDistance = Mathf.Infinity,
-            mateDistance = Mathf.Infinity,
-            threats = new List<AnimalThreat>()
-        };
-
-        float visionRadiusSquared = visionRadius * visionRadius;
-        FoodItem.FindNearby(transform.position, visionRadius, nearbyFood);
-        foreach (FoodItem food in nearbyFood)
-        {
-            if (food == null || !food.IsAvailable)
-            {
-                continue;
-            }
-
-            if (!CanEat(food) || IsRememberedAsUnreachable(food))
-            {
-                continue;
-            }
-
-            float distanceSquared = (transform.position - food.transform.position).sqrMagnitude;
-            if (distanceSquared > visionRadiusSquared)
-            {
-                continue;
-            }
-
-            float distance = Mathf.Sqrt(distanceSquared);
-            if (food.foodType == FoodType.Plant && distance < perception.nearestPlantDistance)
-            {
-                perception.nearestPlant = food;
-                perception.nearestPlantDistance = distance;
-            }
-            else if (food.foodType == FoodType.Meat && distance < perception.nearestMeatDistance)
-            {
-                perception.nearestMeat = food;
-                perception.nearestMeatDistance = distance;
-            }
-        }
-
-        SpeciesManager manager = SpeciesManager.Instance;
-        if (manager != null)
-        {
-            // Only animals in the grid cells this animal's vision covers can be seen, so the rest aren't checked.
-            manager.FindAgentsNear(transform.position, visionRadius, nearbyAnimals);
-            float bestMateScore = 0f;
-            foreach (SeekFood other in nearbyAnimals)
-            {
-                if (seekingMate)
+                currentHealth -= thermalResponse.ThermalDamagePerSecond * deltaTime;
+                if (currentHealth <= 0f)
                 {
-                    ConsiderMate(other, visionRadiusSquared, ref perception, ref bestMateScore);
+                    Die(thermalResponse.ColdStress > thermalResponse.HeatStress
+                        ? AgentDeathCause.ColdExposure : AgentDeathCause.HeatExposure, null);
+                    return;
                 }
+            }
+            UpdateStamina(deltaTime);
+            UpdateWater(deltaTime);
+            RefreshMovementSpeed();
 
-                if (!IsViablePrey(other))
+            if (currentEnergy > 0f)
+            {
+                currentEnergy = Mathf.Max(0f, currentEnergy - CurrentEnergyDrainPerSecond * deltaTime);
+            }
+            else
+            {
+                TakeDamage(starvationDamagePerSecond * deltaTime);
+                if (isDying)
+                {
+                    return;
+                }
+            }
+
+            // Regeneration slowly heals the animal while it has energy.
+            if (perkEffects.regenerationPerSecond > 0f && currentEnergy > 0f && currentHealth < maxHealth)
+            {
+                currentHealth = Mathf.Min(maxHealth,
+                                          currentHealth + perkEffects.regenerationPerSecond * maxHealth * deltaTime);
+            }
+
+            // Courting animals stand still and don't react to threats until the courtship ends or one is attacked.
+            if (currentState == State.Courting)
+            {
+                UpdateCourtship(deltaTime);
+                return;
+            }
+
+            UpdateBreeding(deltaTime);
+
+            if (currentState != State.Escaping && IsOutsideTerrainBounds())
+            {
+                BeginBoundaryEscape();
+                return;
+            }
+
+            if (currentState == State.Escaping)
+            {
+                UpdateEscaping(deltaTime);
+                return;
+            }
+
+            if (currentState == State.Fleeing)
+            {
+                UpdateFleeing(deltaTime);
+                return;
+            }
+
+            if (TryAbandonUnproductiveHunt(deltaTime))
+            {
+                return;
+            }
+
+            UpdateDecision(deltaTime);
+            ExecuteCurrentIntent(deltaTime);
+
+            if (currentState == State.Chasing || currentState == State.Hunting ||
+                currentState == State.Fighting || currentState == State.SeekingMate)
+            {
+                return;
+            }
+
+            UpdateIdleAndWander(deltaTime);
+        }
+
+        // Ready to breed (mature, fed up to the reproduction threshold, rested since its last birth and below the
+        // population ceiling), the animal clones itself or starts looking for a mate, as its sexual drive decides.
+        void UpdateBreeding(float deltaTime)
+        {
+            bool atPopulationCeiling = SpeciesManager.Instance != null &&
+                                       SpeciesManager.Instance.IsAtPopulationCeilingFor(inWater);
+            if (seekingMate)
+            {
+                UpdateMateSearch(deltaTime, atPopulationCeiling);
+                return;
+            }
+
+            if (!IsMature || maxEnergy <= 0f || currentEnergy < maxEnergy * reproductionThreshold ||
+                reproductionCooldownTimer > 0f || atPopulationCeiling)
+            {
+                return;
+            }
+
+            if (MatingRules.CanMate(sexualDrive))
+            {
+                seekingMate = true;
+                mateSearchTimer = 0f;
+                decisionTimer = 0f;
+            }
+            else
+            {
+                ReproduceAlone();
+            }
+        }
+
+        // The search ends when the animal can no longer breed or falls below the energy a partner needs. Out of
+        // time, it clones itself instead; animals that only mate keep looking.
+        void UpdateMateSearch(float deltaTime, bool atPopulationCeiling)
+        {
+            mateSearchTimer += deltaTime;
+            if (atPopulationCeiling || reproductionCooldownTimer > 0f ||
+                currentEnergy < maxEnergy * minimumMateEnergyFraction)
+            {
+                StopMateSearch();
+                return;
+            }
+
+            if (mateSearchTimer >= MatingRules.MateSearchTime(sexualDrive, mateSearchSecondsPerDrive))
+            {
+                StopMateSearch();
+                ReproduceAlone();
+            }
+        }
+
+        void StopMateSearch()
+        {
+            seekingMate = false;
+            mateSearchTimer = 0f;
+            if (currentState == State.SeekingMate)
+            {
+                ClearTargets();
+                currentState = State.Idling;
+                timer = actionTimer;
+                decisionTimer = 0f;
+                TryResetPath();
+            }
+        }
+
+        // Clones itself, dropping whatever it was doing.
+        void ReproduceAlone()
+        {
+            ClearTargets();
+            currentState = State.Idling;
+            timer = actionTimer;
+            Reproduce();
+            decisionTimer = 0f;
+        }
+
+        void UpdateDecision(float deltaTime)
+        {
+            bool hasFoodTarget = IsCurrentFoodTargetAvailable();
+            bool hasPreyTarget = IsViablePrey(currentPreyTarget);
+            bool targetBecameInvalid = (currentState == State.Chasing && !hasFoodTarget) ||
+                                       ((currentState == State.Hunting || currentState == State.Fighting) &&
+                                        !hasPreyTarget) ||
+                                       (currentState == State.SeekingMate && MateFertility(currentMate) <= 0f);
+            if (targetBecameInvalid)
+            {
+                ClearTargets();
+                currentState = State.Idling;
+                timer = actionTimer;
+                TryResetPath();
+            }
+
+            decisionTimer -= deltaTime;
+            if (decisionTimer > 0f || decisionRealTimeCooldown > 0f)
+            {
+                return;
+            }
+
+            AnimalPerception perception = BuildPerception();
+            AnimalDecision decision = decisionPolicy != null
+                ? decisionPolicy.Decide(this, perception)
+                : new AnimalDecision(AgentIntent.Wander);
+            ApplyDecision(decision);
+            decisionTimer = Mathf.Max(0.05f, decisionInterval);
+            decisionRealTimeCooldown = Mathf.Max(0f, minimumDecisionIntervalRealSeconds);
+        }
+
+        AnimalPerception BuildPerception()
+        {
+            AnimalPerception perception = new AnimalPerception
+            {
+                nearestPlantDistance = Mathf.Infinity,
+                nearestMeatDistance = Mathf.Infinity,
+                nearestPreyDistance = Mathf.Infinity,
+                mateDistance = Mathf.Infinity,
+                threats = new List<AnimalThreat>()
+            };
+
+            float visionRadiusSquared = visionRadius * visionRadius;
+            FoodItem.FindNearby(transform.position, visionRadius, nearbyFood);
+            foreach (FoodItem food in nearbyFood)
+            {
+                if (food == null || !food.IsAvailable)
                 {
                     continue;
                 }
 
-                float distanceSquared = (transform.position - other.transform.position).sqrMagnitude;
+                if (!CanEat(food) || IsRememberedAsUnreachable(food))
+                {
+                    continue;
+                }
+
+                float distanceSquared = (transform.position - food.transform.position).sqrMagnitude;
+                if (distanceSquared > visionRadiusSquared)
+                {
+                    continue;
+                }
+
                 float distance = Mathf.Sqrt(distanceSquared);
-                // Camouflaged animals are only spotted, as prey or as hunters, within part of the vision radius.
-                float spottingRadiusSquared = visionRadiusSquared * other.Visibility * other.Visibility;
-                if (!IsTemporarilyAvoidedPrey(other) &&
-                    distanceSquared <= spottingRadiusSquared &&
-                    distanceSquared < perception.nearestPreyDistance * perception.nearestPreyDistance)
+                if (food.foodType == FoodType.Plant && distance < perception.nearestPlantDistance)
                 {
-                    perception.nearestPrey = other;
-                    perception.nearestPreyDistance = distance;
+                    perception.nearestPlant = food;
+                    perception.nearestPlantDistance = distance;
                 }
-
-                bool recentlyAttacked = IsRememberedThreat(other);
-                bool isActivelyHunting = distanceSquared <= spottingRadiusSquared &&
-                                         other.IsTargetingAsPrey(this);
-                if (recentlyAttacked || isActivelyHunting)
+                else if (food.foodType == FoodType.Meat && distance < perception.nearestMeatDistance)
                 {
-                    perception.threats.Add(new AnimalThreat(other, distance,
-                                                            isActivelyHunting, recentlyAttacked));
+                    perception.nearestMeat = food;
+                    perception.nearestMeatDistance = distance;
                 }
             }
 
-            AddRememberedThreatsOutOfView(manager, perception.threats);
-        }
-
-        return perception;
-    }
-
-    // An animal that attacked this one counts as a threat while it is remembered, however far away it is. Those
-    // near enough were added with the animals in view; this adds the rest.
-    void AddRememberedThreatsOutOfView(SpeciesManager manager, List<AnimalThreat> threats)
-    {
-        foreach (ThreatMemory memory in rememberedThreats)
-        {
-            SeekFood attacker = memory.attacker;
-            if (memory.timeRemaining <= 0f || !IsViablePrey(attacker) || !manager.IsActiveAgent(attacker) ||
-                ContainsThreat(threats, attacker))
+            SpeciesManager manager = SpeciesManager.Instance;
+            if (manager != null)
             {
-                continue;
-            }
-
-            float distance = Vector3.Distance(transform.position, attacker.transform.position);
-            threats.Add(new AnimalThreat(attacker, distance, false, true));
-        }
-    }
-
-    static bool ContainsThreat(List<AnimalThreat> threats, SeekFood attacker)
-    {
-        foreach (AnimalThreat threat in threats)
-        {
-            if (threat.attacker == attacker) return true;
-        }
-
-        return false;
-    }
-
-    // Keeps the most promising partner in view, weighing fertility against distance.
-    void ConsiderMate(SeekFood other, float visionRadiusSquared, ref AnimalPerception perception, ref float bestScore)
-    {
-        if (other == null || other == this)
-        {
-            return;
-        }
-
-        float distanceSquared = (transform.position - other.transform.position).sqrMagnitude;
-        if (distanceSquared > visionRadiusSquared || IsAvoidedMate(other))
-        {
-            return;
-        }
-
-        float fertility = MateFertility(other);
-        float distance = Mathf.Sqrt(distanceSquared);
-        float score = fertility / (1f + distance / Mathf.Max(1f, visionRadius));
-        if (score > bestScore)
-        {
-            bestScore = score;
-            perception.mate = other;
-            perception.mateDistance = distance;
-            perception.mateFertility = fertility;
-        }
-    }
-
-    // The chance a courtship with this animal would end in a child, or 0 when it isn't available as a partner.
-    float MateFertility(SeekFood other)
-    {
-        return other == null || other == this || !other.IsAvailableAsMate ? 0f : GeneticFertility(other);
-    }
-
-    // Fertility from how far apart the two genomes are: full for close relatives, fading to none at the
-    // species threshold.
-    float GeneticFertility(SeekFood other)
-    {
-        if (genome == null || !genome.IsValid || other.genome == null || !other.genome.IsValid)
-        {
-            return 0f;
-        }
-
-        float threshold = SpeciesManager.Instance != null
-            ? SpeciesManager.Instance.speciationThreshold
-            : DefaultSpeciationThreshold;
-        return MatingRules.Fertility(AnimalGenome.Distance(genome, other.genome), threshold, fertilityFadeStart);
-    }
-
-    void ApplyDecision(AnimalDecision decision)
-    {
-        State previousState = currentState;
-        FoodItem previousFoodTarget = currentFoodTarget;
-        SeekFood previousPreyTarget = currentPreyTarget;
-        SeekFood previousMate = currentMate;
-        ClearTargets();
-
-        switch (decision.intent)
-        {
-            case AgentIntent.SeekPlant:
-            case AgentIntent.SeekMeat:
-                if (decision.foodTarget != null && decision.foodTarget.IsAvailable)
+                // Only animals in the grid cells this animal's vision covers can be seen, so the rest aren't checked.
+                manager.FindAgentsNear(transform.position, visionRadius, nearbyAnimals);
+                float bestMateScore = 0f;
+                foreach (SeekFood other in nearbyAnimals)
                 {
-                    currentFoodTarget = decision.foodTarget;
-                    currentState = State.Chasing;
-                    bool isNewTarget = previousFoodTarget != currentFoodTarget;
-                    if (isNewTarget)
+                    if (seekingMate)
                     {
-                        foodChaseTimer = 0f;
+                        ConsiderMate(other, visionRadiusSquared, ref perception, ref bestMateScore);
                     }
 
-                    if (isNewTarget || (!agent.pathPending && !agent.hasPath))
+                    if (!IsViablePrey(other))
+                    {
+                        continue;
+                    }
+
+                    float distanceSquared = (transform.position - other.transform.position).sqrMagnitude;
+                    float distance = Mathf.Sqrt(distanceSquared);
+                    // Camouflaged animals are only spotted, as prey or as hunters, within part of the vision radius.
+                    float spottingRadiusSquared = visionRadiusSquared * other.Visibility * other.Visibility;
+                    if (!IsTemporarilyAvoidedPrey(other) &&
+                        distanceSquared <= spottingRadiusSquared &&
+                        distanceSquared < perception.nearestPreyDistance * perception.nearestPreyDistance)
+                    {
+                        perception.nearestPrey = other;
+                        perception.nearestPreyDistance = distance;
+                    }
+
+                    bool recentlyAttacked = IsRememberedThreat(other);
+                    bool isActivelyHunting = distanceSquared <= spottingRadiusSquared &&
+                                             other.IsTargetingAsPrey(this);
+                    if (recentlyAttacked || isActivelyHunting)
+                    {
+                        perception.threats.Add(new AnimalThreat(other, distance,
+                                                                isActivelyHunting, recentlyAttacked));
+                    }
+                }
+
+                AddRememberedThreatsOutOfView(manager, perception.threats);
+            }
+
+            return perception;
+        }
+
+        // An animal that attacked this one counts as a threat while it is remembered, however far away it is. Those
+        // near enough were added with the animals in view; this adds the rest.
+        void AddRememberedThreatsOutOfView(SpeciesManager manager, List<AnimalThreat> threats)
+        {
+            foreach (ThreatMemory memory in rememberedThreats)
+            {
+                SeekFood attacker = memory.attacker;
+                if (memory.timeRemaining <= 0f || !IsViablePrey(attacker) || !manager.IsActiveAgent(attacker) ||
+                    ContainsThreat(threats, attacker))
+                {
+                    continue;
+                }
+
+                float distance = Vector3.Distance(transform.position, attacker.transform.position);
+                threats.Add(new AnimalThreat(attacker, distance, false, true));
+            }
+        }
+
+        static bool ContainsThreat(List<AnimalThreat> threats, SeekFood attacker)
+        {
+            foreach (AnimalThreat threat in threats)
+            {
+                if (threat.attacker == attacker) return true;
+            }
+
+            return false;
+        }
+
+        // Keeps the most promising partner in view, weighing fertility against distance.
+        void ConsiderMate(SeekFood other, float visionRadiusSquared, ref AnimalPerception perception, ref float bestScore)
+        {
+            if (other == null || other == this)
+            {
+                return;
+            }
+
+            float distanceSquared = (transform.position - other.transform.position).sqrMagnitude;
+            if (distanceSquared > visionRadiusSquared || IsAvoidedMate(other))
+            {
+                return;
+            }
+
+            float fertility = MateFertility(other);
+            float distance = Mathf.Sqrt(distanceSquared);
+            float score = fertility / (1f + distance / Mathf.Max(1f, visionRadius));
+            if (score > bestScore)
+            {
+                bestScore = score;
+                perception.mate = other;
+                perception.mateDistance = distance;
+                perception.mateFertility = fertility;
+            }
+        }
+
+        // The chance a courtship with this animal would end in a child, or 0 when it isn't available as a partner.
+        float MateFertility(SeekFood other)
+        {
+            return other == null || other == this || !other.IsAvailableAsMate ? 0f : GeneticFertility(other);
+        }
+
+        // Fertility from how far apart the two genomes are: full for close relatives, fading to none at the
+        // species threshold.
+        float GeneticFertility(SeekFood other)
+        {
+            if (genome == null || !genome.IsValid || other.genome == null || !other.genome.IsValid)
+            {
+                return 0f;
+            }
+
+            float threshold = SpeciesManager.Instance != null
+                ? SpeciesManager.Instance.speciationThreshold
+                : DefaultSpeciationThreshold;
+            return MatingRules.Fertility(AnimalGenome.Distance(genome, other.genome), threshold, fertilityFadeStart);
+        }
+
+        void ApplyDecision(AnimalDecision decision)
+        {
+            State previousState = currentState;
+            FoodItem previousFoodTarget = currentFoodTarget;
+            SeekFood previousPreyTarget = currentPreyTarget;
+            SeekFood previousMate = currentMate;
+            ClearTargets();
+
+            switch (decision.intent)
+            {
+                case AgentIntent.SeekPlant:
+                case AgentIntent.SeekMeat:
+                    if (decision.foodTarget != null && decision.foodTarget.IsAvailable)
+                    {
+                        currentFoodTarget = decision.foodTarget;
+                        currentState = State.Chasing;
+                        bool isNewTarget = previousFoodTarget != currentFoodTarget;
+                        if (isNewTarget)
+                        {
+                            foodChaseTimer = 0f;
+                        }
+
+                        if (isNewTarget || (!agent.pathPending && !agent.hasPath))
+                        {
+                            TrySetDestination(currentFoodTarget.GroundPosition);
+                        }
+                    }
+                    break;
+
+                case AgentIntent.HuntPrey:
+                    if (IsViablePrey(decision.preyTarget))
+                    {
+                        currentPreyTarget = decision.preyTarget;
+                        currentState = State.Hunting;
+                        if (previousPreyTarget != currentPreyTarget)
+                        {
+                            ResetPreyPathTracking();
+                            unproductiveHuntTimer = 0f;
+                        }
+                    }
+                    break;
+
+                case AgentIntent.FightThreat:
+                    if (IsViablePrey(decision.preyTarget))
+                    {
+                        currentPreyTarget = decision.preyTarget;
+                        currentState = State.Fighting;
+                        if (previousPreyTarget != currentPreyTarget)
+                        {
+                            ResetPreyPathTracking();
+                            unproductiveHuntTimer = 0f;
+                        }
+                        if (previousState != State.Fighting && SpeciesManager.Instance != null)
+                        {
+                            SpeciesManager.Instance.RecordThreatResponse(this, foughtBack: true);
+                        }
+                    }
+                    break;
+
+                case AgentIntent.Flee:
+                    if (IsViablePrey(decision.preyTarget))
+                    {
+                        currentFleeThreat = decision.preyTarget;
+                        currentFleeDirection = decision.fleeDirection;
+                        currentState = State.Fleeing;
+                        timer = 0f;
+                        SetFleeDestination(currentFleeDirection, currentFleeThreat);
+                        if (previousState != State.Fleeing && SpeciesManager.Instance != null)
+                        {
+                            SpeciesManager.Instance.RecordThreatResponse(this, foughtBack: false);
+                        }
+                    }
+                    break;
+
+                case AgentIntent.SeekMate:
+                    if (seekingMate && MateFertility(decision.mateTarget) > 0f)
+                    {
+                        currentMate = decision.mateTarget;
+                        currentState = State.SeekingMate;
+                        if (previousMate != currentMate)
+                        {
+                            ResetPreyPathTracking();
+                            mateChaseTimer = 0f;
+                        }
+                    }
+                    break;
+
+                default:
+                    if (currentState != State.Idling && currentState != State.Wandering)
+                    {
+                        currentState = State.Idling;
+                        timer = actionTimer;
+                        TryResetPath();
+                    }
+                    break;
+            }
+        }
+
+        void ExecuteCurrentIntent(float deltaTime)
+        {
+            if (currentState == State.Chasing)
+            {
+                if (IsCurrentFoodTargetAvailable())
+                {
+                    foodChaseTimer += deltaTime;
+                    float interactionRangeSquared = CurrentFoodInteractionRange * CurrentFoodInteractionRange;
+                    Vector3 horizontalOffset = transform.position - currentFoodTarget.transform.position;
+                    horizontalOffset.y = 0f;
+                    if (horizontalOffset.sqrMagnitude <= interactionRangeSquared &&
+                        CanReachFood(currentFoodTarget))
+                    {
+                        TryConsumeFood(currentFoodTarget);
+                    }
+                    else if (IsCurrentFoodOutOfReach())
+                    {
+                        GiveUpOnCurrentFood();
+                    }
+                    else if (!agent.pathPending && !agent.hasPath)
                     {
                         TrySetDestination(currentFoodTarget.GroundPosition);
                     }
                 }
-                break;
-
-            case AgentIntent.HuntPrey:
-                if (IsViablePrey(decision.preyTarget))
+                else
                 {
-                    currentPreyTarget = decision.preyTarget;
-                    currentState = State.Hunting;
-                    if (previousPreyTarget != currentPreyTarget)
-                    {
-                        ResetPreyPathTracking();
-                        unproductiveHuntTimer = 0f;
-                    }
-                }
-                break;
-
-            case AgentIntent.FightThreat:
-                if (IsViablePrey(decision.preyTarget))
-                {
-                    currentPreyTarget = decision.preyTarget;
-                    currentState = State.Fighting;
-                    if (previousPreyTarget != currentPreyTarget)
-                    {
-                        ResetPreyPathTracking();
-                        unproductiveHuntTimer = 0f;
-                    }
-                    if (previousState != State.Fighting && SpeciesManager.Instance != null)
-                    {
-                        SpeciesManager.Instance.RecordThreatResponse(this, foughtBack: true);
-                    }
-                }
-                break;
-
-            case AgentIntent.Flee:
-                if (IsViablePrey(decision.preyTarget))
-                {
-                    currentFleeThreat = decision.preyTarget;
-                    currentFleeDirection = decision.fleeDirection;
-                    currentState = State.Fleeing;
-                    timer = 0f;
-                    SetFleeDestination(currentFleeDirection, currentFleeThreat);
-                    if (previousState != State.Fleeing && SpeciesManager.Instance != null)
-                    {
-                        SpeciesManager.Instance.RecordThreatResponse(this, foughtBack: false);
-                    }
-                }
-                break;
-
-            case AgentIntent.SeekMate:
-                if (seekingMate && MateFertility(decision.mateTarget) > 0f)
-                {
-                    currentMate = decision.mateTarget;
-                    currentState = State.SeekingMate;
-                    if (previousMate != currentMate)
-                    {
-                        ResetPreyPathTracking();
-                        mateChaseTimer = 0f;
-                    }
-                }
-                break;
-
-            default:
-                if (currentState != State.Idling && currentState != State.Wandering)
-                {
+                    ClearTargets();
                     currentState = State.Idling;
-                    timer = actionTimer;
-                    TryResetPath();
+                    decisionTimer = 0f;
                 }
-                break;
-        }
-    }
+            }
+            else if (currentState == State.Hunting || currentState == State.Fighting)
+            {
+                if (!IsViablePrey(currentPreyTarget))
+                {
+                    ClearTargets();
+                    currentState = State.Idling;
+                    decisionTimer = 0f;
+                    return;
+                }
 
-    void ExecuteCurrentIntent(float deltaTime)
-    {
-        if (currentState == State.Chasing)
-        {
-            if (IsCurrentFoodTargetAvailable())
-            {
-                foodChaseTimer += deltaTime;
-                float interactionRangeSquared = CurrentFoodInteractionRange * CurrentFoodInteractionRange;
-                Vector3 horizontalOffset = transform.position - currentFoodTarget.transform.position;
-                horizontalOffset.y = 0f;
-                if (horizontalOffset.sqrMagnitude <= interactionRangeSquared &&
-                    CanReachFood(currentFoodTarget))
+                UpdatePathToMovingTarget(currentPreyTarget);
+
+                float attackRangeSquared = CurrentAttackRange * CurrentAttackRange;
+                if ((transform.position - currentPreyTarget.transform.position).sqrMagnitude <= attackRangeSquared)
                 {
-                    TryConsumeFood(currentFoodTarget);
-                }
-                else if (IsCurrentFoodOutOfReach())
-                {
-                    GiveUpOnCurrentFood();
-                }
-                else if (!agent.pathPending && !agent.hasPath)
-                {
-                    TrySetDestination(currentFoodTarget.GroundPosition);
+                    TryAttack(currentPreyTarget);
                 }
             }
-            else
+            else if (currentState == State.SeekingMate)
             {
-                ClearTargets();
-                currentState = State.Idling;
-                decisionTimer = 0f;
+                if (MateFertility(currentMate) <= 0f)
+                {
+                    ClearTargets();
+                    currentState = State.Idling;
+                    decisionTimer = 0f;
+                    return;
+                }
+
+                mateChaseTimer += deltaTime;
+                UpdatePathToMovingTarget(currentMate);
+
+                // Close enough to court is the same distance as close enough to strike.
+                float courtshipRangeSquared = CurrentAttackRange * CurrentAttackRange;
+                if ((transform.position - currentMate.transform.position).sqrMagnitude <= courtshipRangeSquared)
+                {
+                    BeginCourtship(currentMate);
+                }
+                else if (IsCurrentMateOutOfReach())
+                {
+                    GiveUpOnCurrentMate();
+                }
             }
         }
-        else if (currentState == State.Hunting || currentState == State.Fighting)
+
+        // Follows prey or a partner, refreshing the route as the target moves, no more often than the refresh
+        // interval allows.
+        void UpdatePathToMovingTarget(SeekFood target)
         {
-            if (!IsViablePrey(currentPreyTarget))
+            Vector3 targetPosition = target.transform.position;
+            float movementThreshold = Mathf.Max(0f, preyPathTargetMovementThreshold);
+            bool targetChanged = lastPreyPathTarget != target;
+            bool targetMoved = !hasPreyPathDestination ||
+                               (targetPosition - lastPreyPathDestination).sqrMagnitude >=
+                               movementThreshold * movementThreshold;
+            bool pathMissing = !agent.pathPending && !agent.hasPath;
+
+            if (preyPathRefreshTimer <= 0f &&
+                (targetChanged || targetMoved || pathMissing))
             {
-                ClearTargets();
-                currentState = State.Idling;
-                decisionTimer = 0f;
+                if (TrySetPreyDestination(targetPosition))
+                {
+                    lastPreyPathTarget = target;
+                    lastPreyPathDestination = targetPosition;
+                    hasPreyPathDestination = true;
+                }
+                preyPathRefreshTimer = CalculatePreyPathRefreshInterval();
+            }
+        }
+
+        // Like IsCurrentFoodOutOfReach, for a partner that moves: the chase is taking far longer than crossing the
+        // field of view would, or the route stops well short of where the partner was (across water the animal
+        // can't swim, or up a cliff).
+        bool IsCurrentMateOutOfReach()
+        {
+            float speed = Mathf.Max(0.1f, GetCurrentMovementSpeed());
+            if (mateChaseTimer >= Mathf.Max(maximumFoodChaseDuration, 3f * visionRadius / speed))
+            {
+                return true;
+            }
+
+            if (agent == null || !agent.enabled || !agent.isOnNavMesh || agent.pathPending || !agent.hasPath ||
+                agent.pathStatus == NavMeshPathStatus.PathComplete || !hasPreyPathDestination)
+            {
+                return false;
+            }
+
+            Vector3 shortfall = agent.pathEndPosition - lastPreyPathDestination;
+            shortfall.y = 0f;
+            float range = CurrentAttackRange;
+            return shortfall.sqrMagnitude > range * range;
+        }
+
+        void GiveUpOnCurrentMate()
+        {
+            AvoidMate(currentMate);
+            ClearTargets();
+            mateChaseTimer = 0f;
+            currentState = State.Idling;
+            timer = 0f;
+            decisionTimer = 0f;
+            TryResetPath();
+        }
+
+        void AvoidMate(SeekFood mate)
+        {
+            if (mate == null)
+            {
                 return;
             }
 
-            UpdatePathToMovingTarget(currentPreyTarget);
-
-            float attackRangeSquared = CurrentAttackRange * CurrentAttackRange;
-            if ((transform.position - currentPreyTarget.transform.position).sqrMagnitude <= attackRangeSquared)
+            // A short memory is enough; the oldest entry makes room.
+            if (avoidedMates.Count >= 4)
             {
-                TryAttack(currentPreyTarget);
+                avoidedMates.RemoveAt(0);
             }
+
+            avoidedMates.Add(new AvoidedMate { mate = mate, retryTime = Time.time + AvoidedMateMemory });
         }
-        else if (currentState == State.SeekingMate)
+
+        bool IsAvoidedMate(SeekFood mate)
         {
-            if (MateFertility(currentMate) <= 0f)
+            float now = Time.time;
+            for (int index = avoidedMates.Count - 1; index >= 0; index--)
             {
-                ClearTargets();
-                currentState = State.Idling;
-                decisionTimer = 0f;
+                AvoidedMate entry = avoidedMates[index];
+                if (entry.mate == null || now >= entry.retryTime)
+                {
+                    avoidedMates.RemoveAt(index);
+                }
+                else if (entry.mate == mate)
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        // Both animals stop where they are for the courtship. The partner was checked to be available just before.
+        void BeginCourtship(SeekFood partner)
+        {
+            partner.EnterCourtship(this, leads: false);
+            EnterCourtship(partner, leads: true);
+        }
+
+        void EnterCourtship(SeekFood partner, bool leads)
+        {
+            ClearTargets();
+            currentMate = partner;
+            currentState = State.Courting;
+            leadsCourtship = leads;
+            courtshipTimer = 0f;
+            TryResetPath();
+        }
+
+        // Both animals count down the courtship; the one that led it then decides whether a child is born. Fertility
+        // fades with genetic distance, and after a courtship without a child each looks for someone else.
+        void UpdateCourtship(float deltaTime)
+        {
+            SeekFood partner = currentMate;
+            if (partner == null || !partner.IsAlive || partner.currentState != State.Courting ||
+                partner.currentMate != this)
+            {
+                EndCourtship();
                 return;
             }
 
-            mateChaseTimer += deltaTime;
-            UpdatePathToMovingTarget(currentMate);
-
-            // Close enough to court is the same distance as close enough to strike.
-            float courtshipRangeSquared = CurrentAttackRange * CurrentAttackRange;
-            if ((transform.position - currentMate.transform.position).sqrMagnitude <= courtshipRangeSquared)
+            courtshipTimer += deltaTime;
+            if (!leadsCourtship || courtshipTimer < courtshipDuration)
             {
-                BeginCourtship(currentMate);
+                return;
             }
-            else if (IsCurrentMateOutOfReach())
+
+            float fertility = GeneticFertility(partner);
+            EndCourtship();
+            if (fertility < 1f && Random.value >= fertility)
             {
-                GiveUpOnCurrentMate();
+                AvoidMate(partner);
+                partner.AvoidMate(this);
+                return;
+            }
+
+            bool atPopulationCeiling = SpeciesManager.Instance != null &&
+                                       SpeciesManager.Instance.IsAtPopulationCeilingFor(inWater);
+            // At the ceiling, or with nowhere for the child to be born, the mate search ends on the next frame.
+            if (!atPopulationCeiling && ReproduceWith(partner))
+            {
+                StopMateSearch();
+                partner.StopMateSearch();
             }
         }
-    }
 
-    // Follows prey or a partner, refreshing the route as the target moves, no more often than the refresh
-    // interval allows.
-    void UpdatePathToMovingTarget(SeekFood target)
-    {
-        Vector3 targetPosition = target.transform.position;
-        float movementThreshold = Mathf.Max(0f, preyPathTargetMovementThreshold);
-        bool targetChanged = lastPreyPathTarget != target;
-        bool targetMoved = !hasPreyPathDestination ||
-                           (targetPosition - lastPreyPathDestination).sqrMagnitude >=
-                           movementThreshold * movementThreshold;
-        bool pathMissing = !agent.pathPending && !agent.hasPath;
-
-        if (preyPathRefreshTimer <= 0f &&
-            (targetChanged || targetMoved || pathMissing))
+        // Ends a courtship, finished or interrupted, for both animals.
+        void EndCourtship()
         {
-            if (TrySetPreyDestination(targetPosition))
+            SeekFood partner = currentMate;
+            LeaveCourtship();
+            if (partner != null && partner.currentState == State.Courting && partner.currentMate == this)
             {
-                lastPreyPathTarget = target;
-                lastPreyPathDestination = targetPosition;
-                hasPreyPathDestination = true;
+                partner.LeaveCourtship();
             }
-            preyPathRefreshTimer = CalculatePreyPathRefreshInterval();
         }
-    }
 
-    // Like IsCurrentFoodOutOfReach, for a partner that moves: the chase is taking far longer than crossing the
-    // field of view would, or the route stops well short of where the partner was (across water the animal
-    // can't swim, or up a cliff).
-    bool IsCurrentMateOutOfReach()
-    {
-        float speed = Mathf.Max(0.1f, GetCurrentMovementSpeed());
-        if (mateChaseTimer >= Mathf.Max(maximumFoodChaseDuration, 3f * visionRadius / speed))
+        void LeaveCourtship()
         {
+            currentMate = null;
+            leadsCourtship = false;
+            courtshipTimer = 0f;
+            currentState = State.Idling;
+            timer = actionTimer;
+            decisionTimer = 0f;
+        }
+
+        void TryAttack(SeekFood prey)
+        {
+            if (attackCooldownTimer > 0f || !IsViablePrey(prey) ||
+                currentEnergy < attackEnergyCost || currentStamina < attackStaminaCost)
+            {
+                return;
+            }
+
+            float cooldown = Mathf.Max(0.01f, attackCooldown);
+            int catchUpLimit = Mathf.Max(1, maximumCatchUpAttacksPerFrame);
+            int attacksResolved = 0;
+
+            while (!isDying && attackCooldownTimer <= 0f && attacksResolved < catchUpLimit &&
+                   IsViablePrey(prey) && currentEnergy >= attackEnergyCost &&
+                   currentStamina >= attackStaminaCost)
+            {
+                currentEnergy = Mathf.Max(0f, currentEnergy - attackEnergyCost);
+                currentStamina = Mathf.Max(0f, currentStamina - attackStaminaCost);
+                attackCooldownTimer += cooldown;
+                prey.TakeDamage(strength, this);
+                attacksResolved++;
+            }
+
+            if (attacksResolved > 0 && currentState == State.Hunting)
+            {
+                unproductiveHuntTimer = 0f;
+            }
+
+            if (attacksResolved >= catchUpLimit && attackCooldownTimer <= 0f)
+            {
+                attackCooldownTimer = cooldown;
+            }
+        }
+
+        float CalculatePreyPathRefreshInterval()
+        {
+            float maximumRealInterval = Mathf.Max(0.02f, preyPathRefreshIntervalRealSeconds);
+            float minimumRealInterval = Mathf.Clamp(minimumPreyPathRefreshIntervalRealSeconds,
+                                                    0.02f, maximumRealInterval);
+            float simulatedInterval = Mathf.Max(0.1f, preyPathRefreshIntervalSimulatedSeconds);
+            float speed = Mathf.Max(0.01f, Time.timeScale);
+            float simulationDrivenRealInterval = simulatedInterval / speed;
+            return Mathf.Clamp(simulationDrivenRealInterval,
+                               minimumRealInterval, maximumRealInterval);
+        }
+
+        void ResetPreyPathTracking()
+        {
+            preyPathRefreshTimer = 0f;
+            lastPreyPathTarget = null;
+            lastPreyPathDestination = Vector3.zero;
+            hasPreyPathDestination = false;
+        }
+
+        void UpdateFailedHuntMemory(float deltaTime)
+        {
+            if (temporarilyAvoidedPrey == null)
+            {
+                failedHuntCooldownTimer = 0f;
+                return;
+            }
+
+            failedHuntCooldownTimer -= deltaTime;
+            if (failedHuntCooldownTimer <= 0f)
+            {
+                temporarilyAvoidedPrey = null;
+                failedHuntCooldownTimer = 0f;
+            }
+        }
+
+        bool IsTemporarilyAvoidedPrey(SeekFood possiblePrey)
+        {
+            return possiblePrey != null && possiblePrey == temporarilyAvoidedPrey &&
+                   failedHuntCooldownTimer > 0f;
+        }
+
+        bool TryAbandonUnproductiveHunt(float deltaTime)
+        {
+            if (currentState != State.Hunting || !IsViablePrey(currentPreyTarget))
+            {
+                unproductiveHuntTimer = 0f;
+                return false;
+            }
+
+            unproductiveHuntTimer += deltaTime;
+            float energyFraction = maxEnergy <= Mathf.Epsilon
+                ? 0f
+                : Mathf.Clamp01(currentEnergy / maxEnergy);
+            bool timedOut = unproductiveHuntTimer >=
+                            Mathf.Max(0.1f, maximumUnproductiveHuntDuration);
+            bool energyTooLow = energyFraction <= Mathf.Clamp01(minimumHuntEnergyFraction);
+            if (!timedOut && !energyTooLow)
+            {
+                return false;
+            }
+
+            SeekFood abandonedPrey = currentPreyTarget;
+            temporarilyAvoidedPrey = abandonedPrey;
+            failedHuntCooldownTimer = Mathf.Max(0.1f, failedHuntCooldown);
+            unproductiveHuntTimer = 0f;
+            ClearTargets();
+            ResetPreyPathTracking();
+            currentState = State.Idling;
+            timer = 0f;
+            decisionTimer = 0f;
+            TryResetPath();
+
+            if (SpeciesManager.Instance != null && SpeciesManager.Instance.ShouldLogLifecycleEvents)
+            {
+                string reason = energyTooLow ? "low energy" : "an unsuccessful pursuit";
+                Debug.Log($"{gameObject.name} abandoned {abandonedPrey.gameObject.name} after {reason}.");
+            }
+
             return true;
         }
 
-        if (agent == null || !agent.enabled || !agent.isOnNavMesh || agent.pathPending || !agent.hasPath ||
-            agent.pathStatus == NavMeshPathStatus.PathComplete || !hasPreyPathDestination)
+        void UpdateThreatMemory(float deltaTime)
         {
-            return false;
-        }
-
-        Vector3 shortfall = agent.pathEndPosition - lastPreyPathDestination;
-        shortfall.y = 0f;
-        float range = CurrentAttackRange;
-        return shortfall.sqrMagnitude > range * range;
-    }
-
-    void GiveUpOnCurrentMate()
-    {
-        AvoidMate(currentMate);
-        ClearTargets();
-        mateChaseTimer = 0f;
-        currentState = State.Idling;
-        timer = 0f;
-        decisionTimer = 0f;
-        TryResetPath();
-    }
-
-    void AvoidMate(SeekFood mate)
-    {
-        if (mate == null)
-        {
-            return;
-        }
-
-        // A short memory is enough; the oldest entry makes room.
-        if (avoidedMates.Count >= 4)
-        {
-            avoidedMates.RemoveAt(0);
-        }
-
-        avoidedMates.Add(new AvoidedMate { mate = mate, retryTime = Time.time + AvoidedMateMemory });
-    }
-
-    bool IsAvoidedMate(SeekFood mate)
-    {
-        float now = Time.time;
-        for (int index = avoidedMates.Count - 1; index >= 0; index--)
-        {
-            AvoidedMate entry = avoidedMates[index];
-            if (entry.mate == null || now >= entry.retryTime)
+            for (int index = rememberedThreats.Count - 1; index >= 0; index--)
             {
-                avoidedMates.RemoveAt(index);
-            }
-            else if (entry.mate == mate)
-            {
-                return true;
+                ThreatMemory memory = rememberedThreats[index];
+                memory.timeRemaining -= deltaTime;
+                if (!IsViablePrey(memory.attacker) || memory.timeRemaining <= 0f)
+                {
+                    rememberedThreats.RemoveAt(index);
+                }
             }
         }
 
-        return false;
-    }
-
-    // Both animals stop where they are for the courtship. The partner was checked to be available just before.
-    void BeginCourtship(SeekFood partner)
-    {
-        partner.EnterCourtship(this, leads: false);
-        EnterCourtship(partner, leads: true);
-    }
-
-    void EnterCourtship(SeekFood partner, bool leads)
-    {
-        ClearTargets();
-        currentMate = partner;
-        currentState = State.Courting;
-        leadsCourtship = leads;
-        courtshipTimer = 0f;
-        TryResetPath();
-    }
-
-    // Both animals count down the courtship; the one that led it then decides whether a child is born. Fertility
-    // fades with genetic distance, and after a courtship without a child each looks for someone else.
-    void UpdateCourtship(float deltaTime)
-    {
-        SeekFood partner = currentMate;
-        if (partner == null || !partner.IsAlive || partner.currentState != State.Courting ||
-            partner.currentMate != this)
+        void RememberThreat(SeekFood attacker)
         {
-            EndCourtship();
-            return;
-        }
-
-        courtshipTimer += deltaTime;
-        if (!leadsCourtship || courtshipTimer < courtshipDuration)
-        {
-            return;
-        }
-
-        float fertility = GeneticFertility(partner);
-        EndCourtship();
-        if (fertility < 1f && Random.value >= fertility)
-        {
-            AvoidMate(partner);
-            partner.AvoidMate(this);
-            return;
-        }
-
-        bool atPopulationCeiling = SpeciesManager.Instance != null &&
-                                   SpeciesManager.Instance.IsAtPopulationCeilingFor(inWater);
-        // At the ceiling, or with nowhere for the child to be born, the mate search ends on the next frame.
-        if (!atPopulationCeiling && ReproduceWith(partner))
-        {
-            StopMateSearch();
-            partner.StopMateSearch();
-        }
-    }
-
-    // Ends a courtship, finished or interrupted, for both animals.
-    void EndCourtship()
-    {
-        SeekFood partner = currentMate;
-        LeaveCourtship();
-        if (partner != null && partner.currentState == State.Courting && partner.currentMate == this)
-        {
-            partner.LeaveCourtship();
-        }
-    }
-
-    void LeaveCourtship()
-    {
-        currentMate = null;
-        leadsCourtship = false;
-        courtshipTimer = 0f;
-        currentState = State.Idling;
-        timer = actionTimer;
-        decisionTimer = 0f;
-    }
-
-    void TryAttack(SeekFood prey)
-    {
-        if (attackCooldownTimer > 0f || !IsViablePrey(prey) ||
-            currentEnergy < attackEnergyCost || currentStamina < attackStaminaCost)
-        {
-            return;
-        }
-
-        float cooldown = Mathf.Max(0.01f, attackCooldown);
-        int catchUpLimit = Mathf.Max(1, maximumCatchUpAttacksPerFrame);
-        int attacksResolved = 0;
-
-        while (!isDying && attackCooldownTimer <= 0f && attacksResolved < catchUpLimit &&
-               IsViablePrey(prey) && currentEnergy >= attackEnergyCost &&
-               currentStamina >= attackStaminaCost)
-        {
-            currentEnergy = Mathf.Max(0f, currentEnergy - attackEnergyCost);
-            currentStamina = Mathf.Max(0f, currentStamina - attackStaminaCost);
-            attackCooldownTimer += cooldown;
-            prey.TakeDamage(strength, this);
-            attacksResolved++;
-        }
-
-        if (attacksResolved > 0 && currentState == State.Hunting)
-        {
-            unproductiveHuntTimer = 0f;
-        }
-
-        if (attacksResolved >= catchUpLimit && attackCooldownTimer <= 0f)
-        {
-            attackCooldownTimer = cooldown;
-        }
-    }
-
-    float CalculatePreyPathRefreshInterval()
-    {
-        float maximumRealInterval = Mathf.Max(0.02f, preyPathRefreshIntervalRealSeconds);
-        float minimumRealInterval = Mathf.Clamp(minimumPreyPathRefreshIntervalRealSeconds,
-                                                0.02f, maximumRealInterval);
-        float simulatedInterval = Mathf.Max(0.1f, preyPathRefreshIntervalSimulatedSeconds);
-        float speed = Mathf.Max(0.01f, Time.timeScale);
-        float simulationDrivenRealInterval = simulatedInterval / speed;
-        return Mathf.Clamp(simulationDrivenRealInterval,
-                           minimumRealInterval, maximumRealInterval);
-    }
-
-    void ResetPreyPathTracking()
-    {
-        preyPathRefreshTimer = 0f;
-        lastPreyPathTarget = null;
-        lastPreyPathDestination = Vector3.zero;
-        hasPreyPathDestination = false;
-    }
-
-    void UpdateFailedHuntMemory(float deltaTime)
-    {
-        if (temporarilyAvoidedPrey == null)
-        {
-            failedHuntCooldownTimer = 0f;
-            return;
-        }
-
-        failedHuntCooldownTimer -= deltaTime;
-        if (failedHuntCooldownTimer <= 0f)
-        {
-            temporarilyAvoidedPrey = null;
-            failedHuntCooldownTimer = 0f;
-        }
-    }
-
-    bool IsTemporarilyAvoidedPrey(SeekFood possiblePrey)
-    {
-        return possiblePrey != null && possiblePrey == temporarilyAvoidedPrey &&
-               failedHuntCooldownTimer > 0f;
-    }
-
-    bool TryAbandonUnproductiveHunt(float deltaTime)
-    {
-        if (currentState != State.Hunting || !IsViablePrey(currentPreyTarget))
-        {
-            unproductiveHuntTimer = 0f;
-            return false;
-        }
-
-        unproductiveHuntTimer += deltaTime;
-        float energyFraction = maxEnergy <= Mathf.Epsilon
-            ? 0f
-            : Mathf.Clamp01(currentEnergy / maxEnergy);
-        bool timedOut = unproductiveHuntTimer >=
-                        Mathf.Max(0.1f, maximumUnproductiveHuntDuration);
-        bool energyTooLow = energyFraction <= Mathf.Clamp01(minimumHuntEnergyFraction);
-        if (!timedOut && !energyTooLow)
-        {
-            return false;
-        }
-
-        SeekFood abandonedPrey = currentPreyTarget;
-        temporarilyAvoidedPrey = abandonedPrey;
-        failedHuntCooldownTimer = Mathf.Max(0.1f, failedHuntCooldown);
-        unproductiveHuntTimer = 0f;
-        ClearTargets();
-        ResetPreyPathTracking();
-        currentState = State.Idling;
-        timer = 0f;
-        decisionTimer = 0f;
-        TryResetPath();
-
-        if (SpeciesManager.Instance != null && SpeciesManager.Instance.ShouldLogLifecycleEvents)
-        {
-            string reason = energyTooLow ? "low energy" : "an unsuccessful pursuit";
-            Debug.Log($"{gameObject.name} abandoned {abandonedPrey.gameObject.name} after {reason}.");
-        }
-
-        return true;
-    }
-
-    void UpdateThreatMemory(float deltaTime)
-    {
-        for (int index = rememberedThreats.Count - 1; index >= 0; index--)
-        {
-            ThreatMemory memory = rememberedThreats[index];
-            memory.timeRemaining -= deltaTime;
-            if (!IsViablePrey(memory.attacker) || memory.timeRemaining <= 0f)
+            if (!IsViablePrey(attacker))
             {
-                rememberedThreats.RemoveAt(index);
-            }
-        }
-    }
-
-    void RememberThreat(SeekFood attacker)
-    {
-        if (!IsViablePrey(attacker))
-        {
-            return;
-        }
-
-        foreach (ThreatMemory memory in rememberedThreats)
-        {
-            if (memory.attacker == attacker)
-            {
-                memory.timeRemaining = Mathf.Max(0.1f, threatMemoryDuration);
                 return;
             }
+
+            foreach (ThreatMemory memory in rememberedThreats)
+            {
+                if (memory.attacker == attacker)
+                {
+                    memory.timeRemaining = Mathf.Max(0.1f, threatMemoryDuration);
+                    return;
+                }
+            }
+
+            rememberedThreats.Add(new ThreatMemory
+            {
+                attacker = attacker,
+                timeRemaining = Mathf.Max(0.1f, threatMemoryDuration)
+            });
         }
 
-        rememberedThreats.Add(new ThreatMemory
+        bool IsRememberedThreat(SeekFood possibleThreat)
         {
-            attacker = attacker,
-            timeRemaining = Mathf.Max(0.1f, threatMemoryDuration)
-        });
-    }
-
-    bool IsRememberedThreat(SeekFood possibleThreat)
-    {
-        foreach (ThreatMemory memory in rememberedThreats)
-        {
-            if (memory.attacker == possibleThreat && memory.timeRemaining > 0f)
+            foreach (ThreatMemory memory in rememberedThreats)
             {
-                return true;
+                if (memory.attacker == possibleThreat && memory.timeRemaining > 0f)
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        void UpdateStamina(float deltaTime)
+        {
+            if (currentState == State.Fleeing)
+            {
+                currentStamina = Mathf.Max(0f, currentStamina - fleeStaminaCostPerSecond * deltaTime);
+            }
+            else
+            {
+                currentStamina = Mathf.Min(maxStamina,
+                                           currentStamina + staminaRecoveryPerSecond * deltaTime *
+                                           (thermalResponse != null ? thermalResponse.StaminaRecoveryMultiplier : 1f));
             }
         }
 
-        return false;
-    }
+        void RefreshMovementSpeed()
+        {
+            if (agent == null)
+            {
+                return;
+            }
 
-    void UpdateStamina(float deltaTime)
-    {
-        if (currentState == State.Fleeing)
-        {
-            currentStamina = Mathf.Max(0f, currentStamina - fleeStaminaCostPerSecond * deltaTime);
-        }
-        else
-        {
-            currentStamina = Mathf.Min(maxStamina,
-                                       currentStamina + staminaRecoveryPerSecond * deltaTime *
-                                       (thermalResponse != null ? thermalResponse.StaminaRecoveryMultiplier : 1f));
-        }
-    }
+            float multiplier = 1f;
+            if (currentState == State.Fleeing)
+            {
+                multiplier = currentStamina > 0f ? fleeSpeedMultiplier : exhaustedSpeedMultiplier;
+            }
 
-    void RefreshMovementSpeed()
-    {
-        if (agent == null)
-        {
-            return;
+            float temperatureMultiplier = thermalResponse != null ? thermalResponse.MovementMultiplier : 1f;
+            float baseSpeed = inWater
+                ? (geneMoveSpeed > 0f ? geneMoveSpeed : moveSpeed) * waterMovement.SpeedMultiplier(bodyEffects.swimmingAbility)
+                : moveSpeed;
+            agent.speed = Mathf.Max(0.01f, baseSpeed * multiplier * temperatureMultiplier);
         }
 
-        float multiplier = 1f;
-        if (currentState == State.Fleeing)
+        // The animal is in water when its NavMesh position is down on the flat water surface. Water changes its
+        // speed (RefreshMovementSpeed) and energy use (CurrentEnergyDrainPerSecond), and the body settles half under.
+        // Only swimmers reach dead zones, which are deep, so only they look for one under them.
+        void UpdateWater(float deltaTime)
         {
-            multiplier = currentStamina > 0f ? fleeSpeedMultiplier : exhaustedSpeedMultiplier;
+            inWater = agent != null && agent.isOnNavMesh && WaterAccess.IsInWater(agent.nextPosition.y);
+            inDeadZone = inWater && CanSwimDeepWater &&
+                         NavMesh.SamplePosition(agent.nextPosition, out _, DeadZoneProbeRadius,
+                                                1 << WaterAccess.DeadZoneArea);
+
+            float target = inWater ? 1f : 0f;
+            // The legs measure their height in the first frames, so the body only moves once they have.
+            if (floatAmount == target || agent == null || (bodyView != null && !bodyView.HasMeasuredLift))
+            {
+                return;
+            }
+
+            floatAmount = Mathf.MoveTowards(floatAmount, target, deltaTime / FloatTransitionSeconds);
+            agent.baseOffset = Mathf.Lerp(standingBaseOffset, floatingBaseOffset, floatAmount);
         }
 
-        float temperatureMultiplier = thermalResponse != null ? thermalResponse.MovementMultiplier : 1f;
-        float baseSpeed = inWater
-            ? (geneMoveSpeed > 0f ? geneMoveSpeed : moveSpeed) * waterMovement.SpeedMultiplier(bodyEffects.swimmingAbility)
-            : moveSpeed;
-        agent.speed = Mathf.Max(0.01f, baseSpeed * multiplier * temperatureMultiplier);
-    }
-
-    // The animal is in water when its NavMesh position is down on the flat water surface. Water changes its
-    // speed (RefreshMovementSpeed) and energy use (CurrentEnergyDrainPerSecond), and the body settles half under.
-    // Only swimmers reach dead zones, which are deep, so only they look for one under them.
-    void UpdateWater(float deltaTime)
-    {
-        inWater = agent != null && agent.isOnNavMesh && WaterAccess.IsInWater(agent.nextPosition.y);
-        inDeadZone = inWater && CanSwimDeepWater &&
-                     NavMesh.SamplePosition(agent.nextPosition, out _, DeadZoneProbeRadius,
-                                            1 << WaterAccess.DeadZoneArea);
-
-        float target = inWater ? 1f : 0f;
-        // The legs measure their height in the first frames, so the body only moves once they have.
-        if (floatAmount == target || agent == null || (bodyView != null && !bodyView.HasMeasuredLift))
+        // Deep water is closed to animals that can't swim in it, and water costs each animal's route planning what it
+        // really costs that animal in time and energy, so routes only cross water when it is worth it.
+        void ConfigureWaterAccess()
         {
-            return;
+            float ability = bodyEffects.swimmingAbility;
+            swimmingAbility = ability;
+            agent.areaMask = WaterAccess.AreaMask(CanSwimDeepWater);
+            float waterCost = waterMovement.PathCost(ability, bodyEffects.speedMultiplier);
+            agent.SetAreaCost(WaterAccess.ShallowWaterArea, waterCost);
+            agent.SetAreaCost(WaterAccess.DeepWaterArea, waterCost);
+            agent.SetAreaCost(WaterAccess.DeadZoneArea, waterCost * SeaBiomeMap.CurrentRules.deadZoneEnergyCost);
+
+            // Floating puts the middle of the body at the waterline; legs and the lower half are under water.
+            standingBaseOffset = agent.baseOffset;
+            MeshFilter bodyFilter = GetComponent<MeshFilter>();
+            floatingBaseOffset = bodyFilter != null && bodyFilter.sharedMesh != null
+                ? -bodyFilter.sharedMesh.bounds.center.y
+                : standingBaseOffset;
+            floatAmount = 0f;
         }
 
-        floatAmount = Mathf.MoveTowards(floatAmount, target, deltaTime / FloatTransitionSeconds);
-        agent.baseOffset = Mathf.Lerp(standingBaseOffset, floatingBaseOffset, floatAmount);
-    }
-
-    // Deep water is closed to animals that can't swim in it, and water costs each animal's route planning what it
-    // really costs that animal in time and energy, so routes only cross water when it is worth it.
-    void ConfigureWaterAccess()
-    {
-        float ability = bodyEffects.swimmingAbility;
-        swimmingAbility = ability;
-        agent.areaMask = WaterAccess.AreaMask(CanSwimDeepWater);
-        float waterCost = waterMovement.PathCost(ability, bodyEffects.speedMultiplier);
-        agent.SetAreaCost(WaterAccess.ShallowWaterArea, waterCost);
-        agent.SetAreaCost(WaterAccess.DeepWaterArea, waterCost);
-        agent.SetAreaCost(WaterAccess.DeadZoneArea, waterCost * SeaBiomeMap.CurrentRules.deadZoneEnergyCost);
-
-        // Floating puts the middle of the body at the waterline; legs and the lower half are under water.
-        standingBaseOffset = agent.baseOffset;
-        MeshFilter bodyFilter = GetComponent<MeshFilter>();
-        floatingBaseOffset = bodyFilter != null && bodyFilter.sharedMesh != null
-            ? -bodyFilter.sharedMesh.bounds.center.y
-            : standingBaseOffset;
-        floatAmount = 0f;
-    }
-
-    public float GetCurrentMovementSpeed()
-    {
-        return agent == null ? Mathf.Max(0.01f, moveSpeed) : Mathf.Max(0.01f, agent.speed);
-    }
-
-    public float GetCombatPower()
-    {
-        float attacksPerSecond = 1f / Mathf.Max(0.01f, attackCooldown);
-        float staminaReadiness = 0.25f + 0.75f * Mathf.Clamp01(StaminaFraction);
-        return Mathf.Max(0f, strength) * attacksPerSecond *
-               Mathf.Clamp01(HealthFraction) * staminaReadiness;
-    }
-
-    void UpdateFleeing(float deltaTime)
-    {
-        timer += deltaTime;
-        if (timer >= fleeDuration)
+        public float GetCurrentMovementSpeed()
         {
-            currentFleeThreat = null;
-            currentFleeDirection = Vector3.zero;
-            currentState = State.Idling;
-            timer = actionTimer;
-            decisionTimer = 0f;
-            return;
+            return agent == null ? Mathf.Max(0.01f, moveSpeed) : Mathf.Max(0.01f, agent.speed);
         }
 
-        if (!agent.pathPending && agent.remainingDistance <= agent.stoppingDistance)
+        public float GetCombatPower()
         {
-            SetFleeDestination(currentFleeDirection, currentFleeThreat);
+            float attacksPerSecond = 1f / Mathf.Max(0.01f, attackCooldown);
+            float staminaReadiness = 0.25f + 0.75f * Mathf.Clamp01(StaminaFraction);
+            return Mathf.Max(0f, strength) * attacksPerSecond *
+                   Mathf.Clamp01(HealthFraction) * staminaReadiness;
         }
-    }
 
-    void SetFleeDestination(Vector3 direction, SeekFood fallbackThreat)
-    {
-        Vector3 away = direction;
-        away.y = 0f;
-        if (away.sqrMagnitude < 0.01f && IsViablePrey(fallbackThreat))
+        void UpdateFleeing(float deltaTime)
         {
-            away = transform.position - fallbackThreat.transform.position;
+            timer += deltaTime;
+            if (timer >= fleeDuration)
+            {
+                currentFleeThreat = null;
+                currentFleeDirection = Vector3.zero;
+                currentState = State.Idling;
+                timer = actionTimer;
+                decisionTimer = 0f;
+                return;
+            }
+
+            if (!agent.pathPending && agent.remainingDistance <= agent.stoppingDistance)
+            {
+                SetFleeDestination(currentFleeDirection, currentFleeThreat);
+            }
+        }
+
+        void SetFleeDestination(Vector3 direction, SeekFood fallbackThreat)
+        {
+            Vector3 away = direction;
             away.y = 0f;
+            if (away.sqrMagnitude < 0.01f && IsViablePrey(fallbackThreat))
+            {
+                away = transform.position - fallbackThreat.transform.position;
+                away.y = 0f;
+            }
+
+            if (away.sqrMagnitude < 0.01f)
+            {
+                Vector2 randomDirection = Random.insideUnitCircle.normalized;
+                away = new Vector3(randomDirection.x, 0f, randomDirection.y);
+            }
+
+            Vector3 candidate = transform.position + away.normalized * fleeDistance;
+            ClampDestinationCandidate(ref candidate);
+
+            if (NavMesh.SamplePosition(candidate, out NavMeshHit hit, 25f, DestinationAreas))
+            {
+                TrySetDestination(hit.position);
+            }
         }
 
-        if (away.sqrMagnitude < 0.01f)
-        {
-            Vector2 randomDirection = Random.insideUnitCircle.normalized;
-            away = new Vector3(randomDirection.x, 0f, randomDirection.y);
-        }
-
-        Vector3 candidate = transform.position + away.normalized * fleeDistance;
-        ClampDestinationCandidate(ref candidate);
-
-        if (NavMesh.SamplePosition(candidate, out NavMeshHit hit, 25f, DestinationAreas))
-        {
-            TrySetDestination(hit.position);
-        }
-    }
-
-    void UpdateEscaping(float deltaTime)
-    {
-        timer += deltaTime;
-        if (timer >= actionTimer)
-        {
-            currentState = State.Idling;
-            timer = actionTimer;
-            decisionTimer = 0f;
-        }
-    }
-
-    void UpdateIdleAndWander(float deltaTime)
-    {
-        if (currentState == State.Idling)
+        void UpdateEscaping(float deltaTime)
         {
             timer += deltaTime;
             if (timer >= actionTimer)
             {
+                currentState = State.Idling;
+                timer = actionTimer;
+                decisionTimer = 0f;
+            }
+        }
+
+        void UpdateIdleAndWander(float deltaTime)
+        {
+            if (currentState == State.Idling)
+            {
+                timer += deltaTime;
+                if (timer >= actionTimer)
+                {
+                    PickNextAction();
+                    timer = 0f;
+                }
+                return;
+            }
+
+            if (currentState == State.Wandering && !agent.pathPending &&
+                (!agent.hasPath || agent.remainingDistance <= agent.stoppingDistance + 0.1f))
+            {
                 PickNextAction();
-                timer = 0f;
             }
-            return;
         }
 
-        if (currentState == State.Wandering && !agent.pathPending &&
-            (!agent.hasPath || agent.remainingDistance <= agent.stoppingDistance + 0.1f))
+        void PickNextAction()
         {
-            PickNextAction();
-        }
-    }
+            // An animal wading where it can't swim doesn't stop to rest: every moment in the water is costly.
+            bool wading = inWater && !CanSwimDeepWater;
+            if (!wading && Random.value <= 0.5f)
+            {
+                currentState = State.Idling;
+                TryResetPath();
+                return;
+            }
 
-    void PickNextAction()
-    {
-        // An animal wading where it can't swim doesn't stop to rest: every moment in the water is costly.
-        bool wading = inWater && !CanSwimDeepWater;
-        if (!wading && Random.value <= 0.5f)
-        {
-            currentState = State.Idling;
-            TryResetPath();
-            return;
-        }
+            currentState = State.Wandering;
+            Vector2 offset = Random.insideUnitCircle * wanderRadius;
+            Vector3 candidate = transform.position + new Vector3(offset.x, 0f, offset.y);
+            ClampDestinationCandidate(ref candidate);
 
-        currentState = State.Wandering;
-        Vector2 offset = Random.insideUnitCircle * wanderRadius;
-        Vector3 candidate = transform.position + new Vector3(offset.x, 0f, offset.y);
-        ClampDestinationCandidate(ref candidate);
-
-        float sampleDistance = Mathf.Clamp(wanderRadius, 1f, 25f);
-        // A wader with no land near its random spot heads for the nearest land instead.
-        if (NavMesh.SamplePosition(candidate, out NavMeshHit hit, sampleDistance, DestinationAreas) ||
-            (wading && NavMesh.SamplePosition(transform.position, out hit, Mathf.Max(wanderRadius, 25f),
-                                              DestinationAreas)))
-        {
-            TrySetDestination(hit.position);
-        }
-        else
-        {
-            currentState = State.Idling;
-            TryResetPath();
-        }
-    }
-
-    // Where the animal may choose to wander or flee to: swimmers anywhere they can swim except dead zones, everyone
-    // else only onto land. Routes there can still cross water when that is worth it.
-    int DestinationAreas => CanSwimDeepWater && agent != null
-        ? agent.areaMask & ~(1 << WaterAccess.DeadZoneArea)
-        : WaterAccess.LandAreas;
-
-    void ClampDestinationCandidate(ref Vector3 candidate)
-    {
-        AnimalTerrainWorld terrainWorld = AnimalTerrainWorld.Active;
-        if (!CanSwimDeepWater || terrainWorld == null || !WaterAccess.HasWater)
-        {
-            ClampCandidateToTerrain(ref candidate);
-            return;
+            float sampleDistance = Mathf.Clamp(wanderRadius, 1f, 25f);
+            // A wader with no land near its random spot heads for the nearest land instead.
+            if (NavMesh.SamplePosition(candidate, out NavMeshHit hit, sampleDistance, DestinationAreas) ||
+                (wading && NavMesh.SamplePosition(transform.position, out hit, Mathf.Max(wanderRadius, 25f),
+                                                  DestinationAreas)))
+            {
+                TrySetDestination(hit.position);
+            }
+            else
+            {
+                currentState = State.Idling;
+                TryResetPath();
+            }
         }
 
-        // A swimmer may head out over the water, so it only needs to stay in the habitat, at the height of the
-        // ground or the water surface there.
-        candidate = terrainWorld.ClampToHabitableBounds(candidate);
-        if (terrainWorld.TryGetSample(candidate, out EnvironmentSample sample) && sample.isValid)
-        {
-            candidate.y = Mathf.Max(sample.position.y, WaterAccess.SurfaceHeight);
-        }
-    }
+        // Where the animal may choose to wander or flee to: swimmers anywhere they can swim except dead zones, everyone
+        // else only onto land. Routes there can still cross water when that is worth it.
+        int DestinationAreas => CanSwimDeepWater && agent != null
+            ? agent.areaMask & ~(1 << WaterAccess.DeadZoneArea)
+            : WaterAccess.LandAreas;
 
-    void ClampCandidateToTerrain(ref Vector3 candidate)
-    {
-        AnimalTerrainWorld terrainWorld = AnimalTerrainWorld.Active;
-        if (terrainWorld != null)
+        void ClampDestinationCandidate(ref Vector3 candidate)
         {
+            AnimalTerrainWorld terrainWorld = AnimalTerrainWorld.Active;
+            if (!CanSwimDeepWater || terrainWorld == null || !WaterAccess.HasWater)
+            {
+                ClampCandidateToTerrain(ref candidate);
+                return;
+            }
+
+            // A swimmer may head out over the water, so it only needs to stay in the habitat, at the height of the
+            // ground or the water surface there.
             candidate = terrainWorld.ClampToHabitableBounds(candidate);
-            if (terrainWorld.TryFindWalkableGround(candidate, 30f, out Vector3 ground))
+            if (terrainWorld.TryGetSample(candidate, out EnvironmentSample sample) && sample.isValid)
             {
-                candidate = ground;
+                candidate.y = Mathf.Max(sample.position.y, WaterAccess.SurfaceHeight);
             }
-            return;
         }
 
-        Terrain terrain = Terrain.activeTerrain;
-        if (terrain == null)
+        void ClampCandidateToTerrain(ref Vector3 candidate)
         {
-            return;
+            AnimalTerrainWorld terrainWorld = AnimalTerrainWorld.Active;
+            if (terrainWorld != null)
+            {
+                candidate = terrainWorld.ClampToHabitableBounds(candidate);
+                if (terrainWorld.TryFindWalkableGround(candidate, 30f, out Vector3 ground))
+                {
+                    candidate = ground;
+                }
+                return;
+            }
+
+            Terrain terrain = Terrain.activeTerrain;
+            if (terrain == null)
+            {
+                return;
+            }
+
+            Vector3 terrainPosition = terrain.transform.position;
+            Vector3 terrainSize = terrain.terrainData.size;
+            const float borderInset = 6f;
+            candidate.x = Mathf.Clamp(candidate.x, terrainPosition.x + borderInset, terrainPosition.x + terrainSize.x - borderInset);
+            candidate.z = Mathf.Clamp(candidate.z, terrainPosition.z + borderInset, terrainPosition.z + terrainSize.z - borderInset);
+            candidate.y = terrainPosition.y + terrain.SampleHeight(candidate);
         }
 
-        Vector3 terrainPosition = terrain.transform.position;
-        Vector3 terrainSize = terrain.terrainData.size;
-        const float borderInset = 6f;
-        candidate.x = Mathf.Clamp(candidate.x, terrainPosition.x + borderInset, terrainPosition.x + terrainSize.x - borderInset);
-        candidate.z = Mathf.Clamp(candidate.z, terrainPosition.z + borderInset, terrainPosition.z + terrainSize.z - borderInset);
-        candidate.y = terrainPosition.y + terrain.SampleHeight(candidate);
-    }
-
-    bool IsCurrentFoodTargetAvailable()
-    {
-        return currentFoodTarget != null && currentFoodTarget.IsAvailable &&
-               (!currentFoodTarget.IsSpoiled || CanEatSpoiledFood);
-    }
-
-    // True once chasing the current food can't work: its route stops short of it (across water or up a cliff),
-    // the animal has walked as far as the route goes and still can't eat it, or the chase is taking far longer
-    // than crossing its whole field of view would. Without this, relatives that all pick the same unreachable
-    // plant wait at the shore until they starve.
-    bool IsCurrentFoodOutOfReach()
-    {
-        float speed = Mathf.Max(0.1f, GetCurrentMovementSpeed());
-        float allowedChaseTime = Mathf.Max(maximumFoodChaseDuration, 3f * visionRadius / speed);
-        if (foodChaseTimer >= allowedChaseTime)
+        bool IsCurrentFoodTargetAvailable()
         {
-            return true;
+            return currentFoodTarget != null && currentFoodTarget.IsAvailable &&
+                   (!currentFoodTarget.IsSpoiled || CanEatSpoiledFood);
         }
 
-        if (agent == null || !agent.enabled || !agent.isOnNavMesh || agent.pathPending)
+        // True once chasing the current food can't work: its route stops short of it (across water or up a cliff),
+        // the animal has walked as far as the route goes and still can't eat it, or the chase is taking far longer
+        // than crossing its whole field of view would. Without this, relatives that all pick the same unreachable
+        // plant wait at the shore until they starve.
+        bool IsCurrentFoodOutOfReach()
         {
-            return false;
-        }
-
-        if (agent.hasPath && agent.pathStatus != NavMeshPathStatus.PathComplete)
-        {
-            Vector3 shortfall = agent.pathEndPosition - currentFoodTarget.transform.position;
-            shortfall.y = 0f;
-            float range = CurrentFoodInteractionRange;
-            if (shortfall.sqrMagnitude > range * range)
+            float speed = Mathf.Max(0.1f, GetCurrentMovementSpeed());
+            float allowedChaseTime = Mathf.Max(maximumFoodChaseDuration, 3f * visionRadius / speed);
+            if (foodChaseTimer >= allowedChaseTime)
             {
                 return true;
             }
-        }
 
-        return !agent.hasPath || agent.remainingDistance <= agent.stoppingDistance + 0.5f;
-    }
-
-    void GiveUpOnCurrentFood()
-    {
-        FoodItem abandonedFood = currentFoodTarget;
-        RememberUnreachableFood(abandonedFood);
-        ClearTargets();
-        foodChaseTimer = 0f;
-        currentState = State.Idling;
-        timer = 0f;
-        decisionTimer = 0f;
-        TryResetPath();
-
-        if (SpeciesManager.Instance != null && SpeciesManager.Instance.ShouldLogLifecycleEvents)
-        {
-            Debug.Log($"{gameObject.name} gave up on {abandonedFood.gameObject.name}, which it could not reach.");
-        }
-    }
-
-    void RememberUnreachableFood(FoodItem food)
-    {
-        if (food == null)
-        {
-            return;
-        }
-
-        // A short memory is enough; the oldest entry makes room.
-        if (unreachableFood.Count >= 16)
-        {
-            unreachableFood.RemoveAt(0);
-        }
-
-        unreachableFood.Add(new UnreachableFood
-        {
-            food = food,
-            retryTime = Time.time + Mathf.Max(0.1f, unreachableFoodMemory)
-        });
-    }
-
-    bool IsRememberedAsUnreachable(FoodItem food)
-    {
-        float now = Time.time;
-        for (int index = unreachableFood.Count - 1; index >= 0; index--)
-        {
-            UnreachableFood entry = unreachableFood[index];
-            if (entry.food == null || now >= entry.retryTime)
+            if (agent == null || !agent.enabled || !agent.isOnNavMesh || agent.pathPending)
             {
-                unreachableFood.RemoveAt(index);
+                return false;
             }
-            else if (entry.food == food)
+
+            if (agent.hasPath && agent.pathStatus != NavMeshPathStatus.PathComplete)
             {
-                return true;
+                Vector3 shortfall = agent.pathEndPosition - currentFoodTarget.transform.position;
+                shortfall.y = 0f;
+                float range = CurrentFoodInteractionRange;
+                if (shortfall.sqrMagnitude > range * range)
+                {
+                    return true;
+                }
             }
+
+            return !agent.hasPath || agent.remainingDistance <= agent.stoppingDistance + 0.5f;
         }
 
-        return false;
-    }
-
-    public bool IsTargetingAsPrey(SeekFood possibleTarget)
-    {
-        return possibleTarget != null && currentPreyTarget == possibleTarget &&
-               (currentState == State.Hunting || currentState == State.Fighting);
-    }
-
-    public bool IsFightingThreat(SeekFood possibleThreat)
-    {
-        return possibleThreat != null && currentState == State.Fighting &&
-               currentPreyTarget == possibleThreat;
-    }
-
-    public bool IsViablePrey(SeekFood possiblePrey)
-    {
-        if (possiblePrey == null || possiblePrey == this || !possiblePrey.IsAlive)
+        void GiveUpOnCurrentFood()
         {
-            return false;
-        }
-
-        if (avoidCloseKinPredation && IsCloseRelative(possiblePrey))
-        {
-            return false;
-        }
-
-        return allowCannibalism || possiblePrey.speciesName != speciesName;
-    }
-
-    bool IsCloseRelative(SeekFood other)
-    {
-        if (other == null)
-        {
-            return false;
-        }
-
-        bool isParentOrChild = other == firstParent || other == secondParent ||
-                               other.firstParent == this || other.secondParent == this;
-        if (isParentOrChild)
-        {
-            return true;
-        }
-
-        bool sharesFirstParent = firstParent != null &&
-                                 (other.firstParent == firstParent || other.secondParent == firstParent);
-        bool sharesSecondParent = secondParent != null &&
-                                  (other.firstParent == secondParent || other.secondParent == secondParent);
-        return sharesFirstParent || sharesSecondParent;
-    }
-
-    // A scavenger gut digests plants worse.
-    public float GetDigestionEfficiency(FoodType foodType)
-    {
-        float affinity = Mathf.Clamp01(dietAffinity);
-        float minimum = Mathf.Clamp01(minimumDietEfficiency);
-        return foodType == FoodType.Plant
-            ? (minimum + (1f - minimum) * (1f - affinity)) * perkEffects.plantDigestionMultiplier
-            : minimum + (1f - minimum) * affinity;
-    }
-
-    public bool CanReachFood(FoodItem food)
-    {
-        // Food out in deep water is only for animals that can swim there.
-        if (food == null || (food.inDeepWater && !CanSwimDeepWater))
-        {
-            return false;
-        }
-
-        float verticalReachNeeded = Mathf.Max(0f, food.transform.position.y - transform.position.y);
-        float requiredReach = Mathf.Max(verticalReachNeeded, Mathf.Max(0f, food.requiredFeedingReach));
-        return FeedingReach >= requiredReach;
-    }
-
-    // Spoiled food is only for animals with a scavenger gut.
-    public bool CanEat(FoodItem food)
-    {
-        return food != null && (!food.IsSpoiled || CanEatSpoiledFood) && CanReachFood(food);
-    }
-
-    public float EstimateDigestibleEnergy(FoodItem food)
-    {
-        return !CanEat(food)
-            ? 0f
-            : food.nutritionValue * GetDigestionEfficiency(food.foodType);
-    }
-
-    bool TryConsumeFood(FoodItem food)
-    {
-        // Courting animals don't stop to eat food they happen to touch.
-        if (food == null || currentState == State.Courting || !CanEat(food) || currentEnergy >= maxEnergy ||
-            !food.TryConsume(out float rawNutrition, out FoodType foodType))
-        {
-            return false;
-        }
-
-        float digestibleEnergy = rawNutrition * GetDigestionEfficiency(foodType);
-        float acceptedEnergy = Mathf.Min(maxEnergy - currentEnergy, digestibleEnergy);
-        currentEnergy += acceptedEnergy;
-
-        if (SpeciesManager.Instance != null)
-        {
-            SpeciesManager.Instance.RecordConsumption(this, foodType, rawNutrition, acceptedEnergy);
-        }
-
-        ClearTargets();
-        currentState = State.Idling;
-        timer = actionTimer;
-        decisionTimer = 0f;
-        TryResetPath();
-        return true;
-    }
-
-    void OnTriggerEnter(Collider other)
-    {
-        if (other.CompareTag("Food"))
-        {
-            TryConsumeFood(other.GetComponent<FoodItem>());
-        }
-        else if (other.CompareTag("Border") && currentState != State.Escaping)
-        {
-            BeginBoundaryEscape();
-        }
-    }
-
-    bool IsOutsideTerrainBounds()
-    {
-        AnimalTerrainWorld terrainWorld = AnimalTerrainWorld.Active;
-        if (terrainWorld != null)
-        {
-            return !terrainWorld.IsInsideHabitableBounds(transform.position);
-        }
-
-        Terrain terrain = Terrain.activeTerrain;
-        if (terrain == null)
-        {
-            return false;
-        }
-
-        Vector3 position = transform.position;
-        Vector3 terrainPosition = terrain.transform.position;
-        Vector3 terrainSize = terrain.terrainData.size;
-        return position.x < terrainPosition.x || position.x > terrainPosition.x + terrainSize.x ||
-               position.z < terrainPosition.z || position.z > terrainPosition.z + terrainSize.z;
-    }
-
-    void BeginBoundaryEscape()
-    {
-        ClearTargets();
-        currentState = State.Escaping;
-        timer = 0f;
-
-        AnimalTerrainWorld terrainWorld = AnimalTerrainWorld.Active;
-        if (terrainWorld != null)
-        {
-            if (terrainWorld.TryFindWalkableGroundTowardCenter(
-                transform.position, Mathf.Max(50f, wanderRadius), out Vector3 destination) &&
-                NavMesh.SamplePosition(destination, out NavMeshHit terrainHit, 25f, NavMesh.AllAreas))
-            {
-                TrySetDestination(terrainHit.position);
-            }
-            return;
-        }
-
-        Terrain terrain = Terrain.activeTerrain;
-        if (terrain == null)
-        {
-            return;
-        }
-
-        Vector3 terrainPosition = terrain.transform.position;
-        Vector3 terrainSize = terrain.terrainData.size;
-        Vector3 center = new Vector3(terrainPosition.x + terrainSize.x / 2f,
-                                     transform.position.y,
-                                     terrainPosition.z + terrainSize.z / 2f);
-        if (NavMesh.SamplePosition(center, out NavMeshHit hit, 25f, NavMesh.AllAreas))
-        {
-            TrySetDestination(hit.position);
-        }
-    }
-
-    public void TakeDamage(float amount, SeekFood attacker = null)
-    {
-        if (isDying || amount <= 0f)
-        {
-            return;
-        }
-
-        if (IsViablePrey(attacker))
-        {
-            RememberThreat(attacker);
+            FoodItem abandonedFood = currentFoodTarget;
+            RememberUnreachableFood(abandonedFood);
             ClearTargets();
+            foodChaseTimer = 0f;
             currentState = State.Idling;
+            timer = 0f;
             decisionTimer = 0f;
             TryResetPath();
+
+            if (SpeciesManager.Instance != null && SpeciesManager.Instance.ShouldLogLifecycleEvents)
+            {
+                Debug.Log($"{gameObject.name} gave up on {abandonedFood.gameObject.name}, which it could not reach.");
+            }
         }
 
-        if (attacker != null)
+        void RememberUnreachableFood(FoodItem food)
         {
-            // Venom: the attacker takes back part of every bite, whatever this animal's plates absorb.
-            if (perkEffects.venomDamageReturned > 0f)
+            if (food == null)
             {
-                attacker.TakeVenomDamage(amount * perkEffects.venomDamageReturned);
+                return;
             }
 
-            // Plates absorb part of every attack, but not starvation.
-            amount *= bodyEffects.damageTakenMultiplier;
+            // A short memory is enough; the oldest entry makes room.
+            if (unreachableFood.Count >= 16)
+            {
+                unreachableFood.RemoveAt(0);
+            }
+
+            unreachableFood.Add(new UnreachableFood
+            {
+                food = food,
+                retryTime = Time.time + Mathf.Max(0.1f, unreachableFoodMemory)
+            });
         }
 
-        currentHealth -= amount;
-        if (currentHealth <= 0f)
+        bool IsRememberedAsUnreachable(FoodItem food)
         {
-            Die(attacker == null ? AgentDeathCause.Starvation : AgentDeathCause.Predation, attacker);
-        }
-    }
+            float now = Time.time;
+            for (int index = unreachableFood.Count - 1; index >= 0; index--)
+            {
+                UnreachableFood entry = unreachableFood[index];
+                if (entry.food == null || now >= entry.retryTime)
+                {
+                    unreachableFood.RemoveAt(index);
+                }
+                else if (entry.food == food)
+                {
+                    return true;
+                }
+            }
 
-    // Damage from biting a venomous animal. It isn't an attack, so plates don't absorb it and the bitten animal
-    // isn't remembered as a threat.
-    void TakeVenomDamage(float amount)
-    {
-        if (isDying || amount <= 0f)
-        {
-            return;
-        }
-
-        currentHealth -= amount;
-        if (currentHealth <= 0f)
-        {
-            Die(AgentDeathCause.Venom, null);
-        }
-    }
-
-    void Die(AgentDeathCause cause, SeekFood killer)
-    {
-        if (isDying)
-        {
-            return;
-        }
-
-        isDying = true;
-        deathCause = cause;
-        float carcassEnergy = EstimatedCarcassRawEnergy;
-        currentEnergy = 0f;
-
-        if (carcassEnergy > 0f)
-        {
-            float carcassLinearScale = Mathf.Pow(BodyMassFactor, 1f / 3f);
-            FoodItem.CreateCarcass(transform.position, carcassEnergy, speciesName,
-                                   carcassLifetime, carcassScale * carcassLinearScale, carcassSpoiledLifetime);
-        }
-
-        if (cause == AgentDeathCause.Predation && SpeciesManager.Instance != null)
-        {
-            SpeciesManager.Instance.RecordKill(killer);
-        }
-
-        if (SpeciesManager.Instance != null && SpeciesManager.Instance.ShouldLogLifecycleEvents)
-        {
-            Debug.Log($"{gameObject.name} died from {cause}.");
-        }
-        Destroy(gameObject);
-    }
-
-    // Clones itself: the child gets a mutated copy of this genome, with all of its harmful mutations, and half
-    // this animal's energy.
-    void Reproduce()
-    {
-        AnimalGenome childGenome = genome.CreateMutatedCopy(mutationChance, mutationMagnitude, bodyPlanMutation,
-                                                            out bool mutated);
-        mutated |= childGenome.TryAddHarmfulMutation(harmfulMutationChance);
-        mutated |= childGenome.MutatePerks(perkFlipChance);
-        TryGiveBirth(childGenome, mutated, null);
-    }
-
-    // The child takes each gene, body site and perk from a random parent, and each parent's harmful mutations
-    // with a 50% chance each, then mutates. Each parent gives it a share of its energy. Returns false when the
-    // child had nowhere to be born.
-    bool ReproduceWith(SeekFood partner)
-    {
-        AnimalGenome childGenome = AnimalGenome.Recombine(genome, partner.genome)
-                                               .CreateMutatedCopy(mutationChance, mutationMagnitude,
-                                                                  bodyPlanMutation, out bool mutated);
-        mutated |= childGenome.TryAddHarmfulMutation(harmfulMutationChance);
-        mutated |= childGenome.MutatePerks(perkFlipChance);
-        return TryGiveBirth(childGenome, mutated, partner);
-    }
-
-    // The child is born beside this animal, with a partner as its second parent or none for a clone.
-    bool TryGiveBirth(AnimalGenome childGenome, bool mutated, SeekFood partner)
-    {
-        // The child's genome comes first, because whether it can swim decides where it can be born.
-        bool childSwims = waterMovement.CanSwimDeepWater(AnimalBodyPlan.Evaluate(childGenome).swimmingAbility);
-        if (!TryFindBirthPosition(childSwims, out Vector3 spawnPosition))
-        {
-            // Out in deep water a child that can't swim would have nowhere to be: try again a little later.
-            reproductionCooldownTimer = PostponedBirthDelay;
             return false;
         }
 
-        float childEnergy;
-        if (partner == null)
+        public bool IsTargetingAsPrey(SeekFood possibleTarget)
         {
-            childEnergy = currentEnergy * 0.5f;
-            currentEnergy -= childEnergy;
+            return possibleTarget != null && currentPreyTarget == possibleTarget &&
+                   (currentState == State.Hunting || currentState == State.Fighting);
         }
-        else
-        {
-            childEnergy = PayForChild() + partner.PayForChild();
-        }
-        reproductionCooldownTimer = reproductionCooldown;
 
-        GameObject child = Instantiate(gameObject, spawnPosition, transform.rotation);
-        SeekFood childScript = child.GetComponent<SeekFood>();
-        if (childScript == null)
+        public bool IsFightingThreat(SeekFood possibleThreat)
         {
+            return possibleThreat != null && currentState == State.Fighting &&
+                   currentPreyTarget == possibleThreat;
+        }
+
+        public bool IsViablePrey(SeekFood possiblePrey)
+        {
+            if (possiblePrey == null || possiblePrey == this || !possiblePrey.IsAlive)
+            {
+                return false;
+            }
+
+            if (avoidCloseKinPredation && IsCloseRelative(possiblePrey))
+            {
+                return false;
+            }
+
+            return allowCannibalism || possiblePrey.speciesName != speciesName;
+        }
+
+        bool IsCloseRelative(SeekFood other)
+        {
+            if (other == null)
+            {
+                return false;
+            }
+
+            bool isParentOrChild = other == firstParent || other == secondParent ||
+                                   other.firstParent == this || other.secondParent == this;
+            if (isParentOrChild)
+            {
+                return true;
+            }
+
+            bool sharesFirstParent = firstParent != null &&
+                                     (other.firstParent == firstParent || other.secondParent == firstParent);
+            bool sharesSecondParent = secondParent != null &&
+                                      (other.firstParent == secondParent || other.secondParent == secondParent);
+            return sharesFirstParent || sharesSecondParent;
+        }
+
+        // A scavenger gut digests plants worse.
+        public float GetDigestionEfficiency(FoodType foodType)
+        {
+            float affinity = Mathf.Clamp01(dietAffinity);
+            float minimum = Mathf.Clamp01(minimumDietEfficiency);
+            return foodType == FoodType.Plant
+                ? (minimum + (1f - minimum) * (1f - affinity)) * perkEffects.plantDigestionMultiplier
+                : minimum + (1f - minimum) * affinity;
+        }
+
+        public bool CanReachFood(FoodItem food)
+        {
+            // Food out in deep water is only for animals that can swim there.
+            if (food == null || (food.inDeepWater && !CanSwimDeepWater))
+            {
+                return false;
+            }
+
+            float verticalReachNeeded = Mathf.Max(0f, food.transform.position.y - transform.position.y);
+            float requiredReach = Mathf.Max(verticalReachNeeded, Mathf.Max(0f, food.requiredFeedingReach));
+            return FeedingReach >= requiredReach;
+        }
+
+        // Spoiled food is only for animals with a scavenger gut.
+        public bool CanEat(FoodItem food)
+        {
+            return food != null && (!food.IsSpoiled || CanEatSpoiledFood) && CanReachFood(food);
+        }
+
+        public float EstimateDigestibleEnergy(FoodItem food)
+        {
+            return !CanEat(food)
+                ? 0f
+                : food.nutritionValue * GetDigestionEfficiency(food.foodType);
+        }
+
+        bool TryConsumeFood(FoodItem food)
+        {
+            // Courting animals don't stop to eat food they happen to touch.
+            if (food == null || currentState == State.Courting || !CanEat(food) || currentEnergy >= maxEnergy ||
+                !food.TryConsume(out float rawNutrition, out FoodType foodType))
+            {
+                return false;
+            }
+
+            float digestibleEnergy = rawNutrition * GetDigestionEfficiency(foodType);
+            float acceptedEnergy = Mathf.Min(maxEnergy - currentEnergy, digestibleEnergy);
+            currentEnergy += acceptedEnergy;
+
+            if (SpeciesManager.Instance != null)
+            {
+                SpeciesManager.Instance.RecordConsumption(this, foodType, rawNutrition, acceptedEnergy);
+            }
+
+            ClearTargets();
+            currentState = State.Idling;
+            timer = actionTimer;
+            decisionTimer = 0f;
+            TryResetPath();
             return true;
         }
 
-        childScript.currentEnergy = childEnergy;
-        childScript.currentAge = 0f;
-        childScript.generation = Mathf.Max(generation, partner != null ? partner.generation : 0) + 1;
-        childScript.firstParent = this;
-        childScript.secondParent = partner;
-        // The child copies this genome into its traits when it starts.
-        childScript.genome = childGenome;
-
-        // Offspring start in their (first) parent's species. SpeciesManager splits species whose members drift
-        // genetically apart.
-        childScript.speciesName = speciesName;
-        childScript.speciesColor = speciesColor;
-        child.name = $"Capsule_Species_{childScript.speciesName}";
-
-        if (SpeciesManager.Instance != null)
+        void OnTriggerEnter(Collider other)
         {
-            SpeciesManager.Instance.RecordReproduction(this, mutated, sexual: partner != null);
+            if (other.CompareTag("Food"))
+            {
+                TryConsumeFood(other.GetComponent<FoodItem>());
+            }
+            else if (other.CompareTag("Border") && currentState != State.Escaping)
+            {
+                BeginBoundaryEscape();
+            }
         }
 
-        return true;
-    }
-
-    // One parent's share of a child of two parents. Paying it also starts this parent's rest before breeding again.
-    float PayForChild()
-    {
-        float share = currentEnergy * Mathf.Clamp01(matingEnergyShare);
-        currentEnergy -= share;
-        reproductionCooldownTimer = reproductionCooldown;
-        return share;
-    }
-
-    // Beside the parent, on firm ground nearby if there is any, in a part of the NavMesh the child can use.
-    bool TryFindBirthPosition(bool childSwims, out Vector3 position)
-    {
-        Vector2 offset = Random.insideUnitCircle * 3f;
-        position = transform.position + new Vector3(offset.x, 0f, offset.y);
-        AnimalTerrainWorld terrainWorld = AnimalTerrainWorld.Active;
-        if (terrainWorld != null &&
-            terrainWorld.TryFindWalkableGround(position, 12f, out Vector3 groundPosition))
+        bool IsOutsideTerrainBounds()
         {
-            position = groundPosition;
+            AnimalTerrainWorld terrainWorld = AnimalTerrainWorld.Active;
+            if (terrainWorld != null)
+            {
+                return !terrainWorld.IsInsideHabitableBounds(transform.position);
+            }
+
+            Terrain terrain = Terrain.activeTerrain;
+            if (terrain == null)
+            {
+                return false;
+            }
+
+            Vector3 position = transform.position;
+            Vector3 terrainPosition = terrain.transform.position;
+            Vector3 terrainSize = terrain.terrainData.size;
+            return position.x < terrainPosition.x || position.x > terrainPosition.x + terrainSize.x ||
+                   position.z < terrainPosition.z || position.z > terrainPosition.z + terrainSize.z;
         }
 
-        int childAreas = WaterAccess.AreaMask(childSwims);
-        if (NavMesh.SamplePosition(position, out NavMeshHit hit, 6f, childAreas))
+        void BeginBoundaryEscape()
         {
-            position = hit.position;
+            ClearTargets();
+            currentState = State.Escaping;
+            timer = 0f;
+
+            AnimalTerrainWorld terrainWorld = AnimalTerrainWorld.Active;
+            if (terrainWorld != null)
+            {
+                if (terrainWorld.TryFindWalkableGroundTowardCenter(
+                    transform.position, Mathf.Max(50f, wanderRadius), out Vector3 destination) &&
+                    NavMesh.SamplePosition(destination, out NavMeshHit terrainHit, 25f, NavMesh.AllAreas))
+                {
+                    TrySetDestination(terrainHit.position);
+                }
+                return;
+            }
+
+            Terrain terrain = Terrain.activeTerrain;
+            if (terrain == null)
+            {
+                return;
+            }
+
+            Vector3 terrainPosition = terrain.transform.position;
+            Vector3 terrainSize = terrain.terrainData.size;
+            Vector3 center = new Vector3(terrainPosition.x + terrainSize.x / 2f,
+                                         transform.position.y,
+                                         terrainPosition.z + terrainSize.z / 2f);
+            if (NavMesh.SamplePosition(center, out NavMeshHit hit, 25f, NavMesh.AllAreas))
+            {
+                TrySetDestination(hit.position);
+            }
+        }
+
+        public void TakeDamage(float amount, SeekFood attacker = null)
+        {
+            if (isDying || amount <= 0f)
+            {
+                return;
+            }
+
+            if (IsViablePrey(attacker))
+            {
+                RememberThreat(attacker);
+                ClearTargets();
+                currentState = State.Idling;
+                decisionTimer = 0f;
+                TryResetPath();
+            }
+
+            if (attacker != null)
+            {
+                // Venom: the attacker takes back part of every bite, whatever this animal's plates absorb.
+                if (perkEffects.venomDamageReturned > 0f)
+                {
+                    attacker.TakeVenomDamage(amount * perkEffects.venomDamageReturned);
+                }
+
+                // Plates absorb part of every attack, but not starvation.
+                amount *= bodyEffects.damageTakenMultiplier;
+            }
+
+            currentHealth -= amount;
+            if (currentHealth <= 0f)
+            {
+                Die(attacker == null ? AgentDeathCause.Starvation : AgentDeathCause.Predation, attacker);
+            }
+        }
+
+        // Damage from biting a venomous animal. It isn't an attack, so plates don't absorb it and the bitten animal
+        // isn't remembered as a threat.
+        void TakeVenomDamage(float amount)
+        {
+            if (isDying || amount <= 0f)
+            {
+                return;
+            }
+
+            currentHealth -= amount;
+            if (currentHealth <= 0f)
+            {
+                Die(AgentDeathCause.Venom, null);
+            }
+        }
+
+        void Die(AgentDeathCause cause, SeekFood killer)
+        {
+            if (isDying)
+            {
+                return;
+            }
+
+            isDying = true;
+            deathCause = cause;
+            float carcassEnergy = EstimatedCarcassRawEnergy;
+            currentEnergy = 0f;
+
+            if (carcassEnergy > 0f)
+            {
+                float carcassLinearScale = Mathf.Pow(BodyMassFactor, 1f / 3f);
+                FoodItem.CreateCarcass(transform.position, carcassEnergy, speciesName,
+                                       carcassLifetime, carcassScale * carcassLinearScale, carcassSpoiledLifetime);
+            }
+
+            if (cause == AgentDeathCause.Predation && SpeciesManager.Instance != null)
+            {
+                SpeciesManager.Instance.RecordKill(killer);
+            }
+
+            if (SpeciesManager.Instance != null && SpeciesManager.Instance.ShouldLogLifecycleEvents)
+            {
+                Debug.Log($"{gameObject.name} died from {cause}.");
+            }
+            Destroy(gameObject);
+        }
+
+        // Clones itself: the child gets a mutated copy of this genome, with all of its harmful mutations, and half
+        // this animal's energy.
+        void Reproduce()
+        {
+            AnimalGenome childGenome = genome.CreateMutatedCopy(mutationChance, mutationMagnitude, bodyPlanMutation,
+                                                                out bool mutated);
+            mutated |= childGenome.TryAddHarmfulMutation(harmfulMutationChance);
+            mutated |= childGenome.MutatePerks(perkFlipChance);
+            TryGiveBirth(childGenome, mutated, null);
+        }
+
+        // The child takes each gene, body site and perk from a random parent, and each parent's harmful mutations
+        // with a 50% chance each, then mutates. Each parent gives it a share of its energy. Returns false when the
+        // child had nowhere to be born.
+        bool ReproduceWith(SeekFood partner)
+        {
+            AnimalGenome childGenome = AnimalGenome.Recombine(genome, partner.genome)
+                                                   .CreateMutatedCopy(mutationChance, mutationMagnitude,
+                                                                      bodyPlanMutation, out bool mutated);
+            mutated |= childGenome.TryAddHarmfulMutation(harmfulMutationChance);
+            mutated |= childGenome.MutatePerks(perkFlipChance);
+            return TryGiveBirth(childGenome, mutated, partner);
+        }
+
+        // The child is born beside this animal, with a partner as its second parent or none for a clone.
+        bool TryGiveBirth(AnimalGenome childGenome, bool mutated, SeekFood partner)
+        {
+            // The child's genome comes first, because whether it can swim decides where it can be born.
+            bool childSwims = waterMovement.CanSwimDeepWater(AnimalBodyPlan.Evaluate(childGenome).swimmingAbility);
+            if (!TryFindBirthPosition(childSwims, out Vector3 spawnPosition))
+            {
+                // Out in deep water a child that can't swim would have nowhere to be: try again a little later.
+                reproductionCooldownTimer = PostponedBirthDelay;
+                return false;
+            }
+
+            float childEnergy;
+            if (partner == null)
+            {
+                childEnergy = currentEnergy * 0.5f;
+                currentEnergy -= childEnergy;
+            }
+            else
+            {
+                childEnergy = PayForChild() + partner.PayForChild();
+            }
+            reproductionCooldownTimer = reproductionCooldown;
+
+            GameObject child = Instantiate(gameObject, spawnPosition, transform.rotation);
+            SeekFood childScript = child.GetComponent<SeekFood>();
+            if (childScript == null)
+            {
+                return true;
+            }
+
+            childScript.currentEnergy = childEnergy;
+            childScript.currentAge = 0f;
+            childScript.generation = Mathf.Max(generation, partner != null ? partner.generation : 0) + 1;
+            childScript.firstParent = this;
+            childScript.secondParent = partner;
+            // The child copies this genome into its traits when it starts.
+            childScript.genome = childGenome;
+
+            // Offspring start in their (first) parent's species. SpeciesManager splits species whose members drift
+            // genetically apart.
+            childScript.speciesName = speciesName;
+            childScript.speciesColor = speciesColor;
+            child.name = $"Capsule_Species_{childScript.speciesName}";
+
+            if (SpeciesManager.Instance != null)
+            {
+                SpeciesManager.Instance.RecordReproduction(this, mutated, sexual: partner != null);
+            }
+
             return true;
         }
 
-        if (childSwims || !inWater)
+        // One parent's share of a child of two parents. Paying it also starts this parent's rest before breeding again.
+        float PayForChild()
         {
-            position = transform.position;
-            return true;
+            float share = currentEnergy * Mathf.Clamp01(matingEnergyShare);
+            currentEnergy -= share;
+            reproductionCooldownTimer = reproductionCooldown;
+            return share;
         }
 
-        // The parent is swimming and the child can't: the nearest ground or shallow water, if it's close enough.
-        if (NavMesh.SamplePosition(transform.position, out hit, NonSwimmerBirthSearchRadius, childAreas))
+        // Beside the parent, on firm ground nearby if there is any, in a part of the NavMesh the child can use.
+        bool TryFindBirthPosition(bool childSwims, out Vector3 position)
         {
-            position = hit.position;
-            return true;
-        }
+            Vector2 offset = Random.insideUnitCircle * 3f;
+            position = transform.position + new Vector3(offset.x, 0f, offset.y);
+            AnimalTerrainWorld terrainWorld = AnimalTerrainWorld.Active;
+            if (terrainWorld != null &&
+                terrainWorld.TryFindWalkableGround(position, 12f, out Vector3 groundPosition))
+            {
+                position = groundPosition;
+            }
 
-        return false;
-    }
+            int childAreas = WaterAccess.AreaMask(childSwims);
+            if (NavMesh.SamplePosition(position, out NavMeshHit hit, 6f, childAreas))
+            {
+                position = hit.position;
+                return true;
+            }
 
-    void InitializeGenome()
-    {
-        // Offspring receive a genome from their parent. Founders placed by a scene or the demo
-        // bootstrap describe their genes through their inspector values instead.
-        if (genome == null || !genome.IsValid)
-        {
-            genome = CaptureGenome();
-        }
+            if (childSwims || !inWater)
+            {
+                position = transform.position;
+                return true;
+            }
 
-        ApplyGenome();
-        ApplyBodyPlan();
-    }
+            // The parent is swimming and the child can't: the nearest ground or shallow water, if it's close enough.
+            if (NavMesh.SamplePosition(transform.position, out hit, NonSwimmerBirthSearchRadius, childAreas))
+            {
+                position = hit.position;
+                return true;
+            }
 
-    // Body parts and perks adjust the traits the genes have just set (see AnimalBodyPlan and AnimalPerks). The
-    // genome keeps the unadjusted values, so their effects never compound over generations.
-    void ApplyBodyPlan()
-    {
-        bodyEffects = AnimalBodyPlan.Evaluate(genome);
-        perkEffects = AnimalPerks.Evaluate(genome);
-        geneMoveSpeed = moveSpeed;
-        moveSpeed *= bodyEffects.speedMultiplier;
-        strength *= bodyEffects.strengthMultiplier;
-        visionRadius *= bodyEffects.visionMultiplier;
-        thermalResponse.coldTolerance = Mathf.Max(0f, thermalResponse.coldTolerance + bodyEffects.coldToleranceChange +
-                                                      perkEffects.coldToleranceChange);
-        thermalResponse.heatTolerance = Mathf.Max(0f, thermalResponse.heatTolerance + bodyEffects.heatToleranceChange +
-                                                      perkEffects.heatToleranceChange);
-        bodyPlan = AnimalBodyPlan.Describe(genome);
-        perks = AnimalPerks.Describe(genome);
-    }
-
-    AnimalGenome CaptureGenome()
-    {
-        AnimalGenome captured = AnimalGenome.Create();
-        captured[AnimalGene.MoveSpeed] = moveSpeed;
-        captured[AnimalGene.Strength] = strength;
-        captured[AnimalGene.BodyBulk] = bodyBulk;
-        captured[AnimalGene.BodyHeight] = bodyHeight;
-        captured[AnimalGene.VisionRadius] = visionRadius;
-        captured[AnimalGene.MaxEnergy] = maxEnergy;
-        captured[AnimalGene.MaxStamina] = maxStamina;
-        captured[AnimalGene.MaxHealth] = maxHealth;
-        captured[AnimalGene.MaturityTime] = maturityTime;
-        captured[AnimalGene.MaxLifespan] = maxLifespan;
-        captured[AnimalGene.DietAffinity] = dietAffinity;
-        captured[AnimalGene.PreferredTemperature] = thermalResponse.preferredTemperature;
-        captured[AnimalGene.ColdTolerance] = thermalResponse.coldTolerance;
-        captured[AnimalGene.HeatTolerance] = thermalResponse.heatTolerance;
-        captured[AnimalGene.SexualDrive] = sexualDrive;
-        return captured;
-    }
-
-    void ApplyGenome()
-    {
-        moveSpeed = genome[AnimalGene.MoveSpeed];
-        strength = genome[AnimalGene.Strength];
-        bodyBulk = genome[AnimalGene.BodyBulk];
-        bodyHeight = genome[AnimalGene.BodyHeight];
-        visionRadius = genome[AnimalGene.VisionRadius];
-        maxEnergy = genome[AnimalGene.MaxEnergy];
-        maxStamina = genome[AnimalGene.MaxStamina];
-        maxHealth = genome[AnimalGene.MaxHealth];
-        maturityTime = genome[AnimalGene.MaturityTime];
-        maxLifespan = genome[AnimalGene.MaxLifespan];
-        dietAffinity = genome[AnimalGene.DietAffinity];
-        thermalResponse.preferredTemperature = genome[AnimalGene.PreferredTemperature];
-        thermalResponse.coldTolerance = genome[AnimalGene.ColdTolerance];
-        thermalResponse.heatTolerance = genome[AnimalGene.HeatTolerance];
-        sexualDrive = genome[AnimalGene.SexualDrive];
-        harmfulMutations = genome.HarmfulMutations;
-    }
-
-    void InitializeBodyProportionReferences()
-    {
-        if (referenceLocalScale == Vector3.zero)
-        {
-            referenceLocalScale = transform.localScale;
-            referenceAgentStoppingDistance = Mathf.Max(0f, agent.stoppingDistance);
-        }
-
-        if (referenceAgentRadius <= 0f || referenceAgentHeight <= 0f)
-        {
-            referenceAgentRadius = Mathf.Max(0.01f, agent.radius);
-            referenceAgentHeight = Mathf.Max(0.01f, agent.height);
-            referenceAgentBaseOffset = agent.baseOffset;
-        }
-    }
-
-    void ApplyBodyProportions()
-    {
-        bodyBulk = Mathf.Clamp(bodyBulk, minimumBodyBulk, maximumBodyBulk);
-        bodyHeight = Mathf.Clamp(bodyHeight, minimumBodyHeight, maximumBodyHeight);
-        transform.localScale = Vector3.Scale(referenceLocalScale,
-                                             new Vector3(bodyBulk, bodyHeight, bodyBulk));
-
-        agent.radius = Mathf.Max(0.01f, referenceAgentRadius * bodyBulk);
-        agent.height = Mathf.Max(0.01f, referenceAgentHeight * bodyHeight);
-        // Legs stand the body up off the ground. The agent's offset is in the scaled local space.
-        agent.baseOffset = referenceAgentBaseOffset * bodyHeight + LegLift / Mathf.Max(0.01f, transform.lossyScale.y);
-    }
-
-    void InitializeMetabolicReference()
-    {
-        if (referenceMoveSpeed <= 0f) referenceMoveSpeed = Mathf.Max(0.01f, moveSpeed);
-        if (referenceStrength <= 0f) referenceStrength = Mathf.Max(0.01f, strength);
-        if (referenceBodyBulk <= 0f) referenceBodyBulk = Mathf.Max(0.01f, bodyBulk);
-        if (referenceBodyHeight <= 0f) referenceBodyHeight = Mathf.Max(0.01f, bodyHeight);
-        if (referenceVisionRadius <= 0f) referenceVisionRadius = Mathf.Max(0.01f, visionRadius);
-        if (referenceMaxEnergy <= 0f) referenceMaxEnergy = Mathf.Max(0.01f, maxEnergy);
-        if (referenceMaxStamina <= 0f) referenceMaxStamina = Mathf.Max(0.01f, maxStamina);
-        if (referenceMaxHealth <= 0f) referenceMaxHealth = Mathf.Max(0.01f, maxHealth);
-    }
-
-    // Harmful mutations and perks add their costs on top of the traits' cost, outside its limits.
-    public void RefreshMetabolicRate()
-    {
-        InitializeMetabolicReference();
-
-        float inheritedCost = perkEffects.energyUseMultiplier *
-                              (genome != null && genome.IsValid
-                                  ? genome.EnergyUseMultiplier(harmfulMutationEnergyCost)
-                                  : 1f);
-        float totalWeight = speedMetabolicWeight + strengthMetabolicWeight + bodyMassMetabolicWeight +
-                            visionMetabolicWeight + energyCapacityMetabolicWeight +
-                            staminaCapacityMetabolicWeight + healthMetabolicWeight;
-        if (totalWeight <= Mathf.Epsilon)
-        {
-            currentEnergyDrainPerSecond = Mathf.Max(0f, baseEnergyDrainPerSecond) * inheritedCost;
-            return;
-        }
-
-        float bulkRatio = Mathf.Max(0.01f, bodyBulk) / referenceBodyBulk;
-        float heightRatio = Mathf.Max(0.01f, bodyHeight) / referenceBodyHeight;
-        // Body parts add their weight; their other advantages (speed, strength, vision) are charged below.
-        float relativeMassBurden = bulkRatio * bulkRatio *
-                                   Mathf.Lerp(1f, heightRatio,
-                                              Mathf.Clamp01(heightMassContribution)) *
-                                   (1f + bodyEffects.partsMass);
-
-        float weightedTraitCost =
-            (Mathf.Max(0.01f, moveSpeed) / referenceMoveSpeed) * speedMetabolicWeight +
-            (Mathf.Max(0.01f, strength) / referenceStrength) * strengthMetabolicWeight +
-            relativeMassBurden * bodyMassMetabolicWeight +
-            (Mathf.Max(0.01f, visionRadius) / referenceVisionRadius) * visionMetabolicWeight +
-            (Mathf.Max(0.01f, maxEnergy) / referenceMaxEnergy) * energyCapacityMetabolicWeight +
-            (Mathf.Max(0.01f, maxStamina) / referenceMaxStamina) * staminaCapacityMetabolicWeight +
-            (Mathf.Max(0.01f, maxHealth) / referenceMaxHealth) * healthMetabolicWeight;
-
-        float minimum = Mathf.Max(0f, minimumMetabolicMultiplier);
-        float maximum = Mathf.Max(minimum, maximumMetabolicMultiplier);
-        float multiplier = Mathf.Clamp(weightedTraitCost / totalWeight, minimum, maximum);
-        currentEnergyDrainPerSecond = Mathf.Max(0f, baseEnergyDrainPerSecond) * multiplier * inheritedCost;
-    }
-
-    // Called by SpeciesManager when this animal's group splits off into a new species.
-    public void AssignSpecies(string newSpeciesName, Color newSpeciesColor)
-    {
-        speciesName = newSpeciesName;
-        speciesColor = newSpeciesColor;
-        gameObject.name = $"Capsule_Species_{speciesName}";
-        ApplySpeciesColor();
-    }
-
-    void ApplySpeciesColor()
-    {
-        MeshRenderer meshRenderer = GetComponent<MeshRenderer>();
-        MaterialPropertyBlock propertyBlock = new MaterialPropertyBlock();
-        meshRenderer.GetPropertyBlock(propertyBlock);
-        propertyBlock.SetColor(BaseColorId, speciesColor);
-        propertyBlock.SetColor(ColorId, speciesColor);
-        meshRenderer.SetPropertyBlock(propertyBlock);
-
-        if (bodyView != null)
-        {
-            bodyView.SetColor(speciesColor);
-        }
-    }
-
-    // Draws this animal's body parts. Offspring copy their parent's part objects, so every animal
-    // rebuilds them from its own genome.
-    void BuildBodyView()
-    {
-        if (bodyView == null && !TryGetComponent(out bodyView))
-        {
-            bodyView = gameObject.AddComponent<AnimalBodyView>();
-        }
-
-        bodyView.Build(genome, Mathf.Max(0f, fullLegLength) * Mathf.Max(0.01f, bodyHeight), speciesColor);
-    }
-
-    // Also ends a courtship, for both animals.
-    void ClearTargets()
-    {
-        if (currentState == State.Courting)
-        {
-            EndCourtship();
-        }
-
-        currentFoodTarget = null;
-        currentPreyTarget = null;
-        currentMate = null;
-    }
-
-    bool TrySetDestination(Vector3 destination)
-    {
-        if (agent == null || !agent.enabled || !agent.isOnNavMesh)
-        {
             return false;
         }
 
-        agent.stoppingDistance = Mathf.Max(0f, referenceAgentStoppingDistance);
-        return agent.SetDestination(destination);
-    }
-
-    bool TrySetPreyDestination(Vector3 destination)
-    {
-        if (agent == null || !agent.enabled || !agent.isOnNavMesh)
+        void InitializeGenome()
         {
-            return false;
+            // Offspring receive a genome from their parent. Founders placed by a scene or the demo
+            // bootstrap describe their genes through their inspector values instead.
+            if (genome == null || !genome.IsValid)
+            {
+                genome = CaptureGenome();
+            }
+
+            ApplyGenome();
+            ApplyBodyPlan();
         }
 
-        float approachDistance = CurrentAttackRange *
-                                 Mathf.Clamp(attackApproachRangeFraction, 0.1f, 0.95f);
-        agent.stoppingDistance = Mathf.Max(referenceAgentStoppingDistance, approachDistance);
-        return agent.SetDestination(destination);
-    }
-
-    void TryResetPath()
-    {
-        if (agent != null && agent.enabled && agent.isOnNavMesh)
+        // Body parts and perks adjust the traits the genes have just set (see AnimalBodyPlan and AnimalPerks). The
+        // genome keeps the unadjusted values, so their effects never compound over generations.
+        void ApplyBodyPlan()
         {
+            bodyEffects = AnimalBodyPlan.Evaluate(genome);
+            perkEffects = AnimalPerks.Evaluate(genome);
+            geneMoveSpeed = moveSpeed;
+            moveSpeed *= bodyEffects.speedMultiplier;
+            strength *= bodyEffects.strengthMultiplier;
+            visionRadius *= bodyEffects.visionMultiplier;
+            thermalResponse.coldTolerance = Mathf.Max(0f, thermalResponse.coldTolerance + bodyEffects.coldToleranceChange +
+                                                          perkEffects.coldToleranceChange);
+            thermalResponse.heatTolerance = Mathf.Max(0f, thermalResponse.heatTolerance + bodyEffects.heatToleranceChange +
+                                                          perkEffects.heatToleranceChange);
+            bodyPlan = AnimalBodyPlan.Describe(genome);
+            perks = AnimalPerks.Describe(genome);
+        }
+
+        AnimalGenome CaptureGenome()
+        {
+            AnimalGenome captured = AnimalGenome.Create();
+            captured[AnimalGene.MoveSpeed] = moveSpeed;
+            captured[AnimalGene.Strength] = strength;
+            captured[AnimalGene.BodyBulk] = bodyBulk;
+            captured[AnimalGene.BodyHeight] = bodyHeight;
+            captured[AnimalGene.VisionRadius] = visionRadius;
+            captured[AnimalGene.MaxEnergy] = maxEnergy;
+            captured[AnimalGene.MaxStamina] = maxStamina;
+            captured[AnimalGene.MaxHealth] = maxHealth;
+            captured[AnimalGene.MaturityTime] = maturityTime;
+            captured[AnimalGene.MaxLifespan] = maxLifespan;
+            captured[AnimalGene.DietAffinity] = dietAffinity;
+            captured[AnimalGene.PreferredTemperature] = thermalResponse.preferredTemperature;
+            captured[AnimalGene.ColdTolerance] = thermalResponse.coldTolerance;
+            captured[AnimalGene.HeatTolerance] = thermalResponse.heatTolerance;
+            captured[AnimalGene.SexualDrive] = sexualDrive;
+            return captured;
+        }
+
+        void ApplyGenome()
+        {
+            moveSpeed = genome[AnimalGene.MoveSpeed];
+            strength = genome[AnimalGene.Strength];
+            bodyBulk = genome[AnimalGene.BodyBulk];
+            bodyHeight = genome[AnimalGene.BodyHeight];
+            visionRadius = genome[AnimalGene.VisionRadius];
+            maxEnergy = genome[AnimalGene.MaxEnergy];
+            maxStamina = genome[AnimalGene.MaxStamina];
+            maxHealth = genome[AnimalGene.MaxHealth];
+            maturityTime = genome[AnimalGene.MaturityTime];
+            maxLifespan = genome[AnimalGene.MaxLifespan];
+            dietAffinity = genome[AnimalGene.DietAffinity];
+            thermalResponse.preferredTemperature = genome[AnimalGene.PreferredTemperature];
+            thermalResponse.coldTolerance = genome[AnimalGene.ColdTolerance];
+            thermalResponse.heatTolerance = genome[AnimalGene.HeatTolerance];
+            sexualDrive = genome[AnimalGene.SexualDrive];
+            harmfulMutations = genome.HarmfulMutations;
+        }
+
+        void InitializeBodyProportionReferences()
+        {
+            if (referenceLocalScale == Vector3.zero)
+            {
+                referenceLocalScale = transform.localScale;
+                referenceAgentStoppingDistance = Mathf.Max(0f, agent.stoppingDistance);
+            }
+
+            if (referenceAgentRadius <= 0f || referenceAgentHeight <= 0f)
+            {
+                referenceAgentRadius = Mathf.Max(0.01f, agent.radius);
+                referenceAgentHeight = Mathf.Max(0.01f, agent.height);
+                referenceAgentBaseOffset = agent.baseOffset;
+            }
+        }
+
+        void ApplyBodyProportions()
+        {
+            bodyBulk = Mathf.Clamp(bodyBulk, minimumBodyBulk, maximumBodyBulk);
+            bodyHeight = Mathf.Clamp(bodyHeight, minimumBodyHeight, maximumBodyHeight);
+            transform.localScale = Vector3.Scale(referenceLocalScale,
+                                                 new Vector3(bodyBulk, bodyHeight, bodyBulk));
+
+            agent.radius = Mathf.Max(0.01f, referenceAgentRadius * bodyBulk);
+            agent.height = Mathf.Max(0.01f, referenceAgentHeight * bodyHeight);
+            // Legs stand the body up off the ground. The agent's offset is in the scaled local space.
+            agent.baseOffset = referenceAgentBaseOffset * bodyHeight + LegLift / Mathf.Max(0.01f, transform.lossyScale.y);
+        }
+
+        void InitializeMetabolicReference()
+        {
+            if (referenceMoveSpeed <= 0f) referenceMoveSpeed = Mathf.Max(0.01f, moveSpeed);
+            if (referenceStrength <= 0f) referenceStrength = Mathf.Max(0.01f, strength);
+            if (referenceBodyBulk <= 0f) referenceBodyBulk = Mathf.Max(0.01f, bodyBulk);
+            if (referenceBodyHeight <= 0f) referenceBodyHeight = Mathf.Max(0.01f, bodyHeight);
+            if (referenceVisionRadius <= 0f) referenceVisionRadius = Mathf.Max(0.01f, visionRadius);
+            if (referenceMaxEnergy <= 0f) referenceMaxEnergy = Mathf.Max(0.01f, maxEnergy);
+            if (referenceMaxStamina <= 0f) referenceMaxStamina = Mathf.Max(0.01f, maxStamina);
+            if (referenceMaxHealth <= 0f) referenceMaxHealth = Mathf.Max(0.01f, maxHealth);
+        }
+
+        // Harmful mutations and perks add their costs on top of the traits' cost, outside its limits.
+        public void RefreshMetabolicRate()
+        {
+            InitializeMetabolicReference();
+
+            float inheritedCost = perkEffects.energyUseMultiplier *
+                                  (genome != null && genome.IsValid
+                                      ? genome.EnergyUseMultiplier(harmfulMutationEnergyCost)
+                                      : 1f);
+            float totalWeight = speedMetabolicWeight + strengthMetabolicWeight + bodyMassMetabolicWeight +
+                                visionMetabolicWeight + energyCapacityMetabolicWeight +
+                                staminaCapacityMetabolicWeight + healthMetabolicWeight;
+            if (totalWeight <= Mathf.Epsilon)
+            {
+                currentEnergyDrainPerSecond = Mathf.Max(0f, baseEnergyDrainPerSecond) * inheritedCost;
+                return;
+            }
+
+            float bulkRatio = Mathf.Max(0.01f, bodyBulk) / referenceBodyBulk;
+            float heightRatio = Mathf.Max(0.01f, bodyHeight) / referenceBodyHeight;
+            // Body parts add their weight; their other advantages (speed, strength, vision) are charged below.
+            float relativeMassBurden = bulkRatio * bulkRatio *
+                                       Mathf.Lerp(1f, heightRatio,
+                                                  Mathf.Clamp01(heightMassContribution)) *
+                                       (1f + bodyEffects.partsMass);
+
+            float weightedTraitCost =
+                (Mathf.Max(0.01f, moveSpeed) / referenceMoveSpeed) * speedMetabolicWeight +
+                (Mathf.Max(0.01f, strength) / referenceStrength) * strengthMetabolicWeight +
+                relativeMassBurden * bodyMassMetabolicWeight +
+                (Mathf.Max(0.01f, visionRadius) / referenceVisionRadius) * visionMetabolicWeight +
+                (Mathf.Max(0.01f, maxEnergy) / referenceMaxEnergy) * energyCapacityMetabolicWeight +
+                (Mathf.Max(0.01f, maxStamina) / referenceMaxStamina) * staminaCapacityMetabolicWeight +
+                (Mathf.Max(0.01f, maxHealth) / referenceMaxHealth) * healthMetabolicWeight;
+
+            float minimum = Mathf.Max(0f, minimumMetabolicMultiplier);
+            float maximum = Mathf.Max(minimum, maximumMetabolicMultiplier);
+            float multiplier = Mathf.Clamp(weightedTraitCost / totalWeight, minimum, maximum);
+            currentEnergyDrainPerSecond = Mathf.Max(0f, baseEnergyDrainPerSecond) * multiplier * inheritedCost;
+        }
+
+        // Called by SpeciesManager when this animal's group splits off into a new species.
+        public void AssignSpecies(string newSpeciesName, Color newSpeciesColor)
+        {
+            speciesName = newSpeciesName;
+            speciesColor = newSpeciesColor;
+            gameObject.name = $"Capsule_Species_{speciesName}";
+            ApplySpeciesColor();
+        }
+
+        void ApplySpeciesColor()
+        {
+            MeshRenderer meshRenderer = GetComponent<MeshRenderer>();
+            MaterialPropertyBlock propertyBlock = new MaterialPropertyBlock();
+            meshRenderer.GetPropertyBlock(propertyBlock);
+            propertyBlock.SetColor(BaseColorId, speciesColor);
+            propertyBlock.SetColor(ColorId, speciesColor);
+            meshRenderer.SetPropertyBlock(propertyBlock);
+
+            if (bodyView != null)
+            {
+                bodyView.SetColor(speciesColor);
+            }
+        }
+
+        // Draws this animal's body parts. Offspring copy their parent's part objects, so every animal
+        // rebuilds them from its own genome.
+        void BuildBodyView()
+        {
+            if (bodyView == null && !TryGetComponent(out bodyView))
+            {
+                bodyView = gameObject.AddComponent<AnimalBodyView>();
+            }
+
+            bodyView.Build(genome, Mathf.Max(0f, fullLegLength) * Mathf.Max(0.01f, bodyHeight), speciesColor);
+        }
+
+        // Also ends a courtship, for both animals.
+        void ClearTargets()
+        {
+            if (currentState == State.Courting)
+            {
+                EndCourtship();
+            }
+
+            currentFoodTarget = null;
+            currentPreyTarget = null;
+            currentMate = null;
+        }
+
+        bool TrySetDestination(Vector3 destination)
+        {
+            if (agent == null || !agent.enabled || !agent.isOnNavMesh)
+            {
+                return false;
+            }
+
             agent.stoppingDistance = Mathf.Max(0f, referenceAgentStoppingDistance);
-            agent.ResetPath();
+            return agent.SetDestination(destination);
+        }
+
+        bool TrySetPreyDestination(Vector3 destination)
+        {
+            if (agent == null || !agent.enabled || !agent.isOnNavMesh)
+            {
+                return false;
+            }
+
+            float approachDistance = CurrentAttackRange *
+                                     Mathf.Clamp(attackApproachRangeFraction, 0.1f, 0.95f);
+            agent.stoppingDistance = Mathf.Max(referenceAgentStoppingDistance, approachDistance);
+            return agent.SetDestination(destination);
+        }
+
+        void TryResetPath()
+        {
+            if (agent != null && agent.enabled && agent.isOnNavMesh)
+            {
+                agent.stoppingDistance = Mathf.Max(0f, referenceAgentStoppingDistance);
+                agent.ResetPath();
+            }
         }
     }
 }

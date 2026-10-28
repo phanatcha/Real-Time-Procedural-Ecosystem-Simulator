@@ -1,0 +1,18 @@
+{
+    "name": "Boreal.EcosystemSimulation",
+    "rootNamespace": "Boreal.EcosystemSimulation",
+    "references": [
+        "Boreal.Temperature",
+        "Boreal.TerrainGeneration",
+        "Boreal.World"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": false,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

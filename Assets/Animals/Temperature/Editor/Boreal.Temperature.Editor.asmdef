@@ -1,0 +1,19 @@
+{
+    "name": "Boreal.Temperature.Editor",
+    "rootNamespace": "Boreal.Temperature.Editor",
+    "references": [
+        "Boreal.Animals",
+        "Boreal.Temperature"
+    ],
+    "includePlatforms": [
+        "Editor"
+    ],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": false,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

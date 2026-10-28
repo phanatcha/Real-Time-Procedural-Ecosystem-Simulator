@@ -1,65 +1,68 @@
 using UnityEngine;
 
-[CreateAssetMenu()]
-public class HeightMapSettings : UpdatableData
+namespace Boreal.TerrainGeneration
 {
-    public NoiseSettings noiseSettings;
-    public RidgeSettings ridgeSettings = new RidgeSettings();
-    public ValleySettings valleySettings = new ValleySettings();
-    public RiverSettings riverSettings = new RiverSettings();
-    public LakeSettings lakeSettings = new LakeSettings();
-
-    [Header("Generation-time Hydraulic Erosion")]
-    public HydraulicErosionSettings erosionSettings = new HydraulicErosionSettings();
-
-    public bool useFalloff;
-    [Tooltip("Distance from world origin (0,0) where the island fully becomes ocean.")]
-    public float worldRadius = 1000f;
-
-    public float heightMultiplier;
-    public AnimationCurve heightCurve;
-
-    public float minHeight
+    [CreateAssetMenu()]
+    public class HeightMapSettings : UpdatableData
     {
-        get
-        {
-            return heightMultiplier * heightCurve.Evaluate(0);
-        }
-    }
+        public NoiseSettings noiseSettings;
+        public RidgeSettings ridgeSettings = new RidgeSettings();
+        public ValleySettings valleySettings = new ValleySettings();
+        public RiverSettings riverSettings = new RiverSettings();
+        public LakeSettings lakeSettings = new LakeSettings();
 
-    public float maxHeight
-    {
-        get
+        [Header("Generation-time Hydraulic Erosion")]
+        public HydraulicErosionSettings erosionSettings = new HydraulicErosionSettings();
+
+        public bool useFalloff;
+        [Tooltip("Distance from world origin (0,0) where the island fully becomes ocean.")]
+        public float worldRadius = 1000f;
+
+        public float heightMultiplier;
+        public AnimationCurve heightCurve;
+
+        public float minHeight
         {
-            return heightMultiplier * heightCurve.Evaluate(1);
+            get
+            {
+                return heightMultiplier * heightCurve.Evaluate(0);
+            }
         }
-    }
+
+        public float maxHeight
+        {
+            get
+            {
+                return heightMultiplier * heightCurve.Evaluate(1);
+            }
+        }
 
 #if UNITY_EDITOR
-    protected override void OnValidate()
-    {
-        erosionSettings?.ValidateValues();
-        if (noiseSettings != null)
+        protected override void OnValidate()
         {
-            noiseSettings.ValidateValues();
+            erosionSettings?.ValidateValues();
+            if (noiseSettings != null)
+            {
+                noiseSettings.ValidateValues();
+            }
+            if (ridgeSettings != null)
+            {
+                ridgeSettings.ValidateValues();
+            }
+            if (valleySettings != null)
+            {
+                valleySettings.ValidateValues();
+            }
+            if (riverSettings != null)
+            {
+                riverSettings.ValidateValues();
+            }
+            if (lakeSettings != null)
+            {
+                lakeSettings.ValidateValues();
+            }
+            base.OnValidate();
         }
-        if (ridgeSettings != null)
-        {
-            ridgeSettings.ValidateValues();
-        }
-        if (valleySettings != null)
-        {
-            valleySettings.ValidateValues();
-        }
-        if (riverSettings != null)
-        {
-            riverSettings.ValidateValues();
-        }
-        if (lakeSettings != null)
-        {
-            lakeSettings.ValidateValues();
-        }
-        base.OnValidate();
-    }
 #endif
+    }
 }

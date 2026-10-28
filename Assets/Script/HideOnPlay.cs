@@ -1,14 +1,17 @@
 using UnityEngine;
 
-public class HideOnPlay : MonoBehaviour
+namespace Boreal.Core
 {
-    void Start()
+    public class HideOnPlay : MonoBehaviour
     {
-        gameObject.SetActive(false);
-    }
+        void Start()
+        {
+            gameObject.SetActive(false);
+        }
 
-    void Update()
-    {
+        void Update()
+        {
         
+        }
     }
 }

@@ -1,0 +1,17 @@
+{
+    "name": "Boreal.TerrainGeneration",
+    "rootNamespace": "Boreal.TerrainGeneration",
+    "references": [
+        "Unity.Mathematics",
+        "Unity.RenderPipelines.Universal.Runtime"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": false,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

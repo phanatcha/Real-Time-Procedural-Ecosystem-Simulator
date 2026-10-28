@@ -2,228 +2,231 @@ using System;
 using System.Collections.Generic;
 using UnityEngine;
 
-public sealed class TerrainEnvironmentSampler
+namespace Boreal.TerrainGeneration
 {
-    public const int DefaultMaxCachedChunks = 128;
-
-    readonly HeightMapSettings heightMapSettings;
-    readonly MeshSettings meshSettings;
-    readonly EnvironmentDefinitions environmentDefinitions;
-    readonly VegetationSettings vegetationSettings;
-    readonly int maxCachedChunks;
-    readonly Dictionary<Vector2Int, HeightMap> heightMapCache = new Dictionary<Vector2Int, HeightMap>();
-    readonly Queue<Vector2Int> cacheOrder = new Queue<Vector2Int>();
-    readonly object cacheLock = new object();
-
-    // The height range comes from the height curve, and AnimationCurve.Evaluate returns wrong values
-    // when several threads evaluate the same curve at once. Reading it once, on the thread that creates
-    // the sampler or clears its cache, lets background threads sample terrain safely.
-    float terrainMinHeight;
-    float terrainMaxHeight;
-
-    public HeightMapSettings HeightMapSettings => heightMapSettings;
-    public MeshSettings MeshSettings => meshSettings;
-    public EnvironmentDefinitions EnvironmentDefinitions => environmentDefinitions;
-    public VegetationSettings VegetationSettings => vegetationSettings;
-    public bool IsConfigured => heightMapSettings != null
-        && heightMapSettings.noiseSettings != null
-        && heightMapSettings.heightCurve != null
-        && meshSettings != null
-        && meshSettings.meshScale > 0f
-        && environmentDefinitions != null;
-
-    public int CachedChunkCount
+    public sealed class TerrainEnvironmentSampler
     {
-        get
+        public const int DefaultMaxCachedChunks = 128;
+
+        readonly HeightMapSettings heightMapSettings;
+        readonly MeshSettings meshSettings;
+        readonly EnvironmentDefinitions environmentDefinitions;
+        readonly VegetationSettings vegetationSettings;
+        readonly int maxCachedChunks;
+        readonly Dictionary<Vector2Int, HeightMap> heightMapCache = new Dictionary<Vector2Int, HeightMap>();
+        readonly Queue<Vector2Int> cacheOrder = new Queue<Vector2Int>();
+        readonly object cacheLock = new object();
+
+        // The height range comes from the height curve, and AnimationCurve.Evaluate returns wrong values
+        // when several threads evaluate the same curve at once. Reading it once, on the thread that creates
+        // the sampler or clears its cache, lets background threads sample terrain safely.
+        float terrainMinHeight;
+        float terrainMaxHeight;
+
+        public HeightMapSettings HeightMapSettings => heightMapSettings;
+        public MeshSettings MeshSettings => meshSettings;
+        public EnvironmentDefinitions EnvironmentDefinitions => environmentDefinitions;
+        public VegetationSettings VegetationSettings => vegetationSettings;
+        public bool IsConfigured => heightMapSettings != null
+            && heightMapSettings.noiseSettings != null
+            && heightMapSettings.heightCurve != null
+            && meshSettings != null
+            && meshSettings.meshScale > 0f
+            && environmentDefinitions != null;
+
+        public int CachedChunkCount
+        {
+            get
+            {
+                lock (cacheLock)
+                {
+                    return heightMapCache.Count;
+                }
+            }
+        }
+
+        public TerrainEnvironmentSampler(HeightMapSettings heightMapSettings, MeshSettings meshSettings,
+            EnvironmentDefinitions environmentDefinitions, VegetationSettings vegetationSettings = null,
+            int maxCachedChunks = DefaultMaxCachedChunks)
+        {
+            this.heightMapSettings = heightMapSettings;
+            this.meshSettings = meshSettings;
+            this.environmentDefinitions = environmentDefinitions;
+            this.vegetationSettings = vegetationSettings;
+            this.maxCachedChunks = Mathf.Max(1, maxCachedChunks);
+            RefreshHeightRange();
+        }
+
+        public bool TrySample(Vector3 worldPosition, out EnvironmentSample sample)
+        {
+            return TrySample(new Vector2(worldPosition.x, worldPosition.z), out sample);
+        }
+
+        public bool TrySample(float worldX, float worldZ, out EnvironmentSample sample)
+        {
+            return TrySample(new Vector2(worldX, worldZ), out sample);
+        }
+
+        public bool TrySample(Vector2 worldPosition, out EnvironmentSample sample)
+        {
+            sample = default;
+            if (!IsConfigured || !IsFinite(worldPosition.x) || !IsFinite(worldPosition.y)) return false;
+
+            Vector2Int chunkCoordinate = TerrainGrid.WorldToChunkCoordinate(worldPosition, meshSettings);
+            HeightMap heightMap = GetOrGenerateHeightMap(chunkCoordinate);
+            return TrySampleHeightMap(worldPosition, chunkCoordinate, heightMap, out sample);
+        }
+
+        public bool TrySampleCached(Vector3 worldPosition, out EnvironmentSample sample)
+        {
+            return TrySampleCached(new Vector2(worldPosition.x, worldPosition.z), out sample);
+        }
+
+        public bool TrySampleCached(float worldX, float worldZ, out EnvironmentSample sample)
+        {
+            return TrySampleCached(new Vector2(worldX, worldZ), out sample);
+        }
+
+        public bool TrySampleCached(Vector2 worldPosition, out EnvironmentSample sample)
+        {
+            sample = default;
+            if (!IsConfigured || !IsFinite(worldPosition.x) || !IsFinite(worldPosition.y)) return false;
+
+            Vector2Int chunkCoordinate = TerrainGrid.WorldToChunkCoordinate(worldPosition, meshSettings);
+            HeightMap heightMap;
+            lock (cacheLock)
+            {
+                if (!heightMapCache.TryGetValue(chunkCoordinate, out heightMap)) return false;
+            }
+
+            return TrySampleHeightMap(worldPosition, chunkCoordinate, heightMap, out sample);
+        }
+
+        public EnvironmentSample Sample(Vector2 worldPosition)
+        {
+            if (!TrySample(worldPosition, out EnvironmentSample sample))
+            {
+                throw new InvalidOperationException("The terrain environment sampler is not configured for this query.");
+            }
+
+            return sample;
+        }
+
+        public SeasonalEnvironmentSample SampleSeasonal(Vector2 worldPosition, SeasonState season)
+        {
+            return SeasonalEnvironment.Evaluate(Sample(worldPosition), season);
+        }
+
+        public bool TrySampleSeasonal(Vector2 worldPosition, SeasonState season, out SeasonalEnvironmentSample sample)
+        {
+            sample = default;
+            if (!TrySample(worldPosition, out EnvironmentSample environment)) return false;
+            sample = SeasonalEnvironment.Evaluate(environment, season);
+            return true;
+        }
+
+        public bool TrySampleSeasonal(Vector3 worldPosition, SeasonState season, out SeasonalEnvironmentSample sample)
+        {
+            return TrySampleSeasonal(new Vector2(worldPosition.x, worldPosition.z), season, out sample);
+        }
+
+        public void CacheHeightMap(Vector2Int chunkCoordinate, HeightMap heightMap)
+        {
+            if (heightMap.values == null) return;
+
+            lock (cacheLock)
+            {
+                AddToCache(chunkCoordinate, heightMap);
+            }
+        }
+
+        public void ClearCache()
         {
             lock (cacheLock)
             {
-                return heightMapCache.Count;
+                heightMapCache.Clear();
+                cacheOrder.Clear();
             }
-        }
-    }
 
-    public TerrainEnvironmentSampler(HeightMapSettings heightMapSettings, MeshSettings meshSettings,
-        EnvironmentDefinitions environmentDefinitions, VegetationSettings vegetationSettings = null,
-        int maxCachedChunks = DefaultMaxCachedChunks)
-    {
-        this.heightMapSettings = heightMapSettings;
-        this.meshSettings = meshSettings;
-        this.environmentDefinitions = environmentDefinitions;
-        this.vegetationSettings = vegetationSettings;
-        this.maxCachedChunks = Mathf.Max(1, maxCachedChunks);
-        RefreshHeightRange();
-    }
-
-    public bool TrySample(Vector3 worldPosition, out EnvironmentSample sample)
-    {
-        return TrySample(new Vector2(worldPosition.x, worldPosition.z), out sample);
-    }
-
-    public bool TrySample(float worldX, float worldZ, out EnvironmentSample sample)
-    {
-        return TrySample(new Vector2(worldX, worldZ), out sample);
-    }
-
-    public bool TrySample(Vector2 worldPosition, out EnvironmentSample sample)
-    {
-        sample = default;
-        if (!IsConfigured || !IsFinite(worldPosition.x) || !IsFinite(worldPosition.y)) return false;
-
-        Vector2Int chunkCoordinate = TerrainGrid.WorldToChunkCoordinate(worldPosition, meshSettings);
-        HeightMap heightMap = GetOrGenerateHeightMap(chunkCoordinate);
-        return TrySampleHeightMap(worldPosition, chunkCoordinate, heightMap, out sample);
-    }
-
-    public bool TrySampleCached(Vector3 worldPosition, out EnvironmentSample sample)
-    {
-        return TrySampleCached(new Vector2(worldPosition.x, worldPosition.z), out sample);
-    }
-
-    public bool TrySampleCached(float worldX, float worldZ, out EnvironmentSample sample)
-    {
-        return TrySampleCached(new Vector2(worldX, worldZ), out sample);
-    }
-
-    public bool TrySampleCached(Vector2 worldPosition, out EnvironmentSample sample)
-    {
-        sample = default;
-        if (!IsConfigured || !IsFinite(worldPosition.x) || !IsFinite(worldPosition.y)) return false;
-
-        Vector2Int chunkCoordinate = TerrainGrid.WorldToChunkCoordinate(worldPosition, meshSettings);
-        HeightMap heightMap;
-        lock (cacheLock)
-        {
-            if (!heightMapCache.TryGetValue(chunkCoordinate, out heightMap)) return false;
+            RefreshHeightRange();
         }
 
-        return TrySampleHeightMap(worldPosition, chunkCoordinate, heightMap, out sample);
-    }
-
-    public EnvironmentSample Sample(Vector2 worldPosition)
-    {
-        if (!TrySample(worldPosition, out EnvironmentSample sample))
+        void RefreshHeightRange()
         {
-            throw new InvalidOperationException("The terrain environment sampler is not configured for this query.");
+            if (heightMapSettings == null || heightMapSettings.heightCurve == null) return;
+
+            terrainMinHeight = heightMapSettings.minHeight;
+            terrainMaxHeight = heightMapSettings.maxHeight;
         }
 
-        return sample;
-    }
-
-    public SeasonalEnvironmentSample SampleSeasonal(Vector2 worldPosition, SeasonState season)
-    {
-        return SeasonalEnvironment.Evaluate(Sample(worldPosition), season);
-    }
-
-    public bool TrySampleSeasonal(Vector2 worldPosition, SeasonState season, out SeasonalEnvironmentSample sample)
-    {
-        sample = default;
-        if (!TrySample(worldPosition, out EnvironmentSample environment)) return false;
-        sample = SeasonalEnvironment.Evaluate(environment, season);
-        return true;
-    }
-
-    public bool TrySampleSeasonal(Vector3 worldPosition, SeasonState season, out SeasonalEnvironmentSample sample)
-    {
-        return TrySampleSeasonal(new Vector2(worldPosition.x, worldPosition.z), season, out sample);
-    }
-
-    public void CacheHeightMap(Vector2Int chunkCoordinate, HeightMap heightMap)
-    {
-        if (heightMap.values == null) return;
-
-        lock (cacheLock)
+        HeightMap GetOrGenerateHeightMap(Vector2Int chunkCoordinate)
         {
-            AddToCache(chunkCoordinate, heightMap);
-        }
-    }
-
-    public void ClearCache()
-    {
-        lock (cacheLock)
-        {
-            heightMapCache.Clear();
-            cacheOrder.Clear();
-        }
-
-        RefreshHeightRange();
-    }
-
-    void RefreshHeightRange()
-    {
-        if (heightMapSettings == null || heightMapSettings.heightCurve == null) return;
-
-        terrainMinHeight = heightMapSettings.minHeight;
-        terrainMaxHeight = heightMapSettings.maxHeight;
-    }
-
-    HeightMap GetOrGenerateHeightMap(Vector2Int chunkCoordinate)
-    {
-        lock (cacheLock)
-        {
-            if (heightMapCache.TryGetValue(chunkCoordinate, out HeightMap cachedHeightMap))
+            lock (cacheLock)
             {
-                return cachedHeightMap;
+                if (heightMapCache.TryGetValue(chunkCoordinate, out HeightMap cachedHeightMap))
+                {
+                    return cachedHeightMap;
+                }
             }
-        }
 
-        Vector2 chunkWorldCentre = TerrainGrid.ChunkCoordinateToWorldPosition(chunkCoordinate, meshSettings);
-        Vector2 sampleCentre = chunkWorldCentre / meshSettings.meshScale;
-        HeightMap generatedHeightMap = HeightMapGenerator.GenerateHeightMap(
-            meshSettings.numVertsPerLine,
-            meshSettings.numVertsPerLine,
-            heightMapSettings,
-            sampleCentre);
+            Vector2 chunkWorldCentre = TerrainGrid.ChunkCoordinateToWorldPosition(chunkCoordinate, meshSettings);
+            Vector2 sampleCentre = chunkWorldCentre / meshSettings.meshScale;
+            HeightMap generatedHeightMap = HeightMapGenerator.GenerateHeightMap(
+                meshSettings.numVertsPerLine,
+                meshSettings.numVertsPerLine,
+                heightMapSettings,
+                sampleCentre);
 
-        lock (cacheLock)
-        {
-            if (heightMapCache.TryGetValue(chunkCoordinate, out HeightMap cachedHeightMap))
+            lock (cacheLock)
             {
-                return cachedHeightMap;
+                if (heightMapCache.TryGetValue(chunkCoordinate, out HeightMap cachedHeightMap))
+                {
+                    return cachedHeightMap;
+                }
+
+                AddToCache(chunkCoordinate, generatedHeightMap);
+                return generatedHeightMap;
+            }
+        }
+
+        bool TrySampleHeightMap(Vector2 worldPosition, Vector2Int chunkCoordinate,
+            HeightMap heightMap, out EnvironmentSample sample)
+        {
+            Vector2 chunkWorldCentre = TerrainGrid.ChunkCoordinateToWorldPosition(chunkCoordinate, meshSettings);
+            return EnvironmentSampler.TrySample(
+                worldPosition,
+                heightMap,
+                terrainMinHeight,
+                terrainMaxHeight,
+                environmentDefinitions,
+                vegetationSettings,
+                chunkWorldCentre,
+                meshSettings.numVertsPerLine,
+                meshSettings.meshScale,
+                out sample);
+        }
+
+        void AddToCache(Vector2Int chunkCoordinate, HeightMap heightMap)
+        {
+            if (heightMapCache.ContainsKey(chunkCoordinate))
+            {
+                heightMapCache[chunkCoordinate] = heightMap;
+                return;
             }
 
-            AddToCache(chunkCoordinate, generatedHeightMap);
-            return generatedHeightMap;
+            heightMapCache.Add(chunkCoordinate, heightMap);
+            cacheOrder.Enqueue(chunkCoordinate);
+
+            while (heightMapCache.Count > maxCachedChunks)
+            {
+                Vector2Int oldestCoordinate = cacheOrder.Dequeue();
+                heightMapCache.Remove(oldestCoordinate);
+            }
         }
-    }
 
-    bool TrySampleHeightMap(Vector2 worldPosition, Vector2Int chunkCoordinate,
-        HeightMap heightMap, out EnvironmentSample sample)
-    {
-        Vector2 chunkWorldCentre = TerrainGrid.ChunkCoordinateToWorldPosition(chunkCoordinate, meshSettings);
-        return EnvironmentSampler.TrySample(
-            worldPosition,
-            heightMap,
-            terrainMinHeight,
-            terrainMaxHeight,
-            environmentDefinitions,
-            vegetationSettings,
-            chunkWorldCentre,
-            meshSettings.numVertsPerLine,
-            meshSettings.meshScale,
-            out sample);
-    }
-
-    void AddToCache(Vector2Int chunkCoordinate, HeightMap heightMap)
-    {
-        if (heightMapCache.ContainsKey(chunkCoordinate))
+        static bool IsFinite(float value)
         {
-            heightMapCache[chunkCoordinate] = heightMap;
-            return;
+            return !float.IsNaN(value) && !float.IsInfinity(value);
         }
-
-        heightMapCache.Add(chunkCoordinate, heightMap);
-        cacheOrder.Enqueue(chunkCoordinate);
-
-        while (heightMapCache.Count > maxCachedChunks)
-        {
-            Vector2Int oldestCoordinate = cacheOrder.Dequeue();
-            heightMapCache.Remove(oldestCoordinate);
-        }
-    }
-
-    static bool IsFinite(float value)
-    {
-        return !float.IsNaN(value) && !float.IsInfinity(value);
     }
 }

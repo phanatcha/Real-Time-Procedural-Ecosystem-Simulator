@@ -1,905 +1,908 @@
 using System.Collections.Generic;
 using UnityEngine;
 
-public class TerrainChunk
+namespace Boreal.TerrainGeneration
 {
-    public event System.Action<TerrainChunk, bool> onVisibilityChanged;
-
-
-    public event System.Action<TerrainChunk, MeshCollider> onColliderReady;
-
-    public event System.Action<TerrainChunk> onRenderMeshReady;
-    public Vector2Int coord;
-
-    // ---------------------------------------------------------
-    // PUBLIC ACCESS
-    // ---------------------------------------------------------
-
-    public GameObject GameObject
+    public class TerrainChunk
     {
-        get { return meshObject; }
-    }
+        public event System.Action<TerrainChunk, bool> onVisibilityChanged;
 
-    public MeshCollider MeshCollider
-    {
-        get { return meshCollider; }
-    }
-    public Mesh CurrentMesh
-    {
-        get { return meshFilter.sharedMesh; }
-    }
 
-    public HeightMap HeightMap
-    {
-        get { return heightMap; }
-    }
+        public event System.Action<TerrainChunk, MeshCollider> onColliderReady;
 
-    public Transform ChunkTransform
-    {
-        get { return meshObject.transform; }
-    }
-    public Bounds WorldBounds
-    {
-        get
+        public event System.Action<TerrainChunk> onRenderMeshReady;
+        public Vector2Int coord;
+
+        // ---------------------------------------------------------
+        // PUBLIC ACCESS
+        // ---------------------------------------------------------
+
+        public GameObject GameObject
         {
-            return meshCollider != null && meshCollider.sharedMesh != null
-            ? meshCollider.bounds
-            : bounds;
+            get { return meshObject; }
         }
-    }
 
-
-    // ---------------------------------------------------------
-    // CHUNK OBJECTS
-    // ---------------------------------------------------------
-
-    private GameObject meshObject;
-
-    private MeshRenderer meshRenderer;
-    private MeshFilter meshFilter;
-    private MeshCollider meshCollider;
-
-
-    // ---------------------------------------------------------
-    // TERRAIN DATA
-    // ---------------------------------------------------------
-
-    private Vector2 sampleCentre;
-    private Vector2 position;
-
-    private Bounds bounds;
-
-    private LODInfo[] detailLevels;
-    private LODMesh[] lodMeshes;
-
-    private int colliderLODIndex;
-
-    private HeightMap heightMap;
-
-    private bool heightMapReceived;
-    private bool hasSetCollider;
-
-    private int previousLODIndex = -1;
-
-    private float maxViewDst;
-
-
-    // ---------------------------------------------------------
-    // SETTINGS
-    // ---------------------------------------------------------
-
-    private HeightMapSettings heightMapSettings;
-    private MeshSettings meshSettings;
-
-    private Transform viewer;
-
-
-    // ---------------------------------------------------------
-    // VEGETATION
-    // ---------------------------------------------------------
-
-    private VegetationSettings vegetationSettings;
-    private Material vegetationMaterial;
-
-    private EnvironmentDefinitions environmentDefinitions;
-    private TerrainEnvironmentSampler environmentSampler;
-
-    private bool vegetationRequested;
-
-    private VegetationPlacementData vegetationData;
-
-    private GameObject vegetationObject;
-
-    private MeshFilter treesMeshFilter;
-    private MeshFilter grassMeshFilter;
-    private MeshFilter rocksMeshFilter;
-    private MeshFilter bushesMeshFilter;
-
-    private int vegetationLODIndex = -1;
-
-
-    // ---------------------------------------------------------
-    // CONSTRUCTOR
-    // ---------------------------------------------------------
-
-    public TerrainChunk(
-        Vector2Int coord,
-        HeightMapSettings heightMapSettings,
-        MeshSettings meshSettings,
-        LODInfo[] detailLevels,
-        int colliderLODIndex,
-        Transform parent,
-        Transform viewer,
-        Material material,
-        VegetationSettings vegetationSettings,
-        Material vegetationMaterial,
-        EnvironmentDefinitions environmentDefinitions,
-        TerrainEnvironmentSampler environmentSampler)
-    {
-        this.coord = coord;
-
-        this.detailLevels = detailLevels;
-
-        this.colliderLODIndex =
-            colliderLODIndex;
-
-        this.heightMapSettings =
-            heightMapSettings;
-
-        this.meshSettings =
-            meshSettings;
-
-        this.viewer =
-            viewer;
-
-        this.vegetationSettings =
-            vegetationSettings;
-
-        this.vegetationMaterial =
-            vegetationMaterial;
-
-        this.environmentDefinitions =
-            environmentDefinitions;
-
-        this.environmentSampler =
-            environmentSampler;
-
-
-        sampleCentre =
-            (Vector2)coord *
-            meshSettings.meshWorldSize /
-            meshSettings.meshScale;
-
-
-        position =
-            (Vector2)coord *
-            meshSettings.meshWorldSize;
-
-
-        bounds =
-            new Bounds(
-                position,
-                Vector2.one *
-                meshSettings.meshWorldSize
-            );
-
-
-        // -----------------------------------------------------
-        // CREATE CHUNK GAMEOBJECT
-        // -----------------------------------------------------
-
-        meshObject =
-            new GameObject(
-                $"Terrain Chunk ({coord.x}, {coord.y})"
-            );
-
-
-        meshRenderer =
-            meshObject.AddComponent<MeshRenderer>();
-
-
-        meshFilter =
-            meshObject.AddComponent<MeshFilter>();
-
-
-        meshCollider =
-            meshObject.AddComponent<MeshCollider>();
-
-
-        meshRenderer.sharedMaterial =
-            material;
-
-
-        meshObject.transform.position =
-            new Vector3(
-                position.x,
-                0f,
-                position.y
-            );
-
-
-        meshObject.transform.SetParent(
-            parent,
-            true
-        );
-
-
-        SetVisible(false);
-
-
-        // -----------------------------------------------------
-        // LOD
-        // -----------------------------------------------------
-
-        lodMeshes =
-            new LODMesh[
-                detailLevels.Length
-            ];
-
-
-        for (int i = 0;
-             i < detailLevels.Length;
-             i++)
+        public MeshCollider MeshCollider
         {
-            lodMeshes[i] =
-                new LODMesh(
-                    detailLevels[i].lod
+            get { return meshCollider; }
+        }
+        public Mesh CurrentMesh
+        {
+            get { return meshFilter.sharedMesh; }
+        }
+
+        public HeightMap HeightMap
+        {
+            get { return heightMap; }
+        }
+
+        public Transform ChunkTransform
+        {
+            get { return meshObject.transform; }
+        }
+        public Bounds WorldBounds
+        {
+            get
+            {
+                return meshCollider != null && meshCollider.sharedMesh != null
+                ? meshCollider.bounds
+                : bounds;
+            }
+        }
+
+
+        // ---------------------------------------------------------
+        // CHUNK OBJECTS
+        // ---------------------------------------------------------
+
+        private GameObject meshObject;
+
+        private MeshRenderer meshRenderer;
+        private MeshFilter meshFilter;
+        private MeshCollider meshCollider;
+
+
+        // ---------------------------------------------------------
+        // TERRAIN DATA
+        // ---------------------------------------------------------
+
+        private Vector2 sampleCentre;
+        private Vector2 position;
+
+        private Bounds bounds;
+
+        private LODInfo[] detailLevels;
+        private LODMesh[] lodMeshes;
+
+        private int colliderLODIndex;
+
+        private HeightMap heightMap;
+
+        private bool heightMapReceived;
+        private bool hasSetCollider;
+
+        private int previousLODIndex = -1;
+
+        private float maxViewDst;
+
+
+        // ---------------------------------------------------------
+        // SETTINGS
+        // ---------------------------------------------------------
+
+        private HeightMapSettings heightMapSettings;
+        private MeshSettings meshSettings;
+
+        private Transform viewer;
+
+
+        // ---------------------------------------------------------
+        // VEGETATION
+        // ---------------------------------------------------------
+
+        private VegetationSettings vegetationSettings;
+        private Material vegetationMaterial;
+
+        private EnvironmentDefinitions environmentDefinitions;
+        private TerrainEnvironmentSampler environmentSampler;
+
+        private bool vegetationRequested;
+
+        private VegetationPlacementData vegetationData;
+
+        private GameObject vegetationObject;
+
+        private MeshFilter treesMeshFilter;
+        private MeshFilter grassMeshFilter;
+        private MeshFilter rocksMeshFilter;
+        private MeshFilter bushesMeshFilter;
+
+        private int vegetationLODIndex = -1;
+
+
+        // ---------------------------------------------------------
+        // CONSTRUCTOR
+        // ---------------------------------------------------------
+
+        public TerrainChunk(
+            Vector2Int coord,
+            HeightMapSettings heightMapSettings,
+            MeshSettings meshSettings,
+            LODInfo[] detailLevels,
+            int colliderLODIndex,
+            Transform parent,
+            Transform viewer,
+            Material material,
+            VegetationSettings vegetationSettings,
+            Material vegetationMaterial,
+            EnvironmentDefinitions environmentDefinitions,
+            TerrainEnvironmentSampler environmentSampler)
+        {
+            this.coord = coord;
+
+            this.detailLevels = detailLevels;
+
+            this.colliderLODIndex =
+                colliderLODIndex;
+
+            this.heightMapSettings =
+                heightMapSettings;
+
+            this.meshSettings =
+                meshSettings;
+
+            this.viewer =
+                viewer;
+
+            this.vegetationSettings =
+                vegetationSettings;
+
+            this.vegetationMaterial =
+                vegetationMaterial;
+
+            this.environmentDefinitions =
+                environmentDefinitions;
+
+            this.environmentSampler =
+                environmentSampler;
+
+
+            sampleCentre =
+                (Vector2)coord *
+                meshSettings.meshWorldSize /
+                meshSettings.meshScale;
+
+
+            position =
+                (Vector2)coord *
+                meshSettings.meshWorldSize;
+
+
+            bounds =
+                new Bounds(
+                    position,
+                    Vector2.one *
+                    meshSettings.meshWorldSize
                 );
 
 
-            lodMeshes[i].updateCallback +=
-                UpdateTerrainChunk;
+            // -----------------------------------------------------
+            // CREATE CHUNK GAMEOBJECT
+            // -----------------------------------------------------
+
+            meshObject =
+                new GameObject(
+                    $"Terrain Chunk ({coord.x}, {coord.y})"
+                );
 
 
-            if (i == colliderLODIndex)
-            {
-                lodMeshes[i].updateCallback +=
-                    UpdateCollisionMesh;
-            }
-        }
+            meshRenderer =
+                meshObject.AddComponent<MeshRenderer>();
 
 
-        maxViewDst =
-            detailLevels[
-                detailLevels.Length - 1
-            ]
-            .visibleDstThreshold;
-    }
+            meshFilter =
+                meshObject.AddComponent<MeshFilter>();
 
 
-    // ---------------------------------------------------------
-    // LOAD
-    // ---------------------------------------------------------
-
-    public void Load()
-    {
-        ThreadedDataRequester.RequestData(
-            () =>
-                HeightMapGenerator.GenerateHeightMap(
-                    meshSettings.numVertsPerLine,
-                    meshSettings.numVertsPerLine,
-                    heightMapSettings,
-                    sampleCentre
-                ),
-
-            OnHeightMapReceived
-        );
-    }
+            meshCollider =
+                meshObject.AddComponent<MeshCollider>();
 
 
-    private void OnHeightMapReceived(
-        object heightMapObject)
-    {
-        heightMap =
-            (HeightMap)heightMapObject;
+            meshRenderer.sharedMaterial =
+                material;
 
 
-        environmentSampler?.CacheHeightMap(
-            coord,
-            heightMap
-        );
+            meshObject.transform.position =
+                new Vector3(
+                    position.x,
+                    0f,
+                    position.y
+                );
 
 
-        heightMapReceived =
-            true;
-
-
-        UpdateTerrainChunk();
-    }
-
-
-    // ---------------------------------------------------------
-    // VIEWER
-    // ---------------------------------------------------------
-
-    private Vector2 viewerPosition
-    {
-        get
-        {
-            return new Vector2(
-                viewer.position.x,
-                viewer.position.z
-            );
-        }
-    }
-
-
-    // The generator's viewer can change after chunks exist (the god camera
-    // takes over from the player), so chunks follow it instead of keeping
-    // the one they were created with.
-    public void SetViewer(
-        Transform newViewer)
-    {
-        viewer =
-            newViewer;
-    }
-
-
-    // ---------------------------------------------------------
-    // TERRAIN LOD
-    // ---------------------------------------------------------
-
-    public void UpdateTerrainChunk()
-    {
-        if (!heightMapReceived)
-            return;
-
-
-        float viewerDstFromNearestEdge =
-            Mathf.Sqrt(
-                bounds.SqrDistance(
-                    viewerPosition
-                )
+            meshObject.transform.SetParent(
+                parent,
+                true
             );
 
 
-        bool wasVisible =
-            IsVisible();
+            SetVisible(false);
 
 
-        bool visible =
-            viewerDstFromNearestEdge <=
-            maxViewDst;
+            // -----------------------------------------------------
+            // LOD
+            // -----------------------------------------------------
 
-
-        if (visible)
-        {
-            int lodIndex =
-                0;
+            lodMeshes =
+                new LODMesh[
+                    detailLevels.Length
+                ];
 
 
             for (int i = 0;
-                 i <
-                 detailLevels.Length - 1;
+                 i < detailLevels.Length;
                  i++)
             {
-                if (viewerDstFromNearestEdge >
-                    detailLevels[i]
-                        .visibleDstThreshold)
+                lodMeshes[i] =
+                    new LODMesh(
+                        detailLevels[i].lod
+                    );
+
+
+                lodMeshes[i].updateCallback +=
+                    UpdateTerrainChunk;
+
+
+                if (i == colliderLODIndex)
                 {
-                    lodIndex =
-                        i + 1;
-                }
-                else
-                {
-                    break;
+                    lodMeshes[i].updateCallback +=
+                        UpdateCollisionMesh;
                 }
             }
 
 
-            if (lodIndex !=
-                previousLODIndex)
-            {
-                LODMesh lodMesh =
-                    lodMeshes[
-                        lodIndex
-                    ];
-
-
-                if (lodMesh.hasMesh)
-                {
-                    previousLODIndex =
-                        lodIndex;
-
-
-                    meshFilter.sharedMesh =
-                        lodMesh.mesh;
-
-                    onRenderMeshReady?.Invoke(this);
-
-
-                    UpdateVegetationForLOD(
-                        lodIndex
-                    );
-                }
-                else if (
-                    !lodMesh.hasRequestedMesh)
-                {
-                    lodMesh.RequestMesh(
-                        heightMap,
-                        meshSettings
-                    );
-                }
-            }
-
-
-            // Important:
-            // make sure collider generation is requested
-            // whenever the chunk is visible.
-            UpdateCollisionMesh();
+            maxViewDst =
+                detailLevels[
+                    detailLevels.Length - 1
+                ]
+                .visibleDstThreshold;
         }
 
 
-        if (wasVisible != visible)
+        // ---------------------------------------------------------
+        // LOAD
+        // ---------------------------------------------------------
+
+        public void Load()
         {
-            SetVisible(
-                visible
-            );
+            ThreadedDataRequester.RequestData(
+                () =>
+                    HeightMapGenerator.GenerateHeightMap(
+                        meshSettings.numVertsPerLine,
+                        meshSettings.numVertsPerLine,
+                        heightMapSettings,
+                        sampleCentre
+                    ),
 
-
-            onVisibilityChanged?.Invoke(
-                this,
-                visible
+                OnHeightMapReceived
             );
         }
 
 
-        if (visible &&
-            !vegetationRequested &&
-            vegetationSettings != null &&
-            vegetationMaterial != null)
+        private void OnHeightMapReceived(
+            object heightMapObject)
         {
-            vegetationRequested =
+            heightMap =
+                (HeightMap)heightMapObject;
+
+
+            environmentSampler?.CacheHeightMap(
+                coord,
+                heightMap
+            );
+
+
+            heightMapReceived =
                 true;
 
 
-            RequestVegetation();
+            UpdateTerrainChunk();
         }
-    }
 
 
-    // ---------------------------------------------------------
-    // COLLIDER
-    // ---------------------------------------------------------
+        // ---------------------------------------------------------
+        // VIEWER
+        // ---------------------------------------------------------
 
-    public void UpdateCollisionMesh()
-    {
-        if (hasSetCollider)
+        private Vector2 viewerPosition
         {
-            return;
+            get
+            {
+                return new Vector2(
+                    viewer.position.x,
+                    viewer.position.z
+                );
+            }
         }
 
-        if (!heightMapReceived)
+
+        // The generator's viewer can change after chunks exist (the god camera
+        // takes over from the player), so chunks follow it instead of keeping
+        // the one they were created with.
+        public void SetViewer(
+            Transform newViewer)
         {
-            return;
+            viewer =
+                newViewer;
         }
 
-        float sqrDistance = bounds.SqrDistance(viewerPosition);
 
-        float colliderDistance =
-            detailLevels[colliderLODIndex].visibleDstThreshold;
+        // ---------------------------------------------------------
+        // TERRAIN LOD
+        // ---------------------------------------------------------
 
-        float colliderDistanceSqr =
-            colliderDistance * colliderDistance;
-
-        if (sqrDistance > colliderDistanceSqr)
+        public void UpdateTerrainChunk()
         {
-            return;
+            if (!heightMapReceived)
+                return;
+
+
+            float viewerDstFromNearestEdge =
+                Mathf.Sqrt(
+                    bounds.SqrDistance(
+                        viewerPosition
+                    )
+                );
+
+
+            bool wasVisible =
+                IsVisible();
+
+
+            bool visible =
+                viewerDstFromNearestEdge <=
+                maxViewDst;
+
+
+            if (visible)
+            {
+                int lodIndex =
+                    0;
+
+
+                for (int i = 0;
+                     i <
+                     detailLevels.Length - 1;
+                     i++)
+                {
+                    if (viewerDstFromNearestEdge >
+                        detailLevels[i]
+                            .visibleDstThreshold)
+                    {
+                        lodIndex =
+                            i + 1;
+                    }
+                    else
+                    {
+                        break;
+                    }
+                }
+
+
+                if (lodIndex !=
+                    previousLODIndex)
+                {
+                    LODMesh lodMesh =
+                        lodMeshes[
+                            lodIndex
+                        ];
+
+
+                    if (lodMesh.hasMesh)
+                    {
+                        previousLODIndex =
+                            lodIndex;
+
+
+                        meshFilter.sharedMesh =
+                            lodMesh.mesh;
+
+                        onRenderMeshReady?.Invoke(this);
+
+
+                        UpdateVegetationForLOD(
+                            lodIndex
+                        );
+                    }
+                    else if (
+                        !lodMesh.hasRequestedMesh)
+                    {
+                        lodMesh.RequestMesh(
+                            heightMap,
+                            meshSettings
+                        );
+                    }
+                }
+
+
+                // Important:
+                // make sure collider generation is requested
+                // whenever the chunk is visible.
+                UpdateCollisionMesh();
+            }
+
+
+            if (wasVisible != visible)
+            {
+                SetVisible(
+                    visible
+                );
+
+
+                onVisibilityChanged?.Invoke(
+                    this,
+                    visible
+                );
+            }
+
+
+            if (visible &&
+                !vegetationRequested &&
+                vegetationSettings != null &&
+                vegetationMaterial != null)
+            {
+                vegetationRequested =
+                    true;
+
+
+                RequestVegetation();
+            }
         }
 
-        LODMesh colliderLODMesh = lodMeshes[colliderLODIndex];
 
-        if (!colliderLODMesh.hasRequestedMesh)
+        // ---------------------------------------------------------
+        // COLLIDER
+        // ---------------------------------------------------------
+
+        public void UpdateCollisionMesh()
         {
-            colliderLODMesh.RequestMesh(heightMap, meshSettings);
-            return;
+            if (hasSetCollider)
+            {
+                return;
+            }
+
+            if (!heightMapReceived)
+            {
+                return;
+            }
+
+            float sqrDistance = bounds.SqrDistance(viewerPosition);
+
+            float colliderDistance =
+                detailLevels[colliderLODIndex].visibleDstThreshold;
+
+            float colliderDistanceSqr =
+                colliderDistance * colliderDistance;
+
+            if (sqrDistance > colliderDistanceSqr)
+            {
+                return;
+            }
+
+            LODMesh colliderLODMesh = lodMeshes[colliderLODIndex];
+
+            if (!colliderLODMesh.hasRequestedMesh)
+            {
+                colliderLODMesh.RequestMesh(heightMap, meshSettings);
+                return;
+            }
+
+            if (!colliderLODMesh.hasMesh)
+            {
+                return;
+            }
+
+            meshCollider.sharedMesh = colliderLODMesh.mesh;
+            hasSetCollider = true;
+
+            onColliderReady?.Invoke(this, meshCollider);
         }
 
-        if (!colliderLODMesh.hasMesh)
+        // ---------------------------------------------------------
+        // VEGETATION
+        // ---------------------------------------------------------
+
+        private void RequestVegetation()
         {
-            return;
-        }
+            Vector2 halfSize =
+                Vector2.one *
+                (
+                    meshSettings.meshWorldSize /
+                    2f
+                );
 
-        meshCollider.sharedMesh = colliderLODMesh.mesh;
-        hasSetCollider = true;
 
-        onColliderReady?.Invoke(this, meshCollider);
-    }
+            Vector2 chunkWorldMin =
+                position -
+                halfSize;
 
-    // ---------------------------------------------------------
-    // VEGETATION
-    // ---------------------------------------------------------
 
-    private void RequestVegetation()
-    {
-        Vector2 halfSize =
-            Vector2.one *
-            (
-                meshSettings.meshWorldSize /
-                2f
+            Vector2 chunkWorldMax =
+                position +
+                halfSize;
+
+
+            float terrainMinHeight =
+                heightMapSettings.minHeight;
+
+
+            float terrainMaxHeight =
+                heightMapSettings.maxHeight;
+
+
+            ThreadedDataRequester.RequestData(
+                () =>
+                    VegetationGenerator.GeneratePlacements(
+                        chunkWorldMin,
+                        chunkWorldMax,
+                        heightMap,
+                        terrainMinHeight,
+                        terrainMaxHeight,
+                        vegetationSettings,
+                        environmentDefinitions,
+                        meshSettings.numVertsPerLine,
+                        meshSettings.meshScale
+                    ),
+
+                OnVegetationDataReceived
             );
+        }
 
 
-        Vector2 chunkWorldMin =
-            position -
-            halfSize;
+        private void OnVegetationDataReceived(
+            object dataObject)
+        {
+            vegetationData =
+                (VegetationPlacementData)
+                dataObject;
 
 
-        Vector2 chunkWorldMax =
-            position +
-            halfSize;
+            VegetationTemplateCache
+                .EnsureBuilt(
+                    vegetationSettings
+                );
 
 
-        float terrainMinHeight =
-            heightMapSettings.minHeight;
+            vegetationObject =
+                new GameObject(
+                    "Vegetation"
+                );
 
 
-        float terrainMaxHeight =
-            heightMapSettings.maxHeight;
+            vegetationObject.transform
+                .SetParent(
+                    meshObject.transform,
+                    false
+                );
 
 
-        ThreadedDataRequester.RequestData(
-            () =>
-                VegetationGenerator.GeneratePlacements(
-                    chunkWorldMin,
-                    chunkWorldMax,
-                    heightMap,
-                    terrainMinHeight,
-                    terrainMaxHeight,
-                    vegetationSettings,
-                    environmentDefinitions,
-                    meshSettings.numVertsPerLine,
-                    meshSettings.meshScale
-                ),
-
-            OnVegetationDataReceived
-        );
-    }
+            treesMeshFilter =
+                AddVegetationLayer(
+                    vegetationObject.transform,
+                    "Trees"
+                );
 
 
-    private void OnVegetationDataReceived(
-        object dataObject)
-    {
-        vegetationData =
-            (VegetationPlacementData)
-            dataObject;
+            grassMeshFilter =
+                AddVegetationLayer(
+                    vegetationObject.transform,
+                    "Grass"
+                );
 
 
-        VegetationTemplateCache
-            .EnsureBuilt(
-                vegetationSettings
-            );
+            rocksMeshFilter =
+                AddVegetationLayer(
+                    vegetationObject.transform,
+                    "Rocks"
+                );
 
 
-        vegetationObject =
-            new GameObject(
-                "Vegetation"
-            );
+            bushesMeshFilter =
+                AddVegetationLayer(
+                    vegetationObject.transform,
+                    "Bushes"
+                );
 
 
-        vegetationObject.transform
-            .SetParent(
-                meshObject.transform,
+            if (previousLODIndex >= 0)
+            {
+                UpdateVegetationForLOD(
+                    previousLODIndex
+                );
+            }
+        }
+
+
+        private MeshFilter AddVegetationLayer(
+            Transform parent,
+            string layerName)
+        {
+            GameObject layer =
+                new GameObject(
+                    layerName
+                );
+
+
+            layer.transform.SetParent(
+                parent,
                 false
             );
 
 
-        treesMeshFilter =
-            AddVegetationLayer(
-                vegetationObject.transform,
-                "Trees"
-            );
+            MeshFilter filter =
+                layer.AddComponent<
+                    MeshFilter
+                >();
 
 
-        grassMeshFilter =
-            AddVegetationLayer(
-                vegetationObject.transform,
-                "Grass"
-            );
-
-
-        rocksMeshFilter =
-            AddVegetationLayer(
-                vegetationObject.transform,
-                "Rocks"
-            );
-
-
-        bushesMeshFilter =
-            AddVegetationLayer(
-                vegetationObject.transform,
-                "Bushes"
-            );
-
-
-        if (previousLODIndex >= 0)
-        {
-            UpdateVegetationForLOD(
-                previousLODIndex
-            );
-        }
-    }
-
-
-    private MeshFilter AddVegetationLayer(
-        Transform parent,
-        string layerName)
-    {
-        GameObject layer =
-            new GameObject(
-                layerName
-            );
-
-
-        layer.transform.SetParent(
-            parent,
-            false
-        );
-
-
-        MeshFilter filter =
             layer.AddComponent<
-                MeshFilter
-            >();
+                MeshRenderer
+            >()
+            .sharedMaterial =
+                vegetationMaterial;
 
 
-        layer.AddComponent<
-            MeshRenderer
-        >()
-        .sharedMaterial =
-            vegetationMaterial;
-
-
-        return filter;
-    }
-
-
-    private void UpdateVegetationForLOD(
-        int lodIndex)
-    {
-        if (vegetationData == null ||
-            vegetationObject == null ||
-            vegetationLODIndex ==
-            lodIndex)
-        {
-            return;
+            return filter;
         }
 
 
-        VegetationPlacementData projected =
+        private void UpdateVegetationForLOD(
+            int lodIndex)
+        {
+            if (vegetationData == null ||
+                vegetationObject == null ||
+                vegetationLODIndex ==
+                lodIndex)
+            {
+                return;
+            }
+
+
+            VegetationPlacementData projected =
+                VegetationGenerator
+                    .ProjectPlacementsToLOD(
+                        vegetationData,
+                        heightMap,
+                        heightMapSettings.minHeight,
+                        heightMapSettings.maxHeight,
+                        vegetationSettings,
+                        environmentDefinitions,
+                        position,
+                        meshSettings.numVertsPerLine,
+                        meshSettings.meshScale,
+                        detailLevels[
+                            lodIndex
+                        ].lod
+                    );
+
+
             VegetationGenerator
-                .ProjectPlacementsToLOD(
-                    vegetationData,
-                    heightMap,
-                    heightMapSettings.minHeight,
-                    heightMapSettings.maxHeight,
-                    vegetationSettings,
-                    environmentDefinitions,
-                    position,
-                    meshSettings.numVertsPerLine,
-                    meshSettings.meshScale,
-                    detailLevels[
-                        lodIndex
-                    ].lod
+                .BuildCombinedMeshes(
+                    projected,
+                    meshObject.transform.position,
+                    detailLevels[lodIndex].lod >=
+                    vegetationSettings.farTreeLevelOfDetail,
+                    out Mesh treesMesh,
+                    out Mesh grassMesh,
+                    out Mesh rocksMesh,
+                    out Mesh bushesMesh
                 );
 
 
-        VegetationGenerator
-            .BuildCombinedMeshes(
-                projected,
-                meshObject.transform.position,
-                detailLevels[lodIndex].lod >=
-                vegetationSettings.farTreeLevelOfDetail,
-                out Mesh treesMesh,
-                out Mesh grassMesh,
-                out Mesh rocksMesh,
-                out Mesh bushesMesh
+            SetVegetationLayer(
+                treesMeshFilter,
+                treesMesh,
+                "Trees (" +
+                projected.trees.Count +
+                ")"
             );
 
 
-        SetVegetationLayer(
-            treesMeshFilter,
-            treesMesh,
-            "Trees (" +
-            projected.trees.Count +
-            ")"
-        );
+            SetVegetationLayer(
+                grassMeshFilter,
+                grassMesh,
+                "Grass (" +
+                projected.grass.Count +
+                ")"
+            );
 
 
-        SetVegetationLayer(
-            grassMeshFilter,
-            grassMesh,
-            "Grass (" +
-            projected.grass.Count +
-            ")"
-        );
+            SetVegetationLayer(
+                rocksMeshFilter,
+                rocksMesh,
+                "Rocks (" +
+                projected.rocks.Count +
+                ")"
+            );
 
 
-        SetVegetationLayer(
-            rocksMeshFilter,
-            rocksMesh,
-            "Rocks (" +
-            projected.rocks.Count +
-            ")"
-        );
+            SetVegetationLayer(
+                bushesMeshFilter,
+                bushesMesh,
+                "Bushes (" +
+                projected.bushes.Count +
+                ")"
+            );
 
 
-        SetVegetationLayer(
-            bushesMeshFilter,
-            bushesMesh,
-            "Bushes (" +
-            projected.bushes.Count +
-            ")"
-        );
+            vegetationLODIndex =
+                lodIndex;
+        }
 
 
-        vegetationLODIndex =
-            lodIndex;
-    }
-
-
-    private void SetVegetationLayer(
-        MeshFilter filter,
-        Mesh mesh,
-        string layerName)
-    {
-        Mesh previousMesh =
-            filter.sharedMesh;
-
-
-        filter.sharedMesh =
-            mesh;
-
-
-        filter.gameObject.name =
-            layerName;
-
-
-        filter.gameObject.SetActive(
-            mesh != null
-        );
-
-
-        if (previousMesh != null)
+        private void SetVegetationLayer(
+            MeshFilter filter,
+            Mesh mesh,
+            string layerName)
         {
-            Object.Destroy(
-                previousMesh
+            Mesh previousMesh =
+                filter.sharedMesh;
+
+
+            filter.sharedMesh =
+                mesh;
+
+
+            filter.gameObject.name =
+                layerName;
+
+
+            filter.gameObject.SetActive(
+                mesh != null
+            );
+
+
+            if (previousMesh != null)
+            {
+                Object.Destroy(
+                    previousMesh
+                );
+            }
+        }
+
+
+        // ---------------------------------------------------------
+        // VISIBILITY
+        // ---------------------------------------------------------
+
+        public void SetVisible(
+            bool visible)
+        {
+            meshObject.SetActive(
+                visible
+            );
+        }
+
+
+        public bool IsVisible()
+        {
+            return
+                meshObject.activeSelf;
+        }
+
+
+        // Where this chunk's berry bushes stand, so GrassField can keep its grass low around them.
+        public void CollectBushPositions(List<Vector2> output)
+        {
+            if (vegetationData == null) return;
+
+            foreach (VegetationInstance bush in vegetationData.bushes)
+            {
+                output.Add(new Vector2(bush.position.x, bush.position.z));
+            }
+        }
+
+
+        // ---------------------------------------------------------
+        // ENVIRONMENT
+        // ---------------------------------------------------------
+
+        public bool TryGetEnvironmentSample(
+            Vector2 worldPosition,
+            out EnvironmentSample sample)
+        {
+            if (!heightMapReceived ||
+                environmentDefinitions == null)
+            {
+                sample =
+                    default;
+
+                return false;
+            }
+
+
+            return EnvironmentSampler.TrySample(
+                worldPosition,
+                heightMap,
+                heightMapSettings.minHeight,
+                heightMapSettings.maxHeight,
+                environmentDefinitions,
+                vegetationSettings,
+                position,
+                meshSettings.numVertsPerLine,
+                meshSettings.meshScale,
+                out sample
             );
         }
     }
 
 
-    // ---------------------------------------------------------
-    // VISIBILITY
-    // ---------------------------------------------------------
+    // =============================================================
+    // LOD MESH
+    // =============================================================
 
-    public void SetVisible(
-        bool visible)
+    class LODMesh
     {
-        meshObject.SetActive(
-            visible
-        );
-    }
+        public Mesh mesh;
+
+        public bool hasRequestedMesh;
+
+        public bool hasMesh;
 
 
-    public bool IsVisible()
-    {
-        return
-            meshObject.activeSelf;
-    }
+        private int lod;
 
 
-    // Where this chunk's berry bushes stand, so GrassField can keep its grass low around them.
-    public void CollectBushPositions(List<Vector2> output)
-    {
-        if (vegetationData == null) return;
+        public event System.Action
+            updateCallback;
 
-        foreach (VegetationInstance bush in vegetationData.bushes)
+
+        public LODMesh(
+            int lod)
         {
-            output.Add(new Vector2(bush.position.x, bush.position.z));
-        }
-    }
-
-
-    // ---------------------------------------------------------
-    // ENVIRONMENT
-    // ---------------------------------------------------------
-
-    public bool TryGetEnvironmentSample(
-        Vector2 worldPosition,
-        out EnvironmentSample sample)
-    {
-        if (!heightMapReceived ||
-            environmentDefinitions == null)
-        {
-            sample =
-                default;
-
-            return false;
+            this.lod =
+                lod;
         }
 
 
-        return EnvironmentSampler.TrySample(
-            worldPosition,
-            heightMap,
-            heightMapSettings.minHeight,
-            heightMapSettings.maxHeight,
-            environmentDefinitions,
-            vegetationSettings,
-            position,
-            meshSettings.numVertsPerLine,
-            meshSettings.meshScale,
-            out sample
-        );
-    }
-}
+        private void OnMeshDataReceived(
+            object meshDataObject)
+        {
+            mesh =
+                ((MeshData)meshDataObject)
+                .CreateMesh();
 
 
-// =============================================================
-// LOD MESH
-// =============================================================
-
-class LODMesh
-{
-    public Mesh mesh;
-
-    public bool hasRequestedMesh;
-
-    public bool hasMesh;
+            hasMesh =
+                true;
 
 
-    private int lod;
+            updateCallback?.Invoke();
+        }
 
 
-    public event System.Action
-        updateCallback;
+        public void RequestMesh(
+            HeightMap heightMap,
+            MeshSettings meshSettings)
+        {
+            if (hasRequestedMesh)
+                return;
 
 
-    public LODMesh(
-        int lod)
-    {
-        this.lod =
-            lod;
-    }
+            hasRequestedMesh =
+                true;
 
 
-    private void OnMeshDataReceived(
-        object meshDataObject)
-    {
-        mesh =
-            ((MeshData)meshDataObject)
-            .CreateMesh();
+            ThreadedDataRequester.RequestData(
+                () =>
+                    MeshGenerator.GenerateTerrainMesh(
+                        heightMap.values,
+                        meshSettings,
+                        lod
+                    ),
 
-
-        hasMesh =
-            true;
-
-
-        updateCallback?.Invoke();
-    }
-
-
-    public void RequestMesh(
-        HeightMap heightMap,
-        MeshSettings meshSettings)
-    {
-        if (hasRequestedMesh)
-            return;
-
-
-        hasRequestedMesh =
-            true;
-
-
-        ThreadedDataRequester.RequestData(
-            () =>
-                MeshGenerator.GenerateTerrainMesh(
-                    heightMap.values,
-                    meshSettings,
-                    lod
-                ),
-
-            OnMeshDataReceived
-        );
+                OnMeshDataReceived
+            );
+        }
     }
 }
