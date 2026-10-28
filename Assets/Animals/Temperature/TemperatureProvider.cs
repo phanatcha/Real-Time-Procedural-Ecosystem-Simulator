@@ -1,16 +1,19 @@
 using UnityEngine;
 
-public abstract class TemperatureProvider : MonoBehaviour
+namespace Boreal.Temperature
 {
-    public abstract bool TryGetTemperature(Vector3 worldPosition, out float temperatureCelsius);
-
-    protected static bool IsFinite(float value)
+    public abstract class TemperatureProvider : MonoBehaviour
     {
-        return !float.IsNaN(value) && !float.IsInfinity(value);
-    }
+        public abstract bool TryGetTemperature(Vector3 worldPosition, out float temperatureCelsius);
 
-    protected static bool IsFinite(Vector3 value)
-    {
-        return IsFinite(value.x) && IsFinite(value.y) && IsFinite(value.z);
+        protected static bool IsFinite(float value)
+        {
+            return !float.IsNaN(value) && !float.IsInfinity(value);
+        }
+
+        protected static bool IsFinite(Vector3 value)
+        {
+            return IsFinite(value.x) && IsFinite(value.y) && IsFinite(value.z);
+        }
     }
 }

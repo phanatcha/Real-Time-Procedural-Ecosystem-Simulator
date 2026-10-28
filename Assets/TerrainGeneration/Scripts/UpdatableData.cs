@@ -1,27 +1,31 @@
 using UnityEngine;
-public class UpdatableData : ScriptableObject
+
+namespace Boreal.TerrainGeneration
 {
-    public event System.Action OnValuesUpdated;
-    public bool autoUpdate;
+    public class UpdatableData : ScriptableObject
+    {
+        public event System.Action OnValuesUpdated;
+        public bool autoUpdate;
 
 #if UNITY_EDITOR
-    protected virtual void OnValidate()
-    {
-        if (autoUpdate)
+        protected virtual void OnValidate()
         {
-            UnityEditor.EditorApplication.update += NotifyOfUpdatedValues;
+            if (autoUpdate)
+            {
+                UnityEditor.EditorApplication.update += NotifyOfUpdatedValues;
+            }
         }
-    }
 #endif
 
-    public void NotifyOfUpdatedValues()
-    {
-#if UNITY_EDITOR
-        UnityEditor.EditorApplication.update -= NotifyOfUpdatedValues;
-#endif
-        if (OnValuesUpdated != null)
+        public void NotifyOfUpdatedValues()
         {
-            OnValuesUpdated();
+#if UNITY_EDITOR
+            UnityEditor.EditorApplication.update -= NotifyOfUpdatedValues;
+#endif
+            if (OnValuesUpdated != null)
+            {
+                OnValuesUpdated();
+            }
         }
     }
 }

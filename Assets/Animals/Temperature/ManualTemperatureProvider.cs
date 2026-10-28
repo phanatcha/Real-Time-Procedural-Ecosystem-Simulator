@@ -1,12 +1,15 @@
 using UnityEngine;
 
-public class ManualTemperatureProvider : TemperatureProvider
+namespace Boreal.Temperature
 {
-    public float temperatureCelsius = 20f;
-
-    public override bool TryGetTemperature(Vector3 worldPosition, out float sampledTemperatureCelsius)
+    public class ManualTemperatureProvider : TemperatureProvider
     {
-        sampledTemperatureCelsius = temperatureCelsius;
-        return isActiveAndEnabled && IsFinite(worldPosition) && IsFinite(sampledTemperatureCelsius);
+        public float temperatureCelsius = 20f;
+
+        public override bool TryGetTemperature(Vector3 worldPosition, out float sampledTemperatureCelsius)
+        {
+            sampledTemperatureCelsius = temperatureCelsius;
+            return isActiveAndEnabled && IsFinite(worldPosition) && IsFinite(sampledTemperatureCelsius);
+        }
     }
 }

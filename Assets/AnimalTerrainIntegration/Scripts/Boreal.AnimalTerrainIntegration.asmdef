@@ -1,0 +1,20 @@
+{
+    "name": "Boreal.AnimalTerrainIntegration",
+    "rootNamespace": "Boreal.AnimalTerrainIntegration",
+    "references": [
+        "Boreal.Animals",
+        "Boreal.EcosystemSimulation",
+        "Boreal.Temperature",
+        "Boreal.TerrainGeneration",
+        "Boreal.World"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": false,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

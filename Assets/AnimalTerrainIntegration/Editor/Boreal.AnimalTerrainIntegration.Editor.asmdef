@@ -1,0 +1,19 @@
+{
+    "name": "Boreal.AnimalTerrainIntegration.Editor",
+    "rootNamespace": "Boreal.AnimalTerrainIntegration.Editor",
+    "references": [
+        "Boreal.AnimalTerrainIntegration",
+        "Boreal.TerrainGeneration"
+    ],
+    "includePlatforms": [
+        "Editor"
+    ],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": false,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

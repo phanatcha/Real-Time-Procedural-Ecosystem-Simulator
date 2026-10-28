@@ -1,0 +1,17 @@
+{
+    "name": "Boreal.World",
+    "rootNamespace": "Boreal.World",
+    "references": [
+        "Boreal.Temperature",
+        "Boreal.TerrainGeneration"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": false,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

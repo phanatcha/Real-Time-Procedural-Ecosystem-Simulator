@@ -1,0 +1,22 @@
+{
+    "name": "Boreal.Animals",
+    "rootNamespace": "Boreal.Animals",
+    "references": [
+        "Boreal.Core",
+        "Boreal.Temperature",
+        "Boreal.TerrainGeneration",
+        "Boreal.World",
+        "Unity.InputSystem",
+        "Unity.TextMeshPro",
+        "UnityEngine.UI"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": false,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}
