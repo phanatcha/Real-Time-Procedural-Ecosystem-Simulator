@@ -1,0 +1,19 @@
+{
+    "name": "Boreal.Soak.Editor",
+    "rootNamespace": "Boreal.Soak.Editor",
+    "references": [
+        "Boreal.Animals",
+        "Boreal.Core"
+    ],
+    "includePlatforms": [
+        "Editor"
+    ],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": false,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}
