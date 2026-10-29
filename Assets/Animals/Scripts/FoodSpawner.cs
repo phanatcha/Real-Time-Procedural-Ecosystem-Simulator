@@ -1,7 +1,7 @@
-using System.Collections.Generic;
 using Boreal.Temperature;
 using Boreal.TerrainGeneration;
 using Boreal.World;
+using System.Collections.Generic;
 using UnityEngine;
 
 namespace Boreal.Animals
@@ -14,6 +14,8 @@ namespace Boreal.Animals
     // - Well-wooded ground also grows richer leaves high up, which only animals that reach high enough can eat.
     // - The sea grows its own plants, one kind per sea biome (see SeaFood), floating at the water surface and drawn
     //   as seagrass, kelp, coral or plankton (see SeaPlantLooks). Those in water too deep to wade are for swimmers only.
+    // - Seasons (SeasonClock) change how fast plants regrow, and snow and withered grass hide ground plants, which
+    //   come back as they were once uncovered. Leaves up in the trees and sea plants are never buried.
     // Plant positions come from a hash of the world seed and fixed world cells, so a seed always gives the
     // same layout. Tiles that nothing needs are unloaded but remember what was eaten, and keep regrowing.
     public class FoodSpawner : MonoBehaviour
@@ -90,6 +92,11 @@ namespace Boreal.Animals
         [SerializeField] private int shownPlantCount;
         [SerializeField] private int shownSeaPlantCount;
         [SerializeField] private int seaPlantsEaten;
+        [SerializeField] private int buriedPlantCount;
+
+        // Plant sites whose seasonal values are refreshed per frame after the season moves on a step. Thousands of
+        // sites can be loaded, so a refresh is spread over a few frames.
+        private const int SeasonRefreshesPerFrame = 4000;
 
         private sealed class PlantSite
         {
@@ -113,6 +120,16 @@ namespace Boreal.Animals
             public FoodItem plant;
             // Tall food only: the spruce the shoots grow on. It stays while they are eaten and regrow.
             public GameObject tree;
+            // The terrain under the plant, for what the season does there (SeasonalGround).
+            public EnvironmentSample ground;
+            // Fixed per site, from 0 to 1: a ground plant is buried while the share of plants left uncovered is at or
+            // below it, so plants disappear one by one as snow deepens and come back one by one as it melts.
+            public float burialPoint;
+            // From the season: regrowth speed relative to the base climate, and whether the plant is buried.
+            public float seasonalGrowth = 1f;
+            public bool buried;
+            // The SeasonClock step these were last refreshed for; -1, as without seasons, means unchanged.
+            public int seasonStep = -1;
         }
 
         private sealed class FoodTile
@@ -130,6 +147,7 @@ namespace Boreal.Animals
             public readonly List<Vector3> positions = new List<Vector3>();
             public readonly List<float> moistures = new List<float>();
             public readonly List<float> treeCovers = new List<float>();
+            public readonly List<EnvironmentSample> environments = new List<EnvironmentSample>();
             // 0 for ground plants, otherwise the height of tall food above the ground.
             public readonly List<float> heights = new List<float>();
 
@@ -139,6 +157,7 @@ namespace Boreal.Animals
             public readonly List<SeaBiome> seaBiomes = new List<SeaBiome>();
             public readonly List<float> seaDepths = new List<float>();
             public readonly List<float> seaCelsius = new List<float>();
+            public readonly List<EnvironmentSample> seaEnvironments = new List<EnvironmentSample>();
 
             public void Add(EnvironmentSample environment, float height)
             {
@@ -146,14 +165,17 @@ namespace Boreal.Animals
                 moistures.Add(environment.moisture);
                 treeCovers.Add(environment.treeCover);
                 heights.Add(height);
+                environments.Add(environment);
             }
 
-            public void AddSea(Vector3 surfacePosition, SeaBiome biome, float depth, float celsius)
+            public void AddSea(Vector3 surfacePosition, SeaBiome biome, float depth, float celsius,
+                               EnvironmentSample environment)
             {
                 seaPositions.Add(surfacePosition);
                 seaBiomes.Add(biome);
                 seaDepths.Add(depth);
                 seaCelsius.Add(celsius);
+                seaEnvironments.Add(environment);
             }
         }
 
@@ -181,6 +203,8 @@ namespace Boreal.Animals
         public int ShownSeaPlantCount => shownSeaPlantCount;
         // Sea plants eaten since the world was created.
         public int SeaPlantsEaten => seaPlantsEaten;
+        // Grown plants in shown tiles that snow or withered grass hides, so they aren't shown.
+        public int BuriedPlantCount => buriedPlantCount;
 
         // Forgets every plant, for a newly generated world. The seed decides the new plant layout.
         public void ResetWorld(int seed)
@@ -205,6 +229,7 @@ namespace Boreal.Animals
             shownPlantCount = 0;
             shownSeaPlantCount = 0;
             seaPlantsEaten = 0;
+            buriedPlantCount = 0;
         }
 
         void Update()
@@ -264,8 +289,12 @@ namespace Boreal.Animals
         void UpdatePlants(float deltaTime)
         {
             int created = 0;
+            int seasonRefreshes = 0;
+            int seasonStep = SeasonClock.Step;
+            SeasonConditions season = SeasonClock.Conditions;
             shownPlantCount = 0;
             shownSeaPlantCount = 0;
+            buriedPlantCount = 0;
             foreach (FoodTile tile in tiles.Values)
             {
                 if (tile.sites == null) continue;
@@ -273,11 +302,24 @@ namespace Boreal.Animals
                 foreach (PlantSite site in tile.sites)
                 {
                     if (site.isTall && tile.shown && site.tree == null) AddSpruce(site);
+                    if (site.seasonStep != seasonStep && seasonRefreshes < SeasonRefreshesPerFrame)
+                    {
+                        RefreshSeason(site, season, seasonStep);
+                        seasonRefreshes++;
+                    }
 
                     if (site.plant != null && site.plant.IsAvailable)
                     {
-                        CountShown(site);
-                        continue;
+                        if (!site.buried)
+                        {
+                            CountShown(site);
+                            continue;
+                        }
+
+                        // Snow has covered it. It stays grown under the snow and shows again once uncovered.
+                        Destroy(site.plant.gameObject);
+                        site.plant = null;
+                        site.regrowProgress = 1f;
                     }
 
                     // Eaten or spoiled. The plant destroys itself, so from the next frame it reads as null
@@ -287,8 +329,14 @@ namespace Boreal.Animals
                     site.plant = null;
                     if (site.regrowProgress < 1f)
                     {
-                        site.regrowProgress += deltaTime / site.regrowSeconds;
+                        site.regrowProgress += deltaTime * site.seasonalGrowth / site.regrowSeconds;
                         if (site.regrowProgress < 1f) continue;
+                    }
+
+                    if (site.buried)
+                    {
+                        if (tile.shown) buriedPlantCount++;
+                        continue;
                     }
 
                     if (tile.shown && created < maxPlantsCreatedPerFrame)
@@ -305,6 +353,16 @@ namespace Boreal.Animals
         {
             shownPlantCount++;
             if (site.seaBiome != SeaBiome.None) shownSeaPlantCount++;
+        }
+
+        // What the season does to a site: how fast it regrows, and for ground plants whether snow or withered grass
+        // hides it. Leaves up in the trees stay above the snow, and the sea has none.
+        static void RefreshSeason(PlantSite site, SeasonConditions season, int seasonStep)
+        {
+            SeasonalGround effect = SeasonalGround.At(site.ground, season);
+            site.seasonalGrowth = effect.growth;
+            site.buried = !site.isTall && site.seaBiome == SeaBiome.None && site.burialPoint >= effect.uncovered;
+            site.seasonStep = seasonStep;
         }
 
         FoodTile RequestSites(Vector2Int coordinate, float now)
@@ -354,6 +412,8 @@ namespace Boreal.Animals
             }
 
             FoodItem growthProfile = foodPrefab != null ? foodPrefab.GetComponent<FoodItem>() : null;
+            int seasonStep = SeasonClock.Step;
+            SeasonConditions season = SeasonClock.Conditions;
             tile.sites = new List<PlantSite>(candidates.positions.Count);
             for (int index = 0; index < candidates.positions.Count; index++)
             {
@@ -364,7 +424,7 @@ namespace Boreal.Animals
                 float moisture = candidates.moistures[index];
                 bool isTall = candidates.heights[index] > 0f;
                 float heightAboveGround = isTall ? candidates.heights[index] : surfaceOffset;
-                tile.sites.Add(new PlantSite
+                PlantSite site = new PlantSite
                 {
                     position = position + Vector3.up * heightAboveGround,
                     nutrition = baseNutrition * Mathf.Lerp(moistureNutritionMultiplier.x,
@@ -376,8 +436,14 @@ namespace Boreal.Animals
                     isTall = isTall,
                     forestFood = ForestFoodLooks.Choose(moisture, candidates.treeCovers[index],
                                                         SiteHash(position) % 1000 / 1000f),
-                    regrowProgress = 1f
-                });
+                    regrowProgress = 1f,
+                    ground = candidates.environments[index],
+                    burialPoint = Hash01(worldSeed, Mathf.RoundToInt(position.x * 4f), Mathf.RoundToInt(position.z * 4f),
+                                         8)
+                };
+                // Set now, so a tile loaded in winter never shows its buried plants for a frame.
+                RefreshSeason(site, season, seasonStep);
+                tile.sites.Add(site);
             }
 
             // Sea plants float on the water, so animals reach them at the surface, and grow by the sea's own rules.
@@ -388,7 +454,7 @@ namespace Boreal.Animals
                 if (growthRate < minimumGrowthRate) continue;
 
                 SeaFoodYield yield = seaFood.Yield(candidates.seaBiomes[index]);
-                tile.sites.Add(new PlantSite
+                PlantSite site = new PlantSite
                 {
                     position = candidates.seaPositions[index] + Vector3.up * seaFoodSurfaceOffset,
                     nutrition = baseNutrition * yield.nutrition,
@@ -398,8 +464,11 @@ namespace Boreal.Animals
                     seaBiome = candidates.seaBiomes[index],
                     waterDepth = candidates.seaDepths[index],
                     inDeepWater = candidates.seaDepths[index] > wadingDepth,
-                    regrowProgress = 1f
-                });
+                    regrowProgress = 1f,
+                    ground = candidates.seaEnvironments[index]
+                };
+                RefreshSeason(site, season, seasonStep);
+                tile.sites.Add(site);
             }
 
             loadedTileCount++;
@@ -669,7 +738,7 @@ namespace Boreal.Animals
                             if (biome != SeaBiome.None && Hash01(seed, cellX, cellZ, 7) < sea.rules.Yield(biome).chance)
                             {
                                 candidates.AddSea(new Vector3(position.x, sea.waterLevel, position.y), biome, depth,
-                                                  celsius);
+                                                  celsius, environment);
                             }
                         }
                     }
@@ -743,10 +812,11 @@ namespace Boreal.Animals
                    (baseRegrowSeconds * Mathf.Max(0.1f, yield.regrowth));
         }
 
-        // Fraction of the ideal regrowth rate at this position, from the food's growth temperature range.
+        // Fraction of the ideal regrowth rate at this position, from the food's growth temperature range and the
+        // place's climate. A site keeps it for good, so it leaves out the season, which RefreshSeason applies.
         static float GetGrowthRate(FoodItem growthProfile, Vector3 position)
         {
-            if (growthProfile == null || !TemperatureSystem.TryGetTemperatureAt(position, out float celsius))
+            if (growthProfile == null || !TemperatureSystem.TryGetClimateTemperatureAt(position, out float celsius))
             {
                 return 1f;
             }

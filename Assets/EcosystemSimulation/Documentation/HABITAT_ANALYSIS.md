@@ -26,7 +26,7 @@ To test a terrain feature, change one setting (for example ridge strength or riv
 | Accessibility | Share of suitable habitat reachable from the start, moving between side-by-side walkable samples. Walkable ground without food still counts as a route. |
 | Habitat regions | Separate walkable areas that hold any suitable habitat. |
 
-The defaults copy the live simulation: `AnimalTerrainWorld` for walking, `FoodSpawner` for where plants grow, the plant growth profile from `AnimalTerrainDemoBootstrap` (−12 °C, 2–13 °C, 25 °C) and the founders' temperature genes. **Reset requirements to the founders'** restores them after experimenting.
+The defaults copy the live simulation: `AnimalTerrainWorld` for walking, `FoodSpawner` for where plants grow, the plant growth profile that `AnimalTerrainDemoBootstrap` gives plant food (−20 °C, −8 to 10 °C, 25 °C) and the founders' temperature genes. **Reset requirements to the founders'** restores them after experimenting.
 
 ## Limits
 

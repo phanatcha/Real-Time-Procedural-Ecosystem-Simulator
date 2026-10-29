@@ -1,6 +1,7 @@
+using Boreal.TerrainGeneration;
+using Boreal.Core;
 using System.Collections.Generic;
 using System.Text;
-using Boreal.Core;
 using UnityEngine;
 using UnityEngine.InputSystem;
 
@@ -22,6 +23,9 @@ namespace Boreal.Animals
             public float height;
             public float lifespan;
             public float sexualDrive;
+            public float breedingThreshold;
+            public float torpor;
+            public float mutationRate;
             public float harmfulMutations;
         }
 
@@ -124,7 +128,7 @@ namespace Boreal.Animals
                 text.Append($"   <color=#ff9090>{manager.LastSafetyPauseReason}</color>\n");
             }
 
-            text.Append($"<b>Simulated time</b> {FormatDuration(simulatedSeconds)}\n");
+            text.Append($"<b>Simulated time</b> {FormatDuration(simulatedSeconds)}{DescribeSeason()}\n");
 
             bool seaCeiling = manager.seaPopulationCeiling > 0;
             string ceiling = manager.populationCeiling <= 0 ? ""
@@ -136,7 +140,12 @@ namespace Boreal.Animals
                 : landPaused ? "births paused on land"
                 : seaPaused ? "births paused in water" : null;
             string atCeiling = paused != null ? $" <color=#ffd060>({paused})</color>" : "";
-            string plants = foodSpawner != null ? $"    <b>Plants</b> {foodSpawner.ShownPlantCount} shown{DescribeSeaPlants()}" : "";
+            string buried = foodSpawner != null && foodSpawner.BuriedPlantCount > 0
+                ? $", {foodSpawner.BuriedPlantCount} under snow"
+                : "";
+            string plants = foodSpawner != null
+                ? $"    <b>Plants</b> {foodSpawner.ShownPlantCount} shown{buried}{DescribeSeaPlants()}"
+                : "";
             string tiles = habitatNavigation != null ? $"    <b>Walkable tiles</b> {habitatNavigation.NavigableTileCount}" : "";
             string offscreen = manager.OffscreenPopulation != null ? $"    <b>Off-screen</b> {manager.OffscreenTotal}" : "";
             string water = WaterAccess.HasWater ? $"    <b>In water</b> {DescribeAnimalsInWater(manager)}" : "";
@@ -191,6 +200,9 @@ namespace Boreal.Animals
                 height = record.bodyHeight,
                 lifespan = record.maxLifespan,
                 sexualDrive = record.sexualDrive,
+                breedingThreshold = record.breedingThreshold,
+                torpor = record.torpor,
+                mutationRate = record.mutationRate,
                 harmfulMutations = record.harmfulMutations
             };
             if (!traitsWhenFirstSeen.TryGetValue(largest, out Traits first))
@@ -207,10 +219,37 @@ namespace Boreal.Animals
                         $"lifespan {now.lifespan:0}s {Signed(now.lifespan - first.lifespan, "0")}   " +
                         $"sexual drive {now.sexualDrive:0.00} {Signed(now.sexualDrive - first.sexualDrive, "0.00")}");
             text.Append($"\n   harmful mutations: {now.harmfulMutations:0.0} " +
-                        $"{Signed(now.harmfulMutations - first.harmfulMutations, "0.0")}");
+                        $"{Signed(now.harmfulMutations - first.harmfulMutations, "0.0")}   " +
+                        $"mutation rate {now.mutationRate:0.00}× {Signed(now.mutationRate - first.mutationRate, "0.00")}   " +
+                        $"breeds at {100f * now.breedingThreshold:0}% energy " +
+                        $"{Signed(100f * (now.breedingThreshold - first.breedingThreshold), "0")}   " +
+                        $"torpor {now.torpor:0.00} {Signed(now.torpor - first.torpor, "0.00")}");
             text.Append($"\n   perks: {AnimalPerks.DescribeShares(record.perkShares)}");
             text.Append($"\n   body parts: {DescribeBodyParts(manager, largest)}");
             text.Append($"\n   swimming ability: {swimmingSummary}");
+        }
+
+        // The time of year and what it does compared with the terrain's base climate.
+        static string DescribeSeason()
+        {
+            SeasonClock clock = SeasonClock.Active;
+            if (clock == null) return "";
+            if (!SeasonClock.IsRunning) return "    <b>Season</b> off";
+
+            SeasonConditions conditions = SeasonClock.Conditions;
+            SeasonState season = conditions.state;
+            float celsius = SeasonClock.TemperatureShiftCelsius(season);
+            string shift = float.IsNaN(celsius) ? ""
+                : celsius <= -0.5f ? $"{-celsius:0} °C colder, "
+                : celsius >= 0.5f ? $"{celsius:0} °C warmer, "
+                : "usual temperature, ";
+
+            string easing = clock.EffectiveStrength < clock.strength - 0.005f
+                ? $", seasons at {100f * clock.EffectiveStrength / clock.strength:0}% while easing in"
+                : "";
+            return $"    <b>Season</b> {clock.SeasonName}, year {clock.Year} ({100f * clock.YearProgress:0}% through" +
+                   $"{easing}): {shift}plants regrow at {100f * season.growthMultiplier * conditions.growthBalance:0}%, " +
+                   $"snow {100f * season.snowAmount:0}%";
         }
 
         // How many of the shown plants are in the sea, and how many sea plants have been eaten in this world.

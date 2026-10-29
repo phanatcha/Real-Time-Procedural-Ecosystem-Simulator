@@ -1,6 +1,6 @@
-using System.Collections.Generic;
 using Boreal.TerrainGeneration;
 using Boreal.World;
+using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.AI;
 using UnityEngine.Serialization;
@@ -174,17 +174,26 @@ namespace Boreal.Animals
         [Min(0.1f)] public float carcassScale = 6f;
 
         [Header("Reproduction")]
-        [Range(0f, 1f)] public float reproductionThreshold = 0.95f;
+        [Tooltip("Inherited (the breeding threshold gene, 0.5 to 1). Share of its maximum energy an animal needs before " +
+                 "it breeds. A clone takes half of what the parent has; each mate gives a quarter. Higher keeps more in " +
+                 "reserve for winter but breeds less often. At 0.95 animals living around half energy rarely bred.")]
+        [Range(0f, 1f)] public float reproductionThreshold = 0.8f;
         [Tooltip("Simulated seconds after giving birth before this animal can reproduce again. Without it, " +
                  "every meal can become a birth and populations explode.")]
         [Min(0f)] public float reproductionCooldown = 60f;
+        [Tooltip("Percent chance per gene per birth that it mutates, at a mutation rate of 1.")]
         [Range(0f, 100f)] public float mutationChance = 5f;
         [Min(0f)] public float mutationMagnitude = 0.1f;
+        [Tooltip("Inherited (the mutation rate gene, 0.25 to 4). Multiplies every mutation chance at birth: genes, " +
+                 "body parts, perks and harmful mutations, so a lineage that evolves faster also gathers harmful " +
+                 "mutations faster. A clone mutates at its parent's rate, a child of two parents at the rate it took " +
+                 "from one of them.")]
+        [Range(0.25f, 4f)] public float mutationRate = 1f;
 
         [Header("Mutation Load")]
-        [Tooltip("Percent chance per birth that the child gains a harmful mutation. A clone keeps all of its " +
-                 "parent's; a child of two parents inherits each of each parent's with a 50% chance, so sexual " +
-                 "lineages can shed them while cloning lineages only gain them (Muller's ratchet).")]
+        [Tooltip("Percent chance per birth, at a mutation rate of 1, that the child gains a harmful mutation. A clone " +
+                 "keeps all of its parent's; a child of two parents inherits each of each parent's with a 50% chance, " +
+                 "so sexual lineages can shed them while cloning lineages only gain them (Muller's ratchet).")]
         [Range(0f, 100f)] public float harmfulMutationChance = 10f;
         [Tooltip("How much each harmful mutation adds to energy use: 0.02 adds 2% per mutation.")]
         [Min(0f)] public float harmfulMutationEnergyCost = 0.02f;
@@ -192,8 +201,8 @@ namespace Boreal.Animals
         private int harmfulMutations;
 
         [Header("Perks")]
-        [Tooltip("Percent chance per birth that each perk (thick fur, venom, camouflage, regeneration, scavenger gut) " +
-                 "turns on or off. AnimalPerks describes what each does and costs.")]
+        [Tooltip("Percent chance per birth, at a mutation rate of 1, that each perk (thick fur, venom, camouflage, " +
+                 "regeneration, scavenger gut) turns on or off. AnimalPerks describes what each does and costs.")]
         [Range(0f, 100f)] public float perkFlipChance = 1f;
         [SerializeField, Tooltip("This animal's perks, for reference.")]
         private string perks;
@@ -218,7 +227,8 @@ namespace Boreal.Animals
         [Range(0f, 1f)] public float fertilityFadeStart = 0.5f;
 
         [Header("Body Plan")]
-        [Tooltip("How body parts sprout, grow, shrink and turn into other parts at birth.")]
+        [Tooltip("How body parts sprout, grow, shrink and turn into other parts at birth. The chances are at a mutation " +
+                 "rate of 1.")]
         public BodyPlanMutation bodyPlanMutation = BodyPlanMutation.Default;
         [Tooltip("How far a full-size leg pair lifts the body off the ground at body height 1, in world units. " +
                  "Standing taller also raises the animal's feeding reach.")]
@@ -243,6 +253,8 @@ namespace Boreal.Animals
         public bool CanSwimDeepWater => waterMovement.CanSwimDeepWater(bodyEffects.swimmingAbility);
         public bool IsInWater => inWater;
         public bool IsInDeadZone => inDeadZone;
+        // How much snow under the animal slows it: 1 without snow, lower in snow. Not part of its genes.
+        public float SnowSpeedMultiplier => snowSpeedMultiplier;
         public float CurrentAge => currentAge;
         public int Generation => generation;
         public int HarmfulMutations => harmfulMutations;
@@ -311,8 +323,8 @@ namespace Boreal.Animals
         private const float PostponedBirthDelay = 5f;
         // Simulated seconds a partner the animal couldn't reach, or courted without a child, is passed over.
         private const float AvoidedMateMemory = 30f;
-        // SpeciesManager's default, for fertility when there is no SpeciesManager.
-        private const float DefaultSpeciationThreshold = 0.03f;
+        // Simulated seconds between checks of the snow under the animal, which changes slowly.
+        private const float SnowSampleInterval = 1f;
 
         private static readonly int BaseColorId = Shader.PropertyToID("_BaseColor");
         private static readonly int ColorId = Shader.PropertyToID("_Color");
@@ -340,6 +352,8 @@ namespace Boreal.Animals
         private float geneMoveSpeed;
         private bool inWater;
         private bool inDeadZone;
+        private float snowSpeedMultiplier = 1f;
+        private float snowSampleTimer;
         // The agent's offset standing on land and floating with the body half under water, and how far between
         // the two the body is (0 = standing, 1 = floating).
         private float standingBaseOffset;
@@ -514,6 +528,7 @@ namespace Boreal.Animals
             }
             UpdateStamina(deltaTime);
             UpdateWater(deltaTime);
+            UpdateSnow(deltaTime);
             RefreshMovementSpeed();
 
             if (currentEnergy > 0f)
@@ -845,7 +860,7 @@ namespace Boreal.Animals
 
             float threshold = SpeciesManager.Instance != null
                 ? SpeciesManager.Instance.speciationThreshold
-                : DefaultSpeciationThreshold;
+                : SpeciesManager.DefaultSpeciationThreshold;
             return MatingRules.Fertility(AnimalGenome.Distance(genome, other.genome), threshold, fertilityFadeStart);
         }
 
@@ -1386,7 +1401,7 @@ namespace Boreal.Animals
             float temperatureMultiplier = thermalResponse != null ? thermalResponse.MovementMultiplier : 1f;
             float baseSpeed = inWater
                 ? (geneMoveSpeed > 0f ? geneMoveSpeed : moveSpeed) * waterMovement.SpeedMultiplier(bodyEffects.swimmingAbility)
-                : moveSpeed;
+                : moveSpeed * snowSpeedMultiplier;
             agent.speed = Mathf.Max(0.01f, baseSpeed * multiplier * temperatureMultiplier);
         }
 
@@ -1409,6 +1424,25 @@ namespace Boreal.Animals
 
             floatAmount = Mathf.MoveTowards(floatAmount, target, deltaTime / FloatTransitionSeconds);
             agent.baseOffset = Mathf.Lerp(standingBaseOffset, floatingBaseOffset, floatAmount);
+        }
+
+        // Snow on land slows the animal by the terrain's seasonal movement cost (SeasonalGround), down to 57% of its
+        // speed in the deepest snow.
+        void UpdateSnow(float deltaTime)
+        {
+            snowSampleTimer -= deltaTime;
+            if (snowSampleTimer > 0f) return;
+
+            snowSampleTimer = SnowSampleInterval;
+            snowSpeedMultiplier = 1f;
+            AnimalTerrainWorld terrainWorld = AnimalTerrainWorld.Active;
+            if (inWater || !SeasonClock.IsRunning || terrainWorld == null ||
+                !terrainWorld.TryGetCachedSample(transform.position, out EnvironmentSample ground))
+            {
+                return;
+            }
+
+            snowSpeedMultiplier = 1f / SeasonalGround.At(ground, SeasonClock.Current).movementCost;
         }
 
         // Deep water is closed to animals that can't swim in it, and water costs each animal's route planning what it
@@ -1956,28 +1990,26 @@ namespace Boreal.Animals
             Destroy(gameObject);
         }
 
-        // Clones itself: the child gets a mutated copy of this genome, with all of its harmful mutations, and half
-        // this animal's energy.
+        // Clones itself: the child gets a copy of this genome, with all of its harmful mutations, mutated at this
+        // animal's mutation rate, and half this animal's energy.
         void Reproduce()
         {
-            AnimalGenome childGenome = genome.CreateMutatedCopy(mutationChance, mutationMagnitude, bodyPlanMutation,
-                                                                out bool mutated);
-            mutated |= childGenome.TryAddHarmfulMutation(harmfulMutationChance);
-            mutated |= childGenome.MutatePerks(perkFlipChance);
-            TryGiveBirth(childGenome, mutated, null);
+            TryGiveBirth(CreateChildGenome(genome, out bool mutated), mutated, null);
         }
 
         // The child takes each gene, body site and perk from a random parent, and each parent's harmful mutations
-        // with a 50% chance each, then mutates. Each parent gives it a share of its energy. Returns false when the
-        // child had nowhere to be born.
+        // with a 50% chance each, then mutates at the mutation rate it took. Each parent gives it a share of its
+        // energy. Returns false when the child had nowhere to be born.
         bool ReproduceWith(SeekFood partner)
         {
-            AnimalGenome childGenome = AnimalGenome.Recombine(genome, partner.genome)
-                                                   .CreateMutatedCopy(mutationChance, mutationMagnitude,
-                                                                      bodyPlanMutation, out bool mutated);
-            mutated |= childGenome.TryAddHarmfulMutation(harmfulMutationChance);
-            mutated |= childGenome.MutatePerks(perkFlipChance);
+            AnimalGenome childGenome = CreateChildGenome(AnimalGenome.Recombine(genome, partner.genome), out bool mutated);
             return TryGiveBirth(childGenome, mutated, partner);
+        }
+
+        AnimalGenome CreateChildGenome(AnimalGenome inherited, out bool mutated)
+        {
+            return inherited.CreateChild(mutationChance, mutationMagnitude, bodyPlanMutation, perkFlipChance,
+                                         harmfulMutationChance, out mutated);
         }
 
         // The child is born beside this animal, with a partner as its second parent or none for a clone.
@@ -2126,6 +2158,9 @@ namespace Boreal.Animals
             captured[AnimalGene.ColdTolerance] = thermalResponse.coldTolerance;
             captured[AnimalGene.HeatTolerance] = thermalResponse.heatTolerance;
             captured[AnimalGene.SexualDrive] = sexualDrive;
+            captured[AnimalGene.BreedingThreshold] = reproductionThreshold;
+            captured[AnimalGene.Torpor] = thermalResponse.torpor;
+            captured[AnimalGene.MutationRate] = mutationRate;
             return captured;
         }
 
@@ -2146,6 +2181,9 @@ namespace Boreal.Animals
             thermalResponse.coldTolerance = genome[AnimalGene.ColdTolerance];
             thermalResponse.heatTolerance = genome[AnimalGene.HeatTolerance];
             sexualDrive = genome[AnimalGene.SexualDrive];
+            reproductionThreshold = genome[AnimalGene.BreedingThreshold];
+            thermalResponse.torpor = genome[AnimalGene.Torpor];
+            mutationRate = genome[AnimalGene.MutationRate];
             harmfulMutations = genome.HarmfulMutations;
         }
 

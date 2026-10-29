@@ -68,3 +68,9 @@ therefore knows only the abstraction, never the module above it.
   (often into `Boreal.World`) or define an interface the higher module implements.
 - **Editor-only code** goes in the module's `Editor` folder. **Tests** go in `Tests/Editor`.
 - **A new module** gets its own folder and `.asmdef`, and a row in the table above.
+
+## Live seasonal state
+
+`Boreal.Animals.SeasonClock` publishes `SeasonState` to `Boreal.World.WorldSeason` each update.
+The terrain temperature provider reads that value in World; it never references Animals.
+Disabling the clock and subsystem registration restore the neutral climate, including when domain reload is disabled.

@@ -1,11 +1,11 @@
-using System;
-using System.Collections.Generic;
-using System.IO;
-using System.Text;
 using Boreal.Core;
 using Boreal.Temperature;
 using Boreal.TerrainGeneration;
 using Boreal.World;
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Text;
 using TMPro;
 using UnityEngine;
 using UnityEngine.EventSystems;
@@ -651,8 +651,9 @@ namespace Boreal.Animals
             }
         }
 
-        // The temperature an animal would feel here. The terrain provider only answers for loaded terrain, so its
-        // conversion is applied to the sample directly; an override or another provider goes through the system.
+        // The temperature an animal would feel here in the base climate, without the season. The terrain provider only
+        // answers for loaded terrain, so its conversion is applied to the sample directly; an override or another
+        // provider goes through the system.
         static float Celsius(in EnvironmentSample environment)
         {
             TemperatureSystem system = TemperatureSystem.Active;
@@ -662,7 +663,7 @@ namespace Boreal.Animals
                     terrain.coldestTemperatureCelsius, terrain.warmestTemperatureCelsius);
             }
 
-            TemperatureSystem.TryGetTemperatureAt(environment.position, out float celsius);
+            TemperatureSystem.TryGetClimateTemperatureAt(environment.position, out float celsius);
             return celsius;
         }
 

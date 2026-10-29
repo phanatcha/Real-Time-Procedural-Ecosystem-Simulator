@@ -40,14 +40,17 @@ N(t) = room / (1 + (room − N) / N · e^(−r·t))
 
 **Migration:** 0.4% per second leaves for the side neighbours, favouring those with more room, and takes genomes with it.
 
+**Seasons:** each cell keeps its surveyed spots, and when `SeasonClock` moves on a step (240 a year) the cell applies the season to each spot as the live world does (`SeasonalGround`). The spot's plant energy is multiplied by the season's regrowth (including the clock's yearly growth balance) and by the share of grass not under snow, and its temperature takes the season's shift. So off-screen populations shrink in winter and grow back in summer on the same clock as live animals.
+
 ## Not yet included
 
-- **Off-screen evolution (step 3b):** off-screen genomes are copied, not mutated or selected. Evolution still happens only among live animals. Harmful mutations are neither gained nor shed off-screen, but those a genome already carries stay with it and raise its energy use, so a heavily loaded population has a lower carrying capacity. Perks don't flip off-screen either. Their upkeep is part of the energy use measured on the live animal, thick fur shifts the comfort range, and a scavenger gut digests less of the cell's plant food; venom, camouflage and regeneration have no off-screen effect, since hunting isn't modelled there.
+- **Off-screen evolution (step 3b):** off-screen genomes are copied, not mutated or selected. Evolution still happens only among live animals, so the mutation rate gene does nothing off-screen; genomes keep it, and animals created from them mutate their children at that rate. Harmful mutations are neither gained nor shed off-screen, but those a genome already carries stay with it and raise its energy use, so a heavily loaded population has a lower carrying capacity. Perks don't flip off-screen either. Their upkeep is part of the energy use measured on the live animal, thick fur shifts the comfort range, and a scavenger gut digests less of the cell's plant food; venom, camouflage and regeneration have no off-screen effect, since hunting isn't modelled there.
 - **Off-screen speciation (step 3c):** only live animals are checked for species splits.
 - **Hunting and tall forest food** are not modelled off-screen.
 - **Mating** is not modelled off-screen: populations grow at the same rate whatever their sexual drive, and genomes are not recombined.
+- **Breeding threshold:** off-screen populations grow at the same rate whatever their breeding threshold gene. Torpor is included: it lowers energy use in the cold, as it does for live animals.
 - **Harvest efficiency (0.5)** is an estimate. Compare the live density near the camera with the off-screen density to tune it.
 
 ## Tests
 
-`OffscreenPopulationTests` checks plant energy, capacity, growth and death rates, food sharing between species and with live animals, migration and extinction, and that digestion and temperature stress match `SeekFood` and `AnimalTemperature`.
+`OffscreenPopulationTests` checks plant energy, capacity, growth and death rates, food sharing between species and with live animals, migration and extinction, that digestion and temperature stress match `SeekFood` and `AnimalTemperature`, and that winter lowers a cell's food and temperature.

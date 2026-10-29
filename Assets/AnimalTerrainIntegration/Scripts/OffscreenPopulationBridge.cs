@@ -1,8 +1,8 @@
-using System.Collections.Generic;
 using Boreal.Animals;
 using Boreal.EcosystemSimulation;
 using Boreal.TerrainGeneration;
 using Boreal.World;
+using System.Collections.Generic;
 using UnityEngine;
 
 namespace Boreal.AnimalTerrainIntegration
@@ -59,6 +59,7 @@ namespace Boreal.AnimalTerrainIntegration
             public Vector2Int coordinate;
             public float plantEnergyPerSecond;
             public float celsius;
+            public List<OffscreenGround> ground;
         }
 
         sealed class SurveyResult
@@ -118,6 +119,7 @@ namespace Boreal.AnimalTerrainIntegration
             }
 
             CopyPlantRules();
+            CopyTemperatureRange();
             // A sampler of its own, so the survey does not push the live game's terrain out of its cache.
             TerrainEnvironmentSampler sampler = new TerrainEnvironmentSampler(liveSampler.HeightMapSettings,
                 liveSampler.MeshSettings, liveSampler.EnvironmentDefinitions, liveSampler.VegetationSettings);
@@ -138,6 +140,8 @@ namespace Boreal.AnimalTerrainIntegration
 
             RegisterWithSpeciesManager();
             Vector2 focus = GetFocus();
+            store.season = SeasonClock.Conditions;
+            store.seasonStep = SeasonClock.Step;
             store.Advance(Time.deltaTime, focus);
 
             refreshTimer -= Time.unscaledDeltaTime;
@@ -331,6 +335,8 @@ namespace Boreal.AnimalTerrainIntegration
                 ecology.degreesPerStressUnit = thermal.degreesPerStressUnit;
                 ecology.extraEnergyDrainPerStressUnit = thermal.extraEnergyDrainPerStressUnit;
                 ecology.maximumStress = thermal.maximumStress;
+                ecology.torporEnergySaving = thermal.torporEnergySaving;
+                ecology.torporFullAtStress = thermal.torporFullAtStress;
             }
 
             if (store != null) store.rules = ecology;
@@ -346,6 +352,16 @@ namespace Boreal.AnimalTerrainIntegration
             ecology.plantNutrition = foodSpawner.baseNutrition;
             ecology.moistureNutritionMultiplier = foodSpawner.moistureNutritionMultiplier;
             ecology.plantRegrowSeconds = foodSpawner.baseRegrowSeconds;
+        }
+
+        // So the off-screen populations feel a season's temperature as live animals do.
+        void CopyTemperatureRange()
+        {
+            ProceduralTerrainTemperatureProvider temperature = FindAnyObjectByType<ProceduralTerrainTemperatureProvider>();
+            if (temperature == null) return;
+
+            ecology.coldestCelsius = temperature.coldestTemperatureCelsius;
+            ecology.warmestCelsius = temperature.warmestTemperatureCelsius;
         }
 
         // Walkable ground, plant growth and temperature as the live simulation defines them.
@@ -377,8 +393,9 @@ namespace Boreal.AnimalTerrainIntegration
             return rules;
         }
 
-        // Runs on a background thread: measures each cell's plant energy and temperature on its walkable ground.
-        static SurveyResult SurveyCells(int version, TerrainEnvironmentSampler sampler, HabitatRequirements ground,
+        // Runs on a background thread: measures each cell's plant energy and temperature on its walkable ground, and
+        // keeps each spot so seasons can be applied to it later.
+        static SurveyResult SurveyCells(int version, TerrainEnvironmentSampler sampler, HabitatRequirements requirements,
             OffscreenEcologyRules rules, float extent, float size, int axis)
         {
             SurveyResult result = new SurveyResult { version = version };
@@ -393,6 +410,7 @@ namespace Boreal.AnimalTerrainIntegration
                     float plantEnergy = 0f;
                     float celsiusTotal = 0f;
                     int walkable = 0;
+                    List<OffscreenGround> ground = new List<OffscreenGround>();
                     for (int sampleZ = 0; sampleZ < axis; sampleZ++)
                     {
                         for (int sampleX = 0; sampleX < axis; sampleX++)
@@ -400,13 +418,15 @@ namespace Boreal.AnimalTerrainIntegration
                             Vector2 position = new Vector2((cellX * axis + sampleX + 0.5f) * step,
                                                            (cellZ * axis + sampleZ + 0.5f) * step);
                             if (Mathf.Abs(position.x) > extent || Mathf.Abs(position.y) > extent) continue;
-                            if (!sampler.TrySample(position, out EnvironmentSample sample) || !ground.IsWalkable(sample)) continue;
+                            if (!sampler.TrySample(position, out EnvironmentSample sample) || !requirements.IsWalkable(sample)) continue;
 
-                            float celsius = ground.ToCelsius(sample);
+                            float celsius = rules.ToCelsius(sample.temperature);
+                            float spotEnergy = rules.PlantEnergyPerSecond(sampleArea, sample.grassBiomass, sample.moisture,
+                                                                          requirements.PlantGrowthRate(celsius));
                             walkable++;
                             celsiusTotal += celsius;
-                            plantEnergy += rules.PlantEnergyPerSecond(sampleArea, sample.grassBiomass, sample.moisture,
-                                                                      ground.PlantGrowthRate(celsius));
+                            plantEnergy += spotEnergy;
+                            ground.Add(new OffscreenGround(sample, spotEnergy));
                         }
                     }
 
@@ -415,7 +435,8 @@ namespace Boreal.AnimalTerrainIntegration
                     {
                         coordinate = new Vector2Int(cellX, cellZ),
                         plantEnergyPerSecond = plantEnergy,
-                        celsius = celsiusTotal / walkable
+                        celsius = celsiusTotal / walkable,
+                        ground = ground
                     });
                 }
             }
@@ -439,7 +460,7 @@ namespace Boreal.AnimalTerrainIntegration
             };
             foreach (SurveyedCell cell in result.cells)
             {
-                surveyed.AddCell(cell.coordinate, cell.plantEnergyPerSecond, cell.celsius);
+                surveyed.AddCell(cell.coordinate, cell.plantEnergyPerSecond, cell.celsius, cell.ground);
             }
 
             store = surveyed;

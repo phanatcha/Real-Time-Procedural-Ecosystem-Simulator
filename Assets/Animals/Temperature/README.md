@@ -34,6 +34,8 @@ public override bool TryGetTemperature(Vector3 worldPosition, out float temperat
 
 The temporary zone/gradient sources are examples of this contract, not a required biome data format. A later adapter can calculate biome baseline plus weather, seasons or altitude adjustments and return the resulting local Celsius value. None of the animal or food code needs biome-specific dependencies.
 
+Seasons work this way. `ProceduralTerrainTemperatureProvider` shifts its temperature by the current season on `SeasonClock`, through the terrain's seasonal query (`SeasonalEnvironment`), so animals and carcasses feel the season. A provider can also override `TryGetClimateTemperature` to return the temperature without the season. `TemperatureSystem.TryGetClimateTemperatureAt` uses it for things fixed once from a place's climate, such as how fast a plant site regrows; the season's effect on plants is applied separately. The testing providers ignore seasons.
+
 Consumers use:
 
 ```csharp

@@ -10,6 +10,8 @@ namespace Boreal.Animals
         public float preferredTemperature = 20f;
         [Min(0f)] public float coldTolerance = 10f;
         [Min(0f)] public float heatTolerance = 10f;
+        [Tooltip("0 to 1, inherited: how far the animal slows down in the cold to save energy. See Torpor below.")]
+        [Range(0f, 1f)] public float torpor;
 
         [Header("Response Tuning")]
         public bool enableTemperatureEffects = true;
@@ -23,6 +25,15 @@ namespace Boreal.Animals
         [Min(0f)] public float extremeDamagePerStressUnit = 5f;
         [Tooltip("Maximum stress used for penalties, limiting extreme input temperatures.")]
         [Min(1f)] public float maximumStress = 3f;
+
+        [Header("Torpor")]
+        [Tooltip("Share of its energy use an animal with full torpor saves in deep cold.")]
+        [Range(0f, 1f)] public float torporEnergySaving = 0.5f;
+        [Tooltip("Share of its speed an animal with full torpor loses in deep cold.")]
+        [Range(0f, 1f)] public float torporSlowdown = 0.5f;
+        [Tooltip("Cold stress at which torpor takes full effect; it starts at the comfort range's cold end. 0.5 is " +
+                 "10 °C below it at the default 20 °C per stress unit.")]
+        [Min(0.01f)] public float torporFullAtStress = 0.5f;
         [Tooltip("Simulated seconds between position samples; at most one query per rendered frame.")]
         [Min(0.05f)] public float temperatureSampleInterval = 0.5f;
 
@@ -79,9 +90,20 @@ namespace Boreal.Animals
                 Mathf.InverseLerp(severeStart, 1f, result.coldStress));
             result.recoveryMultiplier = Mathf.Lerp(1f, Mathf.Clamp01(minimumHeatStaminaRecoveryMultiplier),
                 Mathf.InverseLerp(severeStart, 1f, result.heatStress));
+            // Torpor trades speed for energy in the cold, more the colder it is, so it costs nothing when comfortable.
+            float torporAmount = TorporAmount(torpor, result.coldStress, torporFullAtStress);
+            result.energyMultiplier *= 1f - torporAmount * Mathf.Clamp01(torporEnergySaving);
+            result.movementMultiplier *= 1f - torporAmount * Mathf.Clamp01(torporSlowdown);
             result.damagePerSecond = Mathf.Max(0f, stress - 1f) * Mathf.Max(0f, extremeDamagePerStressUnit);
             return result;
         }
+        // How deep an animal's torpor is now, from 0 to its torpor gene: none while comfortable, rising to the full gene
+        // at fullAtStress.
+        public static float TorporAmount(float torpor, float coldStress, float fullAtStress)
+        {
+            return Mathf.Clamp01(torpor) * Mathf.Clamp01(coldStress / Mathf.Max(0.01f, fullAtStress));
+        }
+
         public void ResetRuntimeState()
         {
             sampleTimer = Mathf.Max(0.05f, temperatureSampleInterval);
@@ -143,6 +165,7 @@ namespace Boreal.Animals
             preferredTemperature = parent.preferredTemperature;
             coldTolerance = parent.coldTolerance;
             heatTolerance = parent.heatTolerance;
+            torpor = parent.torpor;
             if (Random.Range(0f, 100f) < chance)
                 preferredTemperature += Random.Range(-shift, shift) * Mathf.Max(0f, preferenceMutationScale);
             if (Random.Range(0f, 100f) < chance)

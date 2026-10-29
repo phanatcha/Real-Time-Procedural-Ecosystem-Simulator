@@ -1,3 +1,4 @@
+
 using System.Collections.Generic;
 using System.Text;
 using UnityEngine;
@@ -55,6 +56,11 @@ namespace Boreal.Animals
         public float coldTolerance;
         public float heatTolerance;
         public float sexualDrive;
+        [Tooltip("Share of maximum energy members need before they breed.")]
+        public float breedingThreshold;
+        public float torpor;
+        [Tooltip("Average mutation rate gene: how many times the base mutation chances members' children mutate at.")]
+        public float mutationRate;
         [Tooltip("Average number of harmful mutations carried, each adding to energy use.")]
         public float harmfulMutations;
         [Tooltip("Share of the living members with each perk (0-1), indexed by AnimalPerk.")]
@@ -142,10 +148,23 @@ namespace Boreal.Animals
         public bool logTelemetryToConsole;
         [Min(1f)] public float telemetryLogInterval = 30f;
 
+        // Chosen by neutral drift (SpeciesSplitCalibrationTests: 250 animals cloning with the default mutation rates
+        // and no selection) so the first species splits after about 50 to 55 generations, with about 12 species alive 200
+        // to 300 generations in. It was 0.03 until perks and the sexual drive gene arrived. Perks flip both ways, so
+        // under drift each spreads to about half the animals and two animals differ in about two of them; at 0.03
+        // the first split then came after about 20 generations. With sexual reproduction and partners chosen
+        // nearby, 0.05 splits a little later, after about 60 generations; in a population where every animal can meet
+        // every other, it rarely splits at all. The breeding threshold and torpor genes brought the first split from
+        // about 55 generations to 50 and were kept at 0.05. The mutation rate gene moved it back to about 55: lineages
+        // whose rate drifts up diverge faster, but one more gene makes every other difference count a little less.
+        // Re-run the calibration after adding a gene, body site or perk.
+        public const float DefaultSpeciationThreshold = 0.05f;
+
         [Header("Speciation")]
         [Tooltip("Genetic distance at which animals count as separate species: 0 means identical and 1 means " +
-                 "opposite ends of every gene's range. Lower values produce more species.")]
-        [Range(0.005f, 0.5f)] public float speciationThreshold = 0.03f;
+                 "opposite ends of every gene's range. Lower values produce more species. The default, 0.05, " +
+                 "splits the first species after about 55 generations of neutral drift.")]
+        [Range(0.005f, 0.5f)] public float speciationThreshold = DefaultSpeciationThreshold;
         [Tooltip("Simulated seconds between checks for species that have drifted into separate groups.")]
         [Min(1f)] public float speciesCensusInterval = 10f;
         [Tooltip("A separated group becomes its own species once it has at least this many members.")]
@@ -176,7 +195,7 @@ namespace Boreal.Animals
         private float lastPerformanceSampleDuration;
         private float lowFrameRateDuration;
         private int performanceMeasurementFrames;
-    
+
         private readonly Dictionary<string, int> speciesPopulation = new Dictionary<string, int>();
         private readonly Dictionary<string, Color> speciesColors = new Dictionary<string, Color>();
         private readonly HashSet<string> assignedSpeciesNames = new HashSet<string>();
@@ -244,6 +263,8 @@ namespace Boreal.Animals
         public bool IsAtPopulationCeilingFor(bool inWater) => inWater ? IsAtSeaPopulationCeiling : IsAtPopulationCeiling;
         // Simulated time (Time.time) when the current world's history began.
         public float WorldStartTime { get; private set; }
+        // Time does not distinguish regenerations while paused, or two resets in one frame.
+        public int WorldRevision { get; private set; }
         // Refreshed at every species census. Founders are generation 0.
         public float AverageGeneration { get; private set; }
         public int HighestGeneration { get; private set; }
@@ -445,6 +466,7 @@ namespace Boreal.Animals
             telemetryTimer = 0f;
             censusTimer = 0f;
             WorldStartTime = Time.time;
+            WorldRevision++;
             AverageGeneration = 0f;
             HighestGeneration = 0;
         }
@@ -591,7 +613,7 @@ namespace Boreal.Animals
                 if (deathCause == AgentDeathCause.ColdExposure) record.coldExposureDeaths++;
                 if (deathCause == AgentDeathCause.HeatExposure) record.heatExposureDeaths++;
                 if (deathCause == AgentDeathCause.Venom) record.venomDeaths++;
-            
+
                 if (speciesPopulation[speciesName] <= 0)
                 {
                     speciesPopulation.Remove(speciesName);
@@ -867,6 +889,8 @@ namespace Boreal.Animals
             record.maturityTime = Mathf.Lerp(record.maturityTime, agent.maturityTime, weight);
             record.maxLifespan = Mathf.Lerp(record.maxLifespan, agent.maxLifespan, weight);
             record.sexualDrive = Mathf.Lerp(record.sexualDrive, agent.sexualDrive, weight);
+            record.breedingThreshold = Mathf.Lerp(record.breedingThreshold, agent.reproductionThreshold, weight);
+            record.mutationRate = Mathf.Lerp(record.mutationRate, agent.mutationRate, weight);
             record.harmfulMutations = Mathf.Lerp(record.harmfulMutations, agent.HarmfulMutations, weight);
             if (record.perkShares == null || record.perkShares.Length != AnimalGenome.PerkCount)
             {
@@ -884,6 +908,7 @@ namespace Boreal.Animals
                                                          agent.ThermalResponse.preferredTemperature, weight);
                 record.coldTolerance = Mathf.Lerp(record.coldTolerance, agent.ThermalResponse.coldTolerance, weight);
                 record.heatTolerance = Mathf.Lerp(record.heatTolerance, agent.ThermalResponse.heatTolerance, weight);
+                record.torpor = Mathf.Lerp(record.torpor, agent.ThermalResponse.torpor, weight);
             }
         }
 
@@ -891,6 +916,12 @@ namespace Boreal.Animals
         public void LogTelemetrySnapshot()
         {
             StringBuilder builder = new StringBuilder("Ecosystem telemetry");
+            SeasonClock seasons = SeasonClock.Active;
+            if (SeasonClock.IsRunning)
+            {
+                builder.Append($" ({seasons.SeasonName}, year {seasons.Year}, " +
+                               $"{100f * seasons.YearProgress:0}% through the year)");
+            }
             foreach (SpeciesTelemetryRecord record in telemetry.Values)
             {
                 speciesPopulation.TryGetValue(record.speciesName, out int living);
@@ -908,7 +939,8 @@ namespace Boreal.Animals
                 builder.Append($"maturity={record.maturityTime:F1}s, lifespan={record.maxLifespan:F1}s): ");
                 builder.Append($"preferredC={record.preferredTemperature:F1}, coldTolerance={record.coldTolerance:F1}, ");
                 builder.Append($"heatTolerance={record.heatTolerance:F1}, sexualDrive={record.sexualDrive:F2}, ");
-                builder.Append($"harmfulMutations={record.harmfulMutations:F1}, ");
+                builder.Append($"breedingThreshold={record.breedingThreshold:F2}, torpor={record.torpor:F2}, ");
+                builder.Append($"mutationRate={record.mutationRate:F2}, harmfulMutations={record.harmfulMutations:F1}, ");
                 builder.Append($"perks=[{AnimalPerks.DescribeShares(record.perkShares)}], ");
                 builder.Append($"living={living}, births={record.births}, deaths={record.deaths}, ");
                 builder.Append($"oldAge={record.oldAgeDeaths}, ");

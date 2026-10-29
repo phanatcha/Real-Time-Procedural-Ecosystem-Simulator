@@ -2102,7 +2102,7 @@ MonoBehaviour:
   logLifecycleEvents: 0
   logTelemetryToConsole: 0
   telemetryLogInterval: 30
-  speciationThreshold: 0.02
+  speciationThreshold: 0.05
   speciesCensusInterval: 10
   minimumNewSpeciesSize: 3
   populationCeiling: 400

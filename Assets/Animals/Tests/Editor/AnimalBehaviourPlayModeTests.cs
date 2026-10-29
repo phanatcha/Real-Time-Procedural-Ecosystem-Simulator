@@ -1,3 +1,4 @@
+
 using System.Collections;
 using System.Collections.Generic;
 using NUnit.Framework;
@@ -9,7 +10,7 @@ using UnityEngine.TestTools;
 
 namespace Boreal.Animals.Tests
 {
-    // Animals behaving in a running scene (item 40). The project has no assembly definitions, so these are Edit Mode
+    // Animals behaving in a running scene (item 40). These are Editor-assembly Edit Mode
     // tests that enter Play Mode themselves: each opens an empty scene, enters Play Mode, then builds flat ground with
     // a NavMesh, a Species Manager, animals and food, and watches them in simulated time (run at 5x). Entering Play
     // Mode reloads scripts, which clears every local variable set before it, so each test builds its scene afterwards.
@@ -49,6 +50,13 @@ namespace Boreal.Animals.Tests
             EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
             yield return new EnterPlayMode(ReloadsDomain);
 
+            // Allocate the log callback's captured state after the domain reload. A display class created
+            // in the outer iterator before EnterPlayMode is not restored by the test runner.
+            yield return ObserveUnreachableFood();
+        }
+
+        static IEnumerator ObserveUnreachableFood()
+        {
             BakeNavMesh(CreateGround(Vector3.zero, 40f), CreateGround(new Vector3(80f, 0f, 0f), 30f));
             SpeciesManager manager = StartSimulation();
             manager.logLifecycleEvents = true;
@@ -220,6 +228,12 @@ namespace Boreal.Animals.Tests
             Assert.Greater(walker.moveSpeed, capsule.moveSpeed, "Legs should make the animal faster.");
         }
 
+        [UnityTearDown]
+        public IEnumerator LeavePlayMode()
+        {
+            if (Application.isPlaying) yield return new ExitPlayMode();
+        }
+
         // Entering Play Mode reloads scripts unless the project's Enter Play Mode Options turn that off.
         static bool ReloadsDomain => !EditorSettings.enterPlayModeOptionsEnabled ||
                                      (EditorSettings.enterPlayModeOptions & EnterPlayModeOptions.DisableDomainReload) == 0;
@@ -282,6 +296,8 @@ namespace Boreal.Animals.Tests
             genome[AnimalGene.ColdTolerance] = 18f;
             genome[AnimalGene.HeatTolerance] = 16f;
             genome[AnimalGene.SexualDrive] = sexualDrive;
+            genome[AnimalGene.BreedingThreshold] = 0.8f;
+            genome[AnimalGene.MutationRate] = 1f;
             if (perk.HasValue) genome.SetPerk(perk.Value, true);
             return genome;
         }

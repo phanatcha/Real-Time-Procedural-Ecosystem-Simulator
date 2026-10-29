@@ -12,7 +12,18 @@ namespace Boreal.World
         public float coldestTemperatureCelsius = -28f;
         public float warmestTemperatureCelsius = 18f;
 
+        // Shifted by the season on SeasonClock, as the terrain's seasonal query shifts its temperature index.
         public override bool TryGetTemperature(Vector3 worldPosition, out float temperatureCelsius)
+        {
+            return TryGetTemperature(worldPosition, WorldSeason.Current, out temperatureCelsius);
+        }
+
+        public override bool TryGetClimateTemperature(Vector3 worldPosition, out float temperatureCelsius)
+        {
+            return TryGetTemperature(worldPosition, WorldSeason.Neutral, out temperatureCelsius);
+        }
+
+        public bool TryGetTemperature(Vector3 worldPosition, SeasonState season, out float temperatureCelsius)
         {
             temperatureCelsius = 0f;
             ResolveTerrainWorld();
@@ -36,8 +47,9 @@ namespace Boreal.World
                     definitions.ShorelineThreshold);
             }
 
+            environment.temperature = normalizedTemperature;
             temperatureCelsius = NormalizedToCelsius(
-                normalizedTemperature,
+                SeasonalEnvironment.Evaluate(environment, season).temperature,
                 coldestTemperatureCelsius,
                 warmestTemperatureCelsius);
             return IsFinite(temperatureCelsius);

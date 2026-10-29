@@ -1,8 +1,9 @@
-using System;
-using System.Collections.Generic;
+using Boreal.World;
 using Boreal.Animals;
 using Boreal.EcosystemSimulation;
 using Boreal.TerrainGeneration;
+using System;
+using System.Collections.Generic;
 using UnityEngine;
 
 namespace Boreal.AnimalTerrainIntegration
@@ -26,6 +27,12 @@ namespace Boreal.AnimalTerrainIntegration
         [Min(0.1f)] public float degreesPerStressUnit;
         [Min(0f)] public float extraEnergyDrainPerStressUnit;
         [Min(1f)] public float maximumStress;
+        [Range(0f, 1f)] public float torporEnergySaving;
+        [Min(0.01f)] public float torporFullAtStress;
+
+        [Header("Temperature (ProceduralTerrainTemperatureProvider)")]
+        public float coldestCelsius;
+        public float warmestCelsius;
 
         [Header("Calibration")]
         [Tooltip("Share of the plant energy growing in a cell that its animals manage to eat. Live animals " +
@@ -46,8 +53,18 @@ namespace Boreal.AnimalTerrainIntegration
             degreesPerStressUnit = 20f,
             extraEnergyDrainPerStressUnit = 0.5f,
             maximumStress = 3f,
+            torporEnergySaving = 0.5f,
+            torporFullAtStress = 0.5f,
+            coldestCelsius = -28f,
+            warmestCelsius = 18f,
             harvestEfficiency = 0.5f
         };
+
+        // Celsius for the terrain's temperature index (0 coldest, 1 warmest), as the terrain's provider converts it.
+        public float ToCelsius(float temperatureIndex)
+        {
+            return ProceduralTerrainTemperatureProvider.NormalizedToCelsius(temperatureIndex, coldestCelsius, warmestCelsius);
+        }
 
         // Plant energy an area of walkable ground grows per second. FoodSpawner puts one plant site per
         // spacing² of ground, holding a plant with a chance equal to the grass biomass. A plant is worth its
@@ -68,14 +85,17 @@ namespace Boreal.AnimalTerrainIntegration
             return minimum + (1f - minimum) * (1f - Mathf.Clamp01(dietAffinity));
         }
 
-        // Extra energy use outside the comfort range, as AnimalTemperature.EvaluateAtTemperature.
-        public float ThermalEnergyMultiplier(float comfortMinimum, float comfortMaximum, float celsius)
+        // Extra energy use outside the comfort range, less what torpor saves in the cold, as
+        // AnimalTemperature.EvaluateAtTemperature.
+        public float ThermalEnergyMultiplier(float comfortMinimum, float comfortMaximum, float celsius, float torpor = 0f)
         {
             float span = Mathf.Max(0.1f, degreesPerStressUnit);
             float cap = Mathf.Max(1f, maximumStress);
             float coldStress = Mathf.Clamp((comfortMinimum - celsius) / span, 0f, cap);
             float heatStress = Mathf.Clamp((celsius - comfortMaximum) / span, 0f, cap);
-            return 1f + Mathf.Max(coldStress, heatStress) * Mathf.Max(0f, extraEnergyDrainPerStressUnit);
+            float torporAmount = AnimalTemperature.TorporAmount(torpor, coldStress, torporFullAtStress);
+            return (1f + Mathf.Max(coldStress, heatStress) * Mathf.Max(0f, extraEnergyDrainPerStressUnit)) *
+                   (1f - torporAmount * Mathf.Clamp01(torporEnergySaving));
         }
 
         // How many animals like this a cell can feed on its own: the plant energy they digest divided by the
@@ -90,7 +110,8 @@ namespace Boreal.AnimalTerrainIntegration
         public float EnergyUse(OffscreenSample sample, float celsius)
         {
             return Mathf.Max(0.001f, sample.baseEnergyUse *
-                                     ThermalEnergyMultiplier(sample.comfortMinimum, sample.comfortMaximum, celsius));
+                                     ThermalEnergyMultiplier(sample.comfortMinimum, sample.comfortMaximum, celsius,
+                                                             sample.torpor));
         }
 
         // Growth while food is plentiful, from the animal's maturity time, breeding cooldown and lifespan.
@@ -120,6 +141,7 @@ namespace Boreal.AnimalTerrainIntegration
         public readonly float comfortMaximum;
         // Below 1 for a scavenger gut, which digests plants worse.
         public readonly float plantDigestionMultiplier;
+        public readonly float torpor;
 
         public float DietAffinity => genome[AnimalGene.DietAffinity];
 
@@ -137,6 +159,7 @@ namespace Boreal.AnimalTerrainIntegration
             comfortMaximum = preferred + Mathf.Max(0f, genome[AnimalGene.HeatTolerance] + effects.heatToleranceChange +
                                                        perks.heatToleranceChange);
             plantDigestionMultiplier = perks.plantDigestionMultiplier;
+            torpor = genome[AnimalGene.Torpor];
         }
     }
 
@@ -155,25 +178,71 @@ namespace Boreal.AnimalTerrainIntegration
         }
     }
 
+    // One surveyed spot of walkable ground in a cell, with the plant energy it grows per second in the base climate.
+    public readonly struct OffscreenGround
+    {
+        public readonly EnvironmentSample environment;
+        public readonly float plantEnergyPerSecond;
+
+        public OffscreenGround(EnvironmentSample environment, float plantEnergyPerSecond)
+        {
+            this.environment = environment;
+            this.plantEnergyPerSecond = Mathf.Max(0f, plantEnergyPerSecond);
+        }
+    }
+
     public sealed class OffscreenCell
     {
         public readonly Vector2Int coordinate;
         public readonly Rect bounds;
-        // Plant energy growing on the cell's walkable ground per second.
-        public readonly float plantEnergyPerSecond;
-        // Average temperature of the walkable ground.
-        public readonly float celsius;
+        // Plant energy growing on the cell's walkable ground per second, and its average temperature, in the base
+        // climate.
+        public readonly float basePlantEnergyPerSecond;
+        public readonly float baseCelsius;
+        // The walkable ground surveyed, so a season can be applied spot by spot. Seasons leave a cell without it as it is.
+        public readonly IReadOnlyList<OffscreenGround> ground;
         public readonly List<OffscreenPopulation> populations = new List<OffscreenPopulation>();
         internal float updateAccumulator;
+        int seasonStep = -1;
+
+        // The same two now, after the season.
+        public float PlantEnergyPerSecond { get; private set; }
+        public float Celsius { get; private set; }
 
         public Vector2 Centre => bounds.center;
 
-        public OffscreenCell(Vector2Int coordinate, Rect bounds, float plantEnergyPerSecond, float celsius)
+        public OffscreenCell(Vector2Int coordinate, Rect bounds, float plantEnergyPerSecond, float celsius,
+                             IReadOnlyList<OffscreenGround> ground = null)
         {
             this.coordinate = coordinate;
             this.bounds = bounds;
-            this.plantEnergyPerSecond = Mathf.Max(0f, plantEnergyPerSecond);
-            this.celsius = celsius;
+            basePlantEnergyPerSecond = Mathf.Max(0f, plantEnergyPerSecond);
+            baseCelsius = celsius;
+            this.ground = ground ?? Array.Empty<OffscreenGround>();
+            PlantEnergyPerSecond = basePlantEnergyPerSecond;
+            Celsius = baseCelsius;
+        }
+
+        // Applies a season once per SeasonClock step, as the live world does: each spot's plants regrow at the season's
+        // pace, those under snow can't be eaten, and the temperature shifts as the terrain's does.
+        internal void ApplySeason(SeasonConditions season, int step, OffscreenEcologyRules rules)
+        {
+            if (step == seasonStep) return;
+
+            seasonStep = step;
+            if (ground.Count == 0) return;
+
+            float plantEnergy = 0f;
+            float celsiusTotal = 0f;
+            foreach (OffscreenGround spot in ground)
+            {
+                SeasonalGround effect = SeasonalGround.At(spot.environment, season);
+                plantEnergy += spot.plantEnergyPerSecond * effect.growth * effect.uncovered;
+                celsiusTotal += rules.ToCelsius(effect.temperature);
+            }
+
+            PlantEnergyPerSecond = plantEnergy;
+            Celsius = celsiusTotal / ground.Count;
         }
 
         public OffscreenPopulation Find(string speciesName)
@@ -212,6 +281,10 @@ namespace Boreal.AnimalTerrainIntegration
         readonly List<float> weights = new List<float>();
 
         public OffscreenEcologyRules rules;
+        // The season now (SeasonClock.Conditions) and its SeasonClock step, set by the owner before Advance. Cells with
+        // surveyed ground apply it whenever the step changes.
+        public SeasonConditions season = SeasonConditions.None;
+        public int seasonStep = -1;
         // Real genomes kept per population to stand for the rest.
         public int samplesPerPopulation = 8;
         public float migrationRatePerSecond = 0.004f;
@@ -233,10 +306,12 @@ namespace Boreal.AnimalTerrainIntegration
             this.random = random ?? new System.Random();
         }
 
-        public void AddCell(Vector2Int coordinate, float plantEnergyPerSecond, float celsius)
+        // ground: the surveyed spots behind the totals, so seasons can change them. Without it seasons don't apply.
+        public void AddCell(Vector2Int coordinate, float plantEnergyPerSecond, float celsius,
+                            IReadOnlyList<OffscreenGround> ground = null)
         {
             Rect bounds = new Rect(coordinate.x * CellSize, coordinate.y * CellSize, CellSize, CellSize);
-            cells[coordinate] = new OffscreenCell(coordinate, bounds, plantEnergyPerSecond, celsius);
+            cells[coordinate] = new OffscreenCell(coordinate, bounds, plantEnergyPerSecond, celsius, ground);
         }
 
         public Vector2Int WorldToCell(Vector2 position)
@@ -329,10 +404,11 @@ namespace Boreal.AnimalTerrainIntegration
         {
             if (population.samples.Count == 0) return 0f;
 
+            cell.ApplySeason(season, seasonStep, rules);
             float total = 0f;
             for (int i = 0; i < population.samples.Count; i++)
             {
-                total += rules.CarryingCapacity(population.samples[i], cell.plantEnergyPerSecond, cell.celsius);
+                total += rules.CarryingCapacity(population.samples[i], cell.PlantEnergyPerSecond, cell.Celsius);
             }
 
             return total / population.samples.Count;
@@ -366,6 +442,7 @@ namespace Boreal.AnimalTerrainIntegration
         {
             if (cell.populations.Count == 0 || elapsed <= 0f) return;
 
+            cell.ApplySeason(season, seasonStep, rules);
             Grow(cell, elapsed);
             for (int i = 0; i < cell.populations.Count; i++)
             {
@@ -421,7 +498,7 @@ namespace Boreal.AnimalTerrainIntegration
                 float ownShare = capacity > 0f ? population.count / capacity : 0f;
                 float room = capacity * Mathf.Max(0f, 1f - (usedShare - ownShare));
                 population.count = EcosystemPopulationSimulation.GrowLogistic(
-                    population.count, room, AverageGrowthRate(population), AverageDeathRate(population, cell.celsius), elapsed);
+                    population.count, room, AverageGrowthRate(population), AverageDeathRate(population, cell.Celsius), elapsed);
             }
         }
 

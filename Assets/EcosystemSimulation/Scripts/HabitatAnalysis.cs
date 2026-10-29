@@ -1,7 +1,7 @@
-using System;
-using System.Collections.Generic;
 using Boreal.TerrainGeneration;
 using Boreal.World;
+using System;
+using System.Collections.Generic;
 using UnityEngine;
 
 namespace Boreal.EcosystemSimulation
@@ -10,7 +10,7 @@ namespace Boreal.EcosystemSimulation
     // the habitat the founders actually live in:
     // - movement: AnimalTerrainWorld's walkable ground (land, not shore, slope up to 32°) inside its 20 m border
     // - food: FoodSpawner's ground plants (grass biomass of at least 0.02 and a regrowth rate of at least 5%),
-    //   using the plant growth profile AnimalTerrainDemoBootstrap gives plant food (-12, 2 to 13 and 25 °C)
+    //   using the plant growth profile below (-20, -8 to 10 and 25 °C), which AnimalTerrainDemoBootstrap gives plant food
     // - temperature: the founders' comfort range, 2 °C preferred with 18 °C of cold and 16 °C of heat tolerance
     [Serializable]
     public struct HabitatRequirements
@@ -44,9 +44,11 @@ namespace Boreal.EcosystemSimulation
             boundaryInset = 20f,
             minimumGrassBiomass = 0.02f,
             minimumPlantGrowthRate = 0.05f,
-            plantMinimumCelsius = -12f,
-            plantOptimalMinimumCelsius = 2f,
-            plantOptimalMaximumCelsius = 13f,
+            // The island's land is about -24 to 2 °C, so plants grow fully from -8 °C and only the coldest heights stay
+            // bare. Until October 2026 full growth needed 2 °C, so most land regrew plants at half speed or less.
+            plantMinimumCelsius = -20f,
+            plantOptimalMinimumCelsius = -8f,
+            plantOptimalMaximumCelsius = 10f,
             plantMaximumCelsius = 25f,
             coldestCelsius = -28f,
             warmestCelsius = 18f,

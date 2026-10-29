@@ -4,7 +4,10 @@
     "references": [
         "Boreal.Animals",
         "UnityEngine.TestRunner",
-        "UnityEditor.TestRunner"
+        "UnityEditor.TestRunner",
+        "Boreal.World",
+        "Boreal.Temperature",
+        "Boreal.TerrainGeneration"
     ],
     "includePlatforms": [
         "Editor"

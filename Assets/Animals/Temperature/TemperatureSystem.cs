@@ -1,3 +1,4 @@
+
 using System.Collections.Generic;
 using UnityEngine;
 
@@ -85,11 +86,21 @@ namespace Boreal.Temperature
         {
             if (!gameObject.scene.IsValid() || (Application.isPlaying && !Application.IsPlaying(gameObject)))
                 return false;
-#if UNITY_EDITOR
+    #if UNITY_EDITOR
             if (UnityEditor.SceneManagement.EditorSceneManager.IsPreviewScene(gameObject.scene))
                 return false;
-#endif
+    #endif
             return true;
+        }
+
+        // The temperature without the season's shift (see TemperatureProvider.TryGetClimateTemperature).
+        public static bool TryGetClimateTemperatureAt(Vector3 worldPosition, out float temperatureCelsius)
+        {
+            if (activeSystem != null && activeSystem.isActiveAndEnabled)
+                return activeSystem.TrySampleTemperature(worldPosition, false, out temperatureCelsius);
+
+            temperatureCelsius = DefaultTemperatureCelsius;
+            return false;
         }
 
         public static float GetTemperatureAt(Vector3 worldPosition)
@@ -99,6 +110,11 @@ namespace Boreal.Temperature
         }
 
         public bool TrySampleTemperature(Vector3 worldPosition, out float temperatureCelsius)
+        {
+            return TrySampleTemperature(worldPosition, true, out temperatureCelsius);
+        }
+
+        private bool TrySampleTemperature(Vector3 worldPosition, bool withSeason, out float temperatureCelsius)
         {
             temperatureCelsius = IsFinite(fallbackTemperatureCelsius)
                 ? fallbackTemperatureCelsius : DefaultTemperatureCelsius;
@@ -114,8 +130,12 @@ namespace Boreal.Temperature
                 return true;
             }
 
+            float sampledTemperature = 0f;
             if (provider == null || !provider.isActiveAndEnabled ||
-                !provider.TryGetTemperature(worldPosition, out float sampledTemperature) || !IsFinite(sampledTemperature))
+                !(withSeason
+                    ? provider.TryGetTemperature(worldPosition, out sampledTemperature)
+                    : provider.TryGetClimateTemperature(worldPosition, out sampledTemperature)) ||
+                !IsFinite(sampledTemperature))
                 return false;
 
             temperatureCelsius = sampledTemperature;

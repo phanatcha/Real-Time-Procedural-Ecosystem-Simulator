@@ -1,3 +1,4 @@
+
 using System.Collections.Generic;
 using UnityEngine;
 
@@ -20,7 +21,15 @@ namespace Boreal.Animals
         ColdTolerance,
         HeatTolerance,
         // 0 to 1: how much the animal looks for a mate instead of cloning itself (see MatingRules).
-        SexualDrive
+        SexualDrive,
+        // 0.5 to 1: the share of its maximum energy an animal needs before it breeds. Higher keeps more in reserve, for
+        // winter, at the cost of breeding less often.
+        BreedingThreshold,
+        // 0 to 1: how far the animal slows down in the cold to save energy (see AnimalTemperature).
+        Torpor,
+        // 0.25 to 4: multiplies every mutation chance when this genome is copied for a child (see CreateChild), so how
+        // fast a lineage evolves also evolves. It raises the chance of harmful mutations too.
+        MutationRate
     }
 
     // Where a body part can grow on the capsule body. Paired sites grow the same part mirrored left and right.
@@ -55,7 +64,8 @@ namespace Boreal.Animals
         ScavengerGut
     }
 
-    // How the body plan changes at birth. Chances are percentages per birth.
+    // How the body plan changes at birth. Chances are percentages per birth at a mutation rate of 1; the mutation
+    // rate gene multiplies them.
     [System.Serializable]
     public struct BodyPlanMutation
     {
@@ -85,6 +95,16 @@ namespace Boreal.Animals
             repurposeChance = 0.2f,
             allowFins = true
         };
+
+        // The same rules with every chance multiplied by a mutation rate. Sizes and steps stay as they are.
+        public BodyPlanMutation WithChancesScaledBy(float rate)
+        {
+            BodyPlanMutation scaled = this;
+            scaled.sproutChance *= rate;
+            scaled.growthChance *= rate;
+            scaled.repurposeChance *= rate;
+            return scaled;
+        }
     }
 
     public enum GeneMutationStyle
@@ -134,15 +154,14 @@ namespace Boreal.Animals
         public static readonly int SiteCount = System.Enum.GetValues(typeof(BodySite)).Length;
         public static readonly int PerkCount = System.Enum.GetValues(typeof(AnimalPerk)).Length;
 
-        // How much one body site counts towards genetic distance, next to the numeric genes' weights (17 in
-        // total). At 0.5 a whole full-size part of difference is about one species threshold (0.03). In a
-        // neutral-drift simulation (250 animals, default mutation rates, cloning only and before the sexual drive
-        // gene) the first split still came after about 45 generations, with about 10 species alive instead of 6
-        // without body parts.
+        // How much one body site counts towards genetic distance, next to the numeric genes' weights (20 in
+        // total). At 0.5 a whole full-size part of difference is about 0.021, under half the default species
+        // threshold (0.05). SpeciesManager.DefaultSpeciationThreshold describes how the weights and threshold were
+        // calibrated.
         public const float BodySiteDistanceWeight = 0.5f;
 
-        // How much one perk of difference counts towards genetic distance. At 0.25 it is about 0.012, under half
-        // the species threshold, so a single perk neither splits a species nor lowers fertility on its own.
+        // How much one perk of difference counts towards genetic distance. At 0.25 it is about 0.010, a fifth of the
+        // default species threshold, so a single perk neither splits a species nor lowers fertility on its own.
         public const float PerkDistanceWeight = 0.25f;
 
         // Per gene: distance weight divided by the gene's range, so Distance is one multiply per gene.
@@ -248,6 +267,10 @@ namespace Boreal.Animals
             AnimalGene.ColdTolerance => new AnimalGeneDefinition(0f, 40f, GeneMutationStyle.Proportional, 1f),
             AnimalGene.HeatTolerance => new AnimalGeneDefinition(0f, 40f, GeneMutationStyle.Proportional, 1f),
             AnimalGene.SexualDrive => new AnimalGeneDefinition(0f, 1f, GeneMutationStyle.Additive, 1f),
+            AnimalGene.BreedingThreshold => new AnimalGeneDefinition(0.5f, 1f, GeneMutationStyle.Additive, 0.5f),
+            AnimalGene.Torpor => new AnimalGeneDefinition(0f, 1f, GeneMutationStyle.Additive, 1f),
+            // Proportional, so it steps by a share of its value and halving takes about as many mutations as doubling.
+            AnimalGene.MutationRate => new AnimalGeneDefinition(0.25f, 4f, GeneMutationStyle.Proportional, 0.01f),
             _ => throw new System.ArgumentOutOfRangeException(nameof(gene), gene, null)
         };
 
@@ -357,6 +380,21 @@ namespace Boreal.Animals
             }
 
             return flipped;
+        }
+
+        // A child's genome: a mutated copy of this one, as SeekFood makes at every birth. Chances are percentages at a
+        // mutation rate of 1, and this genome's mutation rate gene multiplies every one of them: for the genes, the
+        // body plan, the perks and harmful mutations. The magnitude stays as it is. A clone mutates at its parent's
+        // rate; for a child of two parents, call it on the recombined genome, so it mutates at the rate it inherited.
+        public AnimalGenome CreateChild(float mutationChance, float mutationMagnitude, BodyPlanMutation bodyPlanMutation,
+                                        float perkFlipChance, float harmfulMutationChance, out bool mutated)
+        {
+            float rate = this[AnimalGene.MutationRate];
+            AnimalGenome child = CreateMutatedCopy(mutationChance * rate, mutationMagnitude,
+                                                   bodyPlanMutation.WithChancesScaledBy(rate), out mutated);
+            mutated |= child.TryAddHarmfulMutation(harmfulMutationChance * rate);
+            mutated |= child.MutatePerks(perkFlipChance * rate);
+            return child;
         }
 
         // Mutates the numeric genes only; the body plan is copied unchanged.

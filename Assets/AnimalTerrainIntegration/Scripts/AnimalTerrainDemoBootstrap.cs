@@ -1,9 +1,10 @@
-using System.Collections;
-using System.Collections.Generic;
+using Boreal.EcosystemSimulation;
 using Boreal.Animals;
 using Boreal.Temperature;
 using Boreal.TerrainGeneration;
 using Boreal.World;
+using System.Collections;
+using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.AI;
 
@@ -360,10 +361,13 @@ namespace Boreal.AnimalTerrainIntegration
             FoodItem foodItem = food.AddComponent<FoodItem>();
             foodItem.foodType = FoodType.Plant;
             foodItem.nutritionValue = 50f;
-            foodItem.minimumGrowthTemperature = -12f;
-            foodItem.optimalGrowthTemperatureMin = 2f;
-            foodItem.optimalGrowthTemperatureMax = 13f;
-            foodItem.maximumGrowthTemperature = 25f;
+            // The founders' habitat rules hold the plant growth profile, so the Habitat Analysis window measures the
+            // same plants the game grows.
+            HabitatRequirements founders = HabitatRequirements.Founders;
+            foodItem.minimumGrowthTemperature = founders.plantMinimumCelsius;
+            foodItem.optimalGrowthTemperatureMin = founders.plantOptimalMinimumCelsius;
+            foodItem.optimalGrowthTemperatureMax = founders.plantOptimalMaximumCelsius;
+            foodItem.maximumGrowthTemperature = founders.plantMaximumCelsius;
             foodItem.referenceLifetime = 180f;
             foodItem.spoilageReferenceTemperature = 8f;
 

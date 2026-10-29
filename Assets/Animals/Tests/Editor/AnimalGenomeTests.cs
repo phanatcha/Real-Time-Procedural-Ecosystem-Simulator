@@ -1,3 +1,4 @@
+
 using NUnit.Framework;
 using UnityEngine;
 
@@ -479,6 +480,84 @@ namespace Boreal.Animals.Tests
         }
 
         [Test]
+        public void AtAMutationRateOfOneAChildMutatesAsTheSeparateStepsDo()
+        {
+            AnimalGenome parent = CreateGenomeWithMutationRate(1f);
+            Random.InitState(99);
+            AnimalGenome expected = parent.CreateMutatedCopy(5f, 0.1f, BodyPlanMutation.Default, out bool expectedMutated);
+            expectedMutated |= expected.TryAddHarmfulMutation(10f);
+            expectedMutated |= expected.MutatePerks(1f);
+
+            Random.InitState(99);
+            AnimalGenome child = parent.CreateChild(5f, 0.1f, BodyPlanMutation.Default, 1f, 10f, out bool mutated);
+
+            Assert.AreEqual(expectedMutated, mutated);
+            Assert.AreEqual(0f, AnimalGenome.Distance(expected, child));
+            Assert.AreEqual(expected.HarmfulMutations, child.HarmfulMutations);
+        }
+
+        [Test]
+        public void TheMutationRateMultipliesEveryMutationChance()
+        {
+            // At twice the rate, 50% chances become certain.
+            AnimalGenome parent = CreateGenomeWithMutationRate(2f);
+            BodyPlanMutation rules = new BodyPlanMutation { sproutChance = 50f, sproutSize = 0.05f, allowFins = true };
+
+            AnimalGenome child = parent.CreateChild(50f, 0.5f, rules, 50f, 50f, out bool mutated);
+
+            Assert.IsTrue(mutated);
+            for (int index = 0; index < AnimalGenome.GeneCount; index++)
+            {
+                AnimalGene gene = (AnimalGene)index;
+                Assert.AreNotEqual(parent[gene], child[gene], gene.ToString());
+            }
+
+            for (int index = 0; index < AnimalGenome.SiteCount; index++)
+            {
+                Assert.AreNotEqual(BodyPartType.None, child.GetPartType((BodySite)index), ((BodySite)index).ToString());
+            }
+
+            for (int index = 0; index < AnimalGenome.PerkCount; index++)
+            {
+                Assert.IsTrue(child.HasPerk((AnimalPerk)index), ((AnimalPerk)index).ToString());
+            }
+
+            Assert.AreEqual(1, child.HarmfulMutations);
+        }
+
+        [Test]
+        public void ALowerMutationRateMeansFewerHarmfulMutations()
+        {
+            AnimalGenome slow = CreateGenomeWithMutationRate(0.5f);
+            AnimalGenome fast = CreateGenomeWithMutationRate(2f);
+
+            int slowAdded = 0;
+            int fastAdded = 0;
+            for (int birth = 0; birth < 1000; birth++)
+            {
+                slowAdded += slow.CreateChild(0f, 0f, default, 0f, 10f, out _).HarmfulMutations;
+                fastAdded += fast.CreateChild(0f, 0f, default, 0f, 10f, out _).HarmfulMutations;
+            }
+
+            // 5% and 20% of births.
+            Assert.That(slowAdded, Is.InRange(30, 70));
+            Assert.That(fastAdded, Is.InRange(160, 240));
+        }
+
+        [Test]
+        public void TheMutationRateIsInheritedAndCanMutate()
+        {
+            AnimalGenome parent = CreateGenomeWithMutationRate(1.5f);
+
+            Assert.AreEqual(1.5f, parent.CreateChild(0f, 0.1f, default, 0f, 0f, out _)[AnimalGene.MutationRate]);
+
+            // At 1.5 times a 70% chance every gene mutates, the rate gene too, by up to 10% of its value.
+            float changed = parent.CreateChild(70f, 0.1f, default, 0f, 0f, out _)[AnimalGene.MutationRate];
+            Assert.AreNotEqual(1.5f, changed);
+            Assert.That(changed, Is.InRange(1.35f, 1.65f));
+        }
+
+        [Test]
         public void ANewGenomeHasNoPerks()
         {
             AnimalGenome genome = AnimalGenome.Create();
@@ -578,8 +657,9 @@ namespace Boreal.Animals.Tests
 
             float expectedRatio = AnimalGenome.PerkDistanceWeight / AnimalGenome.BodySiteDistanceWeight;
             Assert.That(perkDistance / AnimalGenome.Distance(plain, withNeck), Is.EqualTo(expectedRatio).Within(Tolerance));
-            // Under half the default species threshold (0.03), so one perk doesn't lower fertility.
-            Assert.Less(perkDistance, 0.015f);
+            // Under half the default species threshold, where fertility starts to fade by default, so one perk
+            // doesn't lower fertility.
+            Assert.Less(perkDistance, 0.5f * SpeciesManager.DefaultSpeciationThreshold);
         }
 
         [Test]
@@ -637,6 +717,13 @@ namespace Boreal.Animals.Tests
                 genome.TryAddHarmfulMutation(100f);
             }
 
+            return genome;
+        }
+
+        static AnimalGenome CreateGenomeWithMutationRate(float rate)
+        {
+            AnimalGenome genome = CreateMidpointGenome();
+            genome[AnimalGene.MutationRate] = rate;
             return genome;
         }
 

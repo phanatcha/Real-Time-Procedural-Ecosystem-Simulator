@@ -1,3 +1,4 @@
+using Boreal.TerrainGeneration;
 using Boreal.Animals;
 using NUnit.Framework;
 using UnityEngine;
@@ -94,6 +95,14 @@ namespace Boreal.AnimalTerrainIntegration.Tests
                     Assert.That(Rules.ThermalEnergyMultiplier(-16f, 18f, celsius),
                         Is.EqualTo(thermal.EvaluateAtTemperature(celsius).energyMultiplier).Within(1e-5f), $"At {celsius} °C.");
                 }
+
+                thermal.torpor = 0.7f;
+                for (float celsius = -80f; celsius <= 80f; celsius += 2.5f)
+                {
+                    Assert.That(Rules.ThermalEnergyMultiplier(-16f, 18f, celsius, 0.7f),
+                        Is.EqualTo(thermal.EvaluateAtTemperature(celsius).energyMultiplier).Within(1e-5f),
+                        $"With torpor at {celsius} °C.");
+                }
             }
             finally
             {
@@ -113,6 +122,18 @@ namespace Boreal.AnimalTerrainIntegration.Tests
             Assert.Less(Rules.CarryingCapacity(Founder(diet: 0.9f), PlantEnergy, Mild), expected);
             // 40 °C below the comfort range: two stress units, so double energy use.
             Assert.That(Rules.CarryingCapacity(founder, PlantEnergy, -56f), Is.EqualTo(expected / 2f).Within(1e-4f));
+        }
+
+        [Test]
+        public void TorporSavesEnergyOnlyInTheCold()
+        {
+            // Comfortable: torpor costs and saves nothing.
+            Assert.AreEqual(1f, Rules.ThermalEnergyMultiplier(-16f, 18f, 0f, 1f), 1e-5f);
+            // 12 °C below the comfort range: 0.6 stress units, so 1.3 times the energy without torpor and half that with it.
+            Assert.AreEqual(1.3f, Rules.ThermalEnergyMultiplier(-16f, 18f, -28f), 1e-5f);
+            Assert.AreEqual(0.65f, Rules.ThermalEnergyMultiplier(-16f, 18f, -28f, 1f), 1e-5f);
+            // 5 °C below it, torpor is half on.
+            Assert.AreEqual(1.125f * 0.75f, Rules.ThermalEnergyMultiplier(-16f, 18f, -21f, 1f), 1e-5f);
         }
 
         [Test]
@@ -264,6 +285,99 @@ namespace Boreal.AnimalTerrainIntegration.Tests
             Assert.AreEqual(0f, store.CountSpecies("A"));
             Assert.AreEqual(2f, store.CountSpecies("B"), 1e-4f);
             Assert.IsFalse(store.CountBySpecies().ContainsKey("A"));
+        }
+
+        // A cell surveyed as one spot of flat, fairly cold grassland (temperature index 0.3, about -14 °C).
+        static OffscreenPopulationStore CreateSurveyedStore(out OffscreenCell cell)
+        {
+            EnvironmentSample grassland = new EnvironmentSample
+            {
+                isValid = true, isLand = true, position = new Vector3(40f, 30f, -25f), temperature = 0.3f,
+                moisture = 0.5f, slope = 0f, grassBiomass = 0.6f
+            };
+            OffscreenPopulationStore store = new OffscreenPopulationStore(CellSize, Rules, new System.Random(7));
+            store.AddCell(Vector2Int.zero, PlantEnergy, Rules.ToCelsius(0.3f),
+                          new[] { new OffscreenGround(grassland, PlantEnergy) });
+            cell = Cell(store, Vector2Int.zero);
+            return store;
+        }
+
+        [Test]
+        public void WinterLeavesACellLessFoodAndColdWeather()
+        {
+            OffscreenPopulationStore store = CreateSurveyedStore(out OffscreenCell cell);
+            OffscreenPopulation population = AddAnimals(store, cell, "A", 10);
+            float baseCapacity = store.Capacity(cell, population);
+            Assert.AreEqual(PlantEnergy, cell.PlantEnergyPerSecond, 1e-4f);
+
+            store.season = new SeasonConditions { state = SeasonState.For(BorealSeason.Winter), growthBalance = 1f };
+            store.seasonStep = 1;
+            float winterCapacity = store.Capacity(cell, population);
+
+            // Growth at about 5%, and most of the grass under snow.
+            Assert.Less(cell.PlantEnergyPerSecond, PlantEnergy * 0.05f * 0.3f);
+            // The coldest the terrain gets.
+            Assert.AreEqual(Rules.coldestCelsius, cell.Celsius, 1e-3f);
+            Assert.Less(winterCapacity, baseCapacity * 0.02f);
+
+            // Back to the base climate once seasons are off.
+            store.season = SeasonConditions.None;
+            store.seasonStep = -1;
+            Assert.AreEqual(baseCapacity, store.Capacity(cell, population), 1e-3f);
+            Assert.AreEqual(cell.baseCelsius, cell.Celsius, 1e-3f);
+        }
+
+        [Test]
+        public void BalancedGrowthMakesSummerABoom()
+        {
+            OffscreenPopulationStore store = CreateSurveyedStore(out OffscreenCell cell);
+            OffscreenPopulation population = AddAnimals(store, cell, "A", 10);
+
+            store.season = new SeasonConditions
+            {
+                state = SeasonState.For(BorealSeason.Summer), growthBalance = SeasonClock.YearlyGrowthBalance(1f)
+            };
+            store.seasonStep = 1;
+            store.Capacity(cell, population);
+
+            // Summer's full growth, a little less on drier ground, times about 1.9.
+            Assert.That(cell.PlantEnergyPerSecond, Is.InRange(PlantEnergy * 1.75f, PlantEnergy * 1.9f));
+        }
+
+        [Test]
+        public void LimitedBurialLeavesWinterFoodToFind()
+        {
+            OffscreenPopulationStore store = CreateSurveyedStore(out OffscreenCell cell);
+            OffscreenPopulation population = AddAnimals(store, cell, "A", 10);
+            SeasonConditions winter = new SeasonConditions { state = SeasonState.For(BorealSeason.Winter), growthBalance = 1f };
+
+            store.season = winter;
+            store.seasonStep = 1;
+            store.Capacity(cell, population);
+            float fullyBuried = cell.PlantEnergyPerSecond;
+
+            winter.leastUncovered = 0.5f;
+            store.season = winter;
+            store.seasonStep = 2;
+            store.Capacity(cell, population);
+
+            // Half the grass stays uncovered instead of 7 to 27%.
+            Assert.Greater(cell.PlantEnergyPerSecond, fullyBuried * 1.8f);
+        }
+
+        [Test]
+        public void SeasonsLeaveCellsWithoutSurveyedGroundAlone()
+        {
+            OffscreenPopulationStore store = CreateStore();
+            OffscreenCell cell = Cell(store, Vector2Int.zero);
+            OffscreenPopulation population = AddAnimals(store, cell, "A", 10);
+            float baseCapacity = store.Capacity(cell, population);
+
+            store.season = new SeasonConditions { state = SeasonState.For(BorealSeason.Winter), growthBalance = 1f };
+            store.seasonStep = 1;
+
+            Assert.AreEqual(baseCapacity, store.Capacity(cell, population), 1e-4f);
+            Assert.AreEqual(Mild, cell.Celsius);
         }
     }
 }
