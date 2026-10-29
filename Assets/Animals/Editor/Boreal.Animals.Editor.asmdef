@@ -1,0 +1,23 @@
+{
+    "name": "Boreal.Animals.Editor",
+    "rootNamespace": "Boreal.Animals.Editor",
+    "references": [
+        "Boreal.Animals",
+        "Boreal.Core",
+        "Boreal.TerrainGeneration",
+        "Boreal.World",
+        "Unity.RenderPipelines.Core.Runtime",
+        "Unity.RenderPipelines.Universal.Runtime"
+    ],
+    "includePlatforms": [
+        "Editor"
+    ],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": false,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

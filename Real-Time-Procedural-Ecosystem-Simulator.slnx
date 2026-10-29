@@ -1,4 +1,18 @@
 ﻿<Solution>
-  <Project Path="Assembly-CSharp.csproj" />
-  <Project Path="Assembly-CSharp-Editor.csproj" />
+  <Project Path="Boreal.TerrainGeneration.Editor.csproj" />
+  <Project Path="Boreal.Animals.csproj" />
+  <Project Path="Boreal.EcosystemSimulation.csproj" />
+  <Project Path="Boreal.Core.csproj" />
+  <Project Path="Boreal.TerrainGeneration.csproj" />
+  <Project Path="Boreal.AnimalTerrainIntegration.Tests.csproj" />
+  <Project Path="Boreal.TerrainGeneration.Tests.csproj" />
+  <Project Path="Boreal.Temperature.csproj" />
+  <Project Path="Boreal.Temperature.Editor.csproj" />
+  <Project Path="Boreal.Animals.Tests.csproj" />
+  <Project Path="Boreal.AnimalTerrainIntegration.Editor.csproj" />
+  <Project Path="Boreal.World.csproj" />
+  <Project Path="Boreal.AnimalTerrainIntegration.csproj" />
+  <Project Path="Boreal.Animals.Editor.csproj" />
+  <Project Path="Boreal.EcosystemSimulation.Tests.csproj" />
+  <Project Path="Boreal.EcosystemSimulation.Editor.csproj" />
 </Solution>
