@@ -8,13 +8,19 @@ using UnityEngine.InputSystem;
 namespace Boreal.Animals
 {
     // On-screen summary of the simulation, so evolution is visible without the Inspector. Keys: 1-5 set the
-    // speed to 1x/5x/10x/20x/50x, P pauses or resumes, H hides the panel.
+    // speed to 1x/5x/10x/20x/50x, P pauses or resumes, H hides the panel, G hides the chart under it.
     [DisallowMultipleComponent]
     public class EcosystemHud : MonoBehaviour
     {
         static readonly float[] SpeedPresets = { 1f, 5f, 10f, 20f, 50f };
 
         public bool visible = true;
+        [Header("Chart")]
+        [Tooltip("Animals, species and plants over simulated time, drawn under the panel. G shows or hides it.")]
+        public bool showChart = true;
+        [Tooltip("Simulated seconds between points, as the run recorder samples. Once the chart is full, it keeps " +
+                 "every other point and samples half as often.")]
+        [Min(1f)] public float chartSampleInterval = 10f;
 
         private struct Traits
         {
@@ -26,8 +32,36 @@ namespace Boreal.Animals
             public float breedingThreshold;
             public float torpor;
             public float mutationRate;
+            public float litter;
             public float harmfulMutations;
         }
+
+        private struct ChartSample
+        {
+            public int animals;
+            public int species;
+            public int plants;
+            public bool winter;
+        }
+
+        private const int ChartWidth = 420;
+        private const int ChartHeight = 110;
+        private const int ChartTopMargin = 20;
+        private const int ChartMaxSamples = 840;
+        private static readonly Color32 ChartBackground = new Color32(16, 20, 24, 210);
+        private static readonly Color32 ChartWinter = new Color32(70, 100, 150, 110);
+        private static readonly Color32 AnimalsLine = new Color32(255, 255, 255, 255);
+        private static readonly Color32 SpeciesLine = new Color32(255, 208, 96, 255);
+        private static readonly Color32 PlantsLine = new Color32(110, 220, 120, 255);
+        private readonly List<ChartSample> chartSamples = new List<ChartSample>();
+        private float chartWorldStartTime = -1f;
+        private float nextChartSampleTime;
+        private float chartIntervalNow;
+        private Texture2D chartTexture;
+        private Color32[] chartPixels;
+        private bool chartDirty;
+        private string chartLegend = "";
+        private GUIStyle legendStyle;
 
         // Each species' average traits when it was first seen, to show how far it has drifted since.
         private readonly Dictionary<string, Traits> traitsWhenFirstSeen = new Dictionary<string, Traits>();
@@ -54,9 +88,12 @@ namespace Boreal.Animals
         {
             Keyboard keyboard = Keyboard.current;
             SpeciesManager manager = SpeciesManager.Instance;
-            if (keyboard == null || manager == null || GodCamera.IsTypingInUI()) return;
+            if (manager == null) return;
+            SampleChart(manager);
+            if (keyboard == null || GodCamera.IsTypingInUI()) return;
 
             if (keyboard.hKey.wasPressedThisFrame) visible = !visible;
+            if (keyboard.gKey.wasPressedThisFrame) showChart = !showChart;
 
             if (keyboard.pKey.wasPressedThisFrame)
             {
@@ -106,6 +143,140 @@ namespace Boreal.Animals
             string content = BuildText(manager);
             Vector2 size = style.CalcSize(new GUIContent(content));
             GUI.Box(new Rect(10f, 10f, size.x, size.y), content, style);
+            if (showChart) DrawChart(10f, 10f + size.y + 6f);
+        }
+
+        // One point every Chart Sample Interval simulated seconds, from the world's start. A new world starts the
+        // chart again.
+        void SampleChart(SpeciesManager manager)
+        {
+            if (!Mathf.Approximately(manager.WorldStartTime, chartWorldStartTime))
+            {
+                chartSamples.Clear();
+                chartWorldStartTime = manager.WorldStartTime;
+                chartIntervalNow = Mathf.Max(1f, chartSampleInterval);
+                nextChartSampleTime = 0f;
+                chartDirty = true;
+            }
+
+            float simulated = Mathf.Max(0f, Time.time - manager.WorldStartTime);
+            if (simulated < nextChartSampleTime) return;
+            nextChartSampleTime = simulated + chartIntervalNow;
+
+            if (foodSpawner == null) foodSpawner = FindAnyObjectByType<FoodSpawner>();
+            chartSamples.Add(new ChartSample
+            {
+                animals = manager.TotalPopulation,
+                species = manager.SpeciesAliveCount,
+                plants = foodSpawner != null ? foodSpawner.ShownPlantCount : 0,
+                winter = SeasonClock.IsRunning &&
+                         SeasonClock.Active.SeasonName.EndsWith("winter", System.StringComparison.OrdinalIgnoreCase)
+            });
+            // Full, the chart keeps every other point and samples half as often, so a long run still fits.
+            if (chartSamples.Count > ChartMaxSamples)
+            {
+                for (int index = chartSamples.Count - 1; index >= 0; index -= 2) chartSamples.RemoveAt(index);
+                chartIntervalNow *= 2f;
+            }
+            chartDirty = true;
+        }
+
+        void DrawChart(float x, float y)
+        {
+            if (chartSamples.Count < 2) return;
+            if (chartTexture == null)
+            {
+                chartTexture = new Texture2D(ChartWidth, ChartHeight, TextureFormat.RGBA32, false)
+                {
+                    filterMode = FilterMode.Point,
+                    hideFlags = HideFlags.HideAndDontSave
+                };
+                chartPixels = new Color32[ChartWidth * ChartHeight];
+                chartDirty = true;
+            }
+            if (legendStyle == null)
+            {
+                legendStyle = new GUIStyle(GUI.skin.label) { fontSize = 11, richText = true };
+                legendStyle.normal.textColor = Color.white;
+            }
+            if (chartDirty) RedrawChart();
+
+            Rect area = new Rect(x, y, ChartWidth, ChartHeight);
+            GUI.DrawTexture(area, chartTexture);
+            GUI.Label(new Rect(area.x + 6f, area.y + 1f, ChartWidth - 12f, ChartTopMargin), chartLegend, legendStyle);
+        }
+
+        // Each series is scaled to its own highest value, named in the legend. Winters are shaded.
+        void RedrawChart()
+        {
+            chartDirty = false;
+            for (int index = 0; index < chartPixels.Length; index++) chartPixels[index] = ChartBackground;
+
+            int count = chartSamples.Count;
+            int maxAnimals = 1, maxSpecies = 1, maxPlants = 1;
+            foreach (ChartSample sample in chartSamples)
+            {
+                maxAnimals = Mathf.Max(maxAnimals, sample.animals);
+                maxSpecies = Mathf.Max(maxSpecies, sample.species);
+                maxPlants = Mathf.Max(maxPlants, sample.plants);
+            }
+
+            int plotHeight = ChartHeight - ChartTopMargin - 4;
+            for (int index = 0; index < count; index++)
+            {
+                if (!chartSamples[index].winter) continue;
+                int from = ChartX(index, count), to = ChartX(index + 1, count);
+                for (int px = from; px <= Mathf.Min(to, ChartWidth - 1); px++)
+                    for (int py = 0; py < ChartHeight - ChartTopMargin; py++)
+                        chartPixels[py * ChartWidth + px] = ChartWinter;
+            }
+            for (int index = 1; index < count; index++)
+            {
+                ChartSample a = chartSamples[index - 1], b = chartSamples[index];
+                int x0 = ChartX(index - 1, count), x1 = ChartX(index, count);
+                Plot(x0, ChartY(a.plants, maxPlants, plotHeight), x1, ChartY(b.plants, maxPlants, plotHeight), PlantsLine);
+                Plot(x0, ChartY(a.species, maxSpecies, plotHeight), x1, ChartY(b.species, maxSpecies, plotHeight), SpeciesLine);
+                Plot(x0, ChartY(a.animals, maxAnimals, plotHeight), x1, ChartY(b.animals, maxAnimals, plotHeight), AnimalsLine);
+            }
+            chartTexture.SetPixels32(chartPixels);
+            chartTexture.Apply(false);
+
+            ChartSample last = chartSamples[count - 1];
+            string span = FormatDuration((count - 1) * chartIntervalNow);
+            chartLegend = $"<color=#ffffff>animals {last.animals}</color> (peak {maxAnimals})   " +
+                          $"<color=#ffd060>species {last.species}</color> (peak {maxSpecies})   " +
+                          $"<color=#6edc78>plants shown {last.plants}</color> (peak {maxPlants})   last {span}" +
+                          (SeasonClock.IsRunning ? ", winters shaded" : "");
+        }
+
+        static int ChartX(int index, int count)
+        {
+            return Mathf.Clamp(Mathf.RoundToInt(index * (ChartWidth - 1f) / Mathf.Max(1, count - 1)), 0, ChartWidth - 1);
+        }
+
+        static int ChartY(int value, int maximum, int plotHeight)
+        {
+            return 2 + Mathf.RoundToInt(plotHeight * Mathf.Clamp01(value / (float)maximum));
+        }
+
+        void Plot(int x0, int y0, int x1, int y1, Color32 colour)
+        {
+            int dx = Mathf.Abs(x1 - x0), sx = x0 < x1 ? 1 : -1;
+            int dy = -Mathf.Abs(y1 - y0), sy = y0 < y1 ? 1 : -1;
+            int error = dx + dy;
+            while (true)
+            {
+                if (x0 >= 0 && x0 < ChartWidth && y0 >= 0 && y0 < ChartHeight) chartPixels[y0 * ChartWidth + x0] = colour;
+                if (x0 == x1 && y0 == y1) break;
+                int doubled = 2 * error;
+                if (doubled >= dy) { error += dy; x0 += sx; }
+                if (doubled <= dx) { error += dx; y0 += sy; }
+            }
+        }
+
+        void OnDestroy()
+        {
+            if (chartTexture != null) Destroy(chartTexture);
         }
 
         string BuildText(SpeciesManager manager)
@@ -122,7 +293,7 @@ namespace Boreal.Animals
             string speed = manager.IsSafetyPaused ? "<color=#ff7070>SAFETY PAUSED</color> (press 1-5 to resume)"
                 : manager.simulationSpeed <= 0f ? "<color=#ffd060>PAUSED</color>"
                 : $"{manager.simulationSpeed:0.#}x (achieved {manager.AchievedSimulationSpeed:0.#}x)";
-            text.Append($"<b>Speed</b> {speed}    1-5: 1x 5x 10x 20x 50x   P: pause   H: hide\n");
+            text.Append($"<b>Speed</b> {speed}    1-5: 1x 5x 10x 20x 50x   P: pause   H: hide   G: chart\n");
             if (manager.IsSafetyPaused)
             {
                 text.Append($"   <color=#ff9090>{manager.LastSafetyPauseReason}</color>\n");
@@ -203,6 +374,7 @@ namespace Boreal.Animals
                 breedingThreshold = record.breedingThreshold,
                 torpor = record.torpor,
                 mutationRate = record.mutationRate,
+                litter = record.litterSize,
                 harmfulMutations = record.harmfulMutations
             };
             if (!traitsWhenFirstSeen.TryGetValue(largest, out Traits first))
@@ -223,7 +395,8 @@ namespace Boreal.Animals
                         $"mutation rate {now.mutationRate:0.00}× {Signed(now.mutationRate - first.mutationRate, "0.00")}   " +
                         $"breeds at {100f * now.breedingThreshold:0}% energy " +
                         $"{Signed(100f * (now.breedingThreshold - first.breedingThreshold), "0")}   " +
-                        $"torpor {now.torpor:0.00} {Signed(now.torpor - first.torpor, "0.00")}");
+                        $"torpor {now.torpor:0.00} {Signed(now.torpor - first.torpor, "0.00")}   " +
+                        $"litter {now.litter:0.00} {Signed(now.litter - first.litter, "0.00")}");
             text.Append($"\n   perks: {AnimalPerks.DescribeShares(record.perkShares)}");
             text.Append($"\n   body parts: {DescribeBodyParts(manager, largest)}");
             text.Append($"\n   swimming ability: {swimmingSummary}");
