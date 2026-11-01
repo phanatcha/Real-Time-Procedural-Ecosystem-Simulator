@@ -354,6 +354,61 @@ namespace Boreal.Animals.Tests
             Assert.That(total, Is.EqualTo(parent.currentEnergy).Within(4f));
         }
 
+        // Thirst (item 27): a thirsty animal walks to fresh water and drinks until it is nearly full.
+        [UnityTest]
+        public IEnumerator ThirstyAnimalsWalkToFreshWaterAndDrink()
+        {
+            EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
+            yield return new EnterPlayMode(ReloadsDomain);
+
+            BakeNavMesh(CreateGround(Vector3.zero, 60f));
+            StartSimulation();
+            // The test scene has no terrain, so TestWater stands in for a lake bank 20 m east. A static method, not a
+            // lambda: a closure made before EnterPlayMode is lost in the domain reload.
+            SeekFood.DrinkingWaterLocator = LocateTestWater;
+            Vector3 water = TestWater;
+            SeekFood animal = CreateAnimal(Vector3.zero, Genome(), energyFraction: 1f, age: 10f);
+            animal.currentHydration = 10f;
+
+            float deadline = Time.time + 30f;
+            while (!animal.IsDrinking && Time.time < deadline) yield return null;
+            Assert.IsTrue(animal.IsDrinking, "The thirsty animal did not reach the water within 30 simulated seconds.");
+            Assert.Less(Vector3.Distance(animal.transform.position, water), animal.CurrentFoodInteractionRange + 1f);
+
+            deadline = Time.time + 15f;
+            while (animal.IsDrinking && Time.time < deadline) yield return null;
+            Assert.GreaterOrEqual(animal.currentHydration, 0.9f * animal.maxHydration, "Drinking should refill hydration.");
+            Assert.IsFalse(animal.IsThirsty);
+        }
+
+        // With no water anywhere, an animal with no hydration left dies of thirst, and the death is counted.
+        [UnityTest]
+        public IEnumerator AnimalsWithNoWaterDieOfThirst()
+        {
+            EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
+            yield return new EnterPlayMode(ReloadsDomain);
+
+            BakeNavMesh(CreateGround(Vector3.zero, 60f));
+            StartSimulation();
+            SeekFood.DrinkingWaterLocator = null;
+            SeekFood animal = CreateAnimal(Vector3.zero, Genome(), energyFraction: 1f, age: 10f);
+            animal.currentHydration = 0f;
+            animal.thirstDamagePerSecond = 50f;
+            yield return null;
+            yield return null;
+            SpeciesTelemetryRecord record = Telemetry();
+
+            float deadline = Time.time + 20f;
+            while (AnimalCount() > 0 && Time.time < deadline) yield return null;
+            Assert.AreEqual(0, AnimalCount(), "The animal should have died of thirst.");
+            Assert.AreEqual(1, record.thirstDeaths);
+            Assert.AreEqual(0, record.starvationDeaths);
+        }
+
+        static readonly Vector3 TestWater = new Vector3(20f, 0f, 0f);
+
+        static Vector3? LocateTestWater(Vector3 position, float radius) => TestWater;
+
         static SeekFood Child(SeekFood parent)
         {
             foreach (SeekFood animal in Object.FindObjectsByType<SeekFood>(FindObjectsSortMode.None))
@@ -366,6 +421,7 @@ namespace Boreal.Animals.Tests
         [UnityTearDown]
         public IEnumerator LeavePlayMode()
         {
+            SeekFood.DrinkingWaterLocator = null;
             if (Application.isPlaying) yield return new ExitPlayMode();
         }
 

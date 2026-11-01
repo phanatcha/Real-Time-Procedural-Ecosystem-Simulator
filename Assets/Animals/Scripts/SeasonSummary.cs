@@ -20,13 +20,14 @@ namespace Boreal.Animals
         public int coldDeaths;
         public int heatDeaths;
         public int venomDeaths;
+        public int thirstDeaths;
         public int plantMeals;
         public int meatMeals;
         public int speciesEver;
 
         // Deaths from causes without their own count, such as drowning out of bounds.
         public int OtherDeaths => deaths - starvationDeaths - predationDeaths - oldAgeDeaths - coldDeaths - heatDeaths -
-                                  venomDeaths;
+                                  venomDeaths - thirstDeaths;
 
         public static EcosystemTally Of(IEnumerable<SpeciesTelemetryRecord> records)
         {
@@ -42,6 +43,7 @@ namespace Boreal.Animals
                 tally.coldDeaths += record.coldExposureDeaths;
                 tally.heatDeaths += record.heatExposureDeaths;
                 tally.venomDeaths += record.venomDeaths;
+                tally.thirstDeaths += record.thirstDeaths;
                 tally.plantMeals += record.plantMeals;
                 tally.meatMeals += record.meatMeals;
                 tally.speciesEver++;
@@ -63,6 +65,7 @@ namespace Boreal.Animals
                 coldDeaths = later.coldDeaths - earlier.coldDeaths,
                 heatDeaths = later.heatDeaths - earlier.heatDeaths,
                 venomDeaths = later.venomDeaths - earlier.venomDeaths,
+                thirstDeaths = later.thirstDeaths - earlier.thirstDeaths,
                 plantMeals = later.plantMeals - earlier.plantMeals,
                 meatMeals = later.meatMeals - earlier.meatMeals,
                 speciesEver = later.speciesEver - earlier.speciesEver
@@ -156,7 +159,7 @@ namespace Boreal.Animals
                         $"off-screen {offscreenAnimals}");
             line.Append($" | births {change.births} ({change.births - change.sexualBirths} clones, " +
                         $"{change.sexualBirths} from two parents)");
-            line.Append($" | deaths {change.deaths}: starvation {change.starvationDeaths}, " +
+            line.Append($" | deaths {change.deaths}: starvation {change.starvationDeaths}, thirst {change.thirstDeaths}, " +
                         $"predation {change.predationDeaths}, old age {change.oldAgeDeaths}, cold {change.coldDeaths}, " +
                         $"heat {change.heatDeaths}, venom {change.venomDeaths}, other {change.OtherDeaths}");
             line.Append($" | meals: {change.plantMeals} plant, {change.meatMeals} meat");

@@ -39,6 +39,25 @@ namespace Boreal.Animals
         [Min(0f)] public float baseEnergyDrainPerSecond = 1f;
         [Min(0f)] public float starvationDamagePerSecond = 5f;
 
+        [Header("Thirst")]
+        [Tooltip("Animals need fresh water as well as food (item 27): a thirsty animal walks to the nearest river or " +
+                 "lake bank it can reach and drinks. The sea is salt. Off, hydration stays full.")]
+        public bool enableThirst = true;
+        [Min(1f)] public float maxHydration = 100f;
+        [Tooltip("Hydration lost per simulated second while comfortable; each unit of heat stress adds as much again.")]
+        [Min(0f)] public float hydrationDrainPerSecond = 0.4f;
+        [Tooltip("Share of maximum hydration below which the animal looks for water. A drink is worth more the " +
+                 "further below it the animal is (UtilityDecisionPolicy.thirstValue).")]
+        [Range(0f, 1f)] public float thirstThreshold = 0.5f;
+        [Tooltip("Hydration gained per simulated second while drinking or standing in fresh water.")]
+        [Min(0f)] public float drinkPerSecond = 25f;
+        [Tooltip("Health lost per simulated second once the animal has no water left.")]
+        [Min(0f)] public float thirstDamagePerSecond = 2f;
+        [Tooltip("Simulated seconds a drinking spot the animal couldn't reach is avoided, as with unreachable food.")]
+        [Min(0.1f)] public float unreachableWaterMemory = 60f;
+        [Tooltip("Current hydration. Negative means full when the animal starts.")]
+        public float currentHydration = -1f;
+
         [Header("Metabolic Trait Tradeoffs")]
         [Min(0f)] public float speedMetabolicWeight = 0.4f;
         [Min(0f)] public float strengthMetabolicWeight = 0.2f;
@@ -273,6 +292,23 @@ namespace Boreal.Animals
         public bool CanSwimDeepWater => waterMovement.CanSwimDeepWater(bodyEffects.swimmingAbility);
         public bool IsInWater => inWater;
         public bool IsInDeadZone => inDeadZone;
+        public float HydrationFraction => enableThirst && maxHydration > 0f ? Mathf.Clamp01(currentHydration / maxHydration) : 1f;
+        public bool IsThirsty => enableThirst && HydrationFraction < thirstThreshold;
+        // 0 at the thirst threshold, 1 with no water left. An animal already at the water keeps a quarter of the
+        // urgency until it is nearly full, so it finishes its drink instead of wandering off at the threshold.
+        public float ThirstUrgency
+        {
+            get
+            {
+                if (!enableThirst) return 0f;
+                float urgency = Mathf.Clamp01(Mathf.InverseLerp(Mathf.Max(0.01f, thirstThreshold), 0f, HydrationFraction));
+                return WantsToKeepDrinking ? Mathf.Max(urgency, 0.25f) : urgency;
+            }
+        }
+        public bool IsDrinking => currentState == State.Drinking;
+        // On the way to water or drinking, and not yet nearly full.
+        bool WantsToKeepDrinking => (currentState == State.Drinking || currentState == State.SeekingWater) &&
+                                    HydrationFraction < 0.95f;
         // How much snow under the animal slows it: 1 without snow, lower in snow. Not part of its genes.
         public float SnowSpeedMultiplier => snowSpeedMultiplier;
         public float CurrentAge => currentAge;
@@ -431,7 +467,23 @@ namespace Boreal.Animals
             public float retryTime;
         }
 
-        private enum State { Idling, Wandering, Chasing, Hunting, Fighting, Fleeing, Escaping, SeekingMate, Courting }
+        private enum State { Idling, Wandering, Chasing, Hunting, Fighting, Fleeing, Escaping, SeekingMate, Courting, SeekingWater, Drinking }
+
+        struct UnreachableWater
+        {
+            public Vector3 spot;
+            public float retryTime;
+        }
+
+        // The place the animal is going to drink at, kept once found until it has drunk or given up on it.
+        private Vector3 currentDrinkingSpot;
+        private bool hasDrinkingSpot;
+        private float waterChaseTimer;
+        private float nextWaterSearchTime;
+        private readonly List<UnreachableWater> unreachableWater = new List<UnreachableWater>();
+        // For tests and scenes without terrain: given a position and a search radius, a point of fresh water, or
+        // null. Unset, the terrain's rivers and lakes are used.
+        public static System.Func<Vector3, float, Vector3?> DrinkingWaterLocator;
         private State currentState = State.Wandering;
 
         void Start()
@@ -461,6 +513,8 @@ namespace Boreal.Animals
             decisionTimer = Random.Range(0f, Mathf.Max(0.05f, decisionInterval));
             decisionRealTimeCooldown = Random.Range(0f, Mathf.Max(0f, minimumDecisionIntervalRealSeconds));
             currentEnergy = Mathf.Clamp(currentEnergy, 0f, maxEnergy);
+            if (currentHydration < 0f) currentHydration = maxHydration;
+            currentHydration = Mathf.Min(currentHydration, maxHydration);
             currentHealth = maxHealth;
             strength = Mathf.Max(0f, strength);
             maxStamina = Mathf.Max(0.01f, maxStamina);
@@ -577,6 +631,11 @@ namespace Boreal.Animals
                 }
             }
 
+            if (UpdateThirst(deltaTime))
+            {
+                return;
+            }
+
             // Regeneration slowly heals the animal while it has energy.
             if (perkEffects.regenerationPerSecond > 0f && currentEnergy > 0f && currentHealth < maxHealth)
             {
@@ -620,7 +679,8 @@ namespace Boreal.Animals
             ExecuteCurrentIntent(deltaTime);
 
             if (currentState == State.Chasing || currentState == State.Hunting ||
-                currentState == State.Fighting || currentState == State.SeekingMate)
+                currentState == State.Fighting || currentState == State.SeekingMate ||
+                currentState == State.SeekingWater || currentState == State.Drinking)
             {
                 return;
             }
@@ -827,7 +887,168 @@ namespace Boreal.Animals
                 AddRememberedThreatsOutOfView(manager, perception.threats);
             }
 
+            perception.drinkingSpotDistance = Mathf.Infinity;
+            if ((IsThirsty || WantsToKeepDrinking) && TryFindDrinkingSpot(out Vector3 drinkingSpot))
+            {
+                perception.hasDrinkingSpot = true;
+                perception.drinkingSpot = drinkingSpot;
+                perception.drinkingSpotDistance = Vector3.Distance(transform.position, drinkingSpot);
+            }
+
             return perception;
+        }
+
+        // Hydration falls with time, faster in the heat, and refills while the animal drinks or stands in fresh water.
+        // With none left the animal loses health. Returns true when it died of thirst.
+        bool UpdateThirst(float deltaTime)
+        {
+            if (!enableThirst) return false;
+
+            if (currentState == State.Drinking || IsStandingInFreshWater())
+            {
+                currentHydration = Mathf.Min(maxHydration, currentHydration + drinkPerSecond * deltaTime);
+                return false;
+            }
+
+            float heat = thermalResponse != null ? thermalResponse.HeatStress : 0f;
+            currentHydration = Mathf.Max(0f, currentHydration - hydrationDrainPerSecond * (1f + heat) * deltaTime);
+            if (currentHydration > 0f) return false;
+
+            currentHealth -= thirstDamagePerSecond * deltaTime;
+            if (currentHealth <= 0f)
+            {
+                Die(AgentDeathCause.Thirst, null);
+                return true;
+            }
+            return false;
+        }
+
+        bool IsStandingInFreshWater()
+        {
+            if (!inWater) return false;
+            AnimalTerrainWorld terrainWorld = AnimalTerrainWorld.Active;
+            return terrainWorld != null && terrainWorld.TryGetCachedSample(transform.position, out EnvironmentSample ground) &&
+                   IsFreshWater(ground);
+        }
+
+        // Rivers and lakes; the sea is salt.
+        static bool IsFreshWater(in EnvironmentSample sample)
+        {
+            return sample.isValid && sample.isWater && (sample.riverStrength > 0.05f || sample.lakeStrength > 0.05f);
+        }
+
+        // The nearest fresh water in view and a place at its edge on the NavMesh where this animal can stand or wade
+        // to drink. The spot is kept until it has been drunk from or given up on; the search itself runs at most
+        // every two seconds, since it samples the terrain along rays.
+        bool TryFindDrinkingSpot(out Vector3 spot)
+        {
+            spot = currentDrinkingSpot;
+            if (hasDrinkingSpot) return true;
+            if (Time.time < nextWaterSearchTime) return false;
+            nextWaterSearchTime = Time.time + 2f;
+
+            Vector3? water = DrinkingWaterLocator != null
+                ? DrinkingWaterLocator(transform.position, visionRadius)
+                : FindFreshWater();
+            if (!water.HasValue) return false;
+            if (!NavMesh.SamplePosition(water.Value, out NavMeshHit hit, 15f, WaterAccess.AreaMask(CanSwimDeepWater))) return false;
+            if (IsRememberedUnreachableWater(hit.position)) return false;
+
+            spot = hit.position;
+            currentDrinkingSpot = spot;
+            hasDrinkingSpot = true;
+            return true;
+        }
+
+        // Walks rays out from the animal and takes the first water each meets: that is the shore, and past it is
+        // only more water. Returns the nearest fresh water found.
+        Vector3? FindFreshWater()
+        {
+            AnimalTerrainWorld terrainWorld = AnimalTerrainWorld.Active;
+            if (terrainWorld == null) return null;
+
+            const int Directions = 12;
+            float step = Mathf.Max(8f, visionRadius / 10f);
+            Vector3 origin = transform.position;
+            Vector3? nearest = null;
+            float nearestDistance = float.MaxValue;
+            for (int direction = 0; direction < Directions; direction++)
+            {
+                float angle = direction * Mathf.PI * 2f / Directions;
+                Vector3 along = new Vector3(Mathf.Cos(angle), 0f, Mathf.Sin(angle));
+                for (float distance = step; distance <= visionRadius && distance < nearestDistance; distance += step)
+                {
+                    Vector3 point = origin + along * distance;
+                    if (!terrainWorld.TryGetSample(point, out EnvironmentSample sample) || !sample.isValid) break;
+                    if (!sample.isWater) continue;
+                    if (IsFreshWater(sample))
+                    {
+                        nearest = sample.position;
+                        nearestDistance = distance;
+                    }
+                    break;
+                }
+            }
+            return nearest;
+        }
+
+        // True once walking to the drinking spot can't work: the route stops short of it, the animal has walked as
+        // far as the route goes, or it is taking far longer than crossing its field of view would.
+        bool IsDrinkingSpotOutOfReach()
+        {
+            float speed = Mathf.Max(0.1f, GetCurrentMovementSpeed());
+            if (waterChaseTimer >= Mathf.Max(maximumFoodChaseDuration, 3f * visionRadius / speed)) return true;
+            if (agent == null || !agent.enabled || !agent.isOnNavMesh || agent.pathPending) return false;
+
+            if (agent.hasPath && agent.pathStatus != NavMeshPathStatus.PathComplete)
+            {
+                Vector3 shortfall = agent.pathEndPosition - currentDrinkingSpot;
+                shortfall.y = 0f;
+                float range = CurrentFoodInteractionRange;
+                if (shortfall.sqrMagnitude > range * range) return true;
+            }
+
+            return !agent.hasPath || agent.remainingDistance <= agent.stoppingDistance + 0.5f;
+        }
+
+        void GiveUpOnWater()
+        {
+            if (unreachableWater.Count >= 16) unreachableWater.RemoveAt(0);
+            unreachableWater.Add(new UnreachableWater
+            {
+                spot = currentDrinkingSpot,
+                retryTime = Time.time + Mathf.Max(0.1f, unreachableWaterMemory)
+            });
+            hasDrinkingSpot = false;
+            waterChaseTimer = 0f;
+            ClearTargets();
+            currentState = State.Idling;
+            timer = 0f;
+            decisionTimer = 0f;
+            TryResetPath();
+
+            if (SpeciesManager.Instance != null && SpeciesManager.Instance.ShouldLogLifecycleEvents)
+            {
+                Debug.Log($"{gameObject.name} gave up on drinking at x {currentDrinkingSpot.x:0} z {currentDrinkingSpot.z:0}, which it could not reach.");
+            }
+        }
+
+        bool IsRememberedUnreachableWater(Vector3 spot)
+        {
+            float now = Time.time;
+            for (int index = unreachableWater.Count - 1; index >= 0; index--)
+            {
+                UnreachableWater entry = unreachableWater[index];
+                if (entry.retryTime <= now)
+                {
+                    unreachableWater.RemoveAt(index);
+                    continue;
+                }
+                Vector3 offset = entry.spot - spot;
+                offset.y = 0f;
+                if (offset.sqrMagnitude < 15f * 15f) return true;
+            }
+            return false;
         }
 
         // An animal that attacked this one counts as a threat while it is remembered, however far away it is. Those
@@ -979,6 +1200,31 @@ namespace Boreal.Animals
                     }
                     break;
 
+                case AgentIntent.Drink:
+                    if (enableThirst)
+                    {
+                        Vector3 change = decision.drinkingSpot - currentDrinkingSpot;
+                        change.y = 0f;
+                        bool sameSpot = hasDrinkingSpot && change.sqrMagnitude < 1f;
+                        currentDrinkingSpot = decision.drinkingSpot;
+                        hasDrinkingSpot = true;
+                        if (previousState == State.Drinking && sameSpot)
+                        {
+                            // Already at the water: keep drinking.
+                            currentState = State.Drinking;
+                        }
+                        else
+                        {
+                            currentState = State.SeekingWater;
+                            if (!sameSpot || previousState != State.SeekingWater) waterChaseTimer = 0f;
+                            if (!sameSpot || previousState != State.SeekingWater || (!agent.pathPending && !agent.hasPath))
+                            {
+                                TrySetDestination(currentDrinkingSpot);
+                            }
+                        }
+                    }
+                    break;
+
                 case AgentIntent.SeekMate:
                     if (seekingMate && MateFertility(decision.mateTarget) > 0f)
                     {
@@ -1031,6 +1277,37 @@ namespace Boreal.Animals
                 {
                     ClearTargets();
                     currentState = State.Idling;
+                    decisionTimer = 0f;
+                }
+            }
+            else if (currentState == State.SeekingWater)
+            {
+                waterChaseTimer += deltaTime;
+                Vector3 offset = transform.position - currentDrinkingSpot;
+                offset.y = 0f;
+                float range = CurrentFoodInteractionRange;
+                if (offset.sqrMagnitude <= range * range)
+                {
+                    // At the water's edge: stand and drink (UpdateThirst refills).
+                    currentState = State.Drinking;
+                    TryResetPath();
+                }
+                else if (IsDrinkingSpotOutOfReach())
+                {
+                    GiveUpOnWater();
+                }
+                else if (!agent.pathPending && !agent.hasPath)
+                {
+                    TrySetDestination(currentDrinkingSpot);
+                }
+            }
+            else if (currentState == State.Drinking)
+            {
+                if (!enableThirst || HydrationFraction >= 0.95f)
+                {
+                    hasDrinkingSpot = false;
+                    currentState = State.Idling;
+                    timer = actionTimer;
                     decisionTimer = 0f;
                 }
             }
@@ -2128,6 +2405,7 @@ namespace Boreal.Animals
             }
 
             childScript.currentEnergy = childEnergy;
+            childScript.currentHydration = maxHydration;
             childScript.currentAge = 0f;
             childScript.bornInSimulation = true;
             childScript.generation = Mathf.Max(generation, partner != null ? partner.generation : 0) + 1;

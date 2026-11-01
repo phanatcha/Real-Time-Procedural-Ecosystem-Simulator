@@ -38,7 +38,7 @@ namespace Boreal.Animals
         [Serializable]
         sealed class RunMetadata
         {
-            public int schemaVersion = 2;
+            public int schemaVersion = 3;
             public string startedUtc, sourceRevision, experiment, unityVersion, worldSeed;
             public float sampleInterval;
             public bool offscreenEnabled;
@@ -98,7 +98,7 @@ namespace Boreal.Animals
                 representativeAnimalSettings = representative != null ? JsonUtility.ToJson(representative) : ""
             };
             File.WriteAllText(Path.Combine(OutputDirectory, "metadata.json"), JsonUtility.ToJson(metadata, true));
-            population = Open("population.csv", "time,live,offscreen,species_alive,births,cloned_births,sexual_births,deaths,starvation,predation,old_age,cold,heat,venom,other,land_ceiling,sea_ceiling,requested_speed,achieved_speed,season,season_strength,offscreen_enabled,breeding_wait_episodes,breeding_wait_seconds");
+            population = Open("population.csv", "time,live,offscreen,species_alive,births,cloned_births,sexual_births,deaths,starvation,predation,old_age,cold,heat,venom,thirst,other,land_ceiling,sea_ceiling,requested_speed,achieved_speed,season,season_strength,offscreen_enabled,breeding_wait_episodes,breeding_wait_seconds");
             species = Open("species.csv", "time,species,parent,origin,extinction,live,offscreen,births,sexual_births,deaths,breeding_wait_episodes,breeding_wait_seconds");
             traits = Open("traits.csv", "time,species,trait,live_sample_count,mean,standard_deviation,minimum,maximum");
             events = Open("events.csv", "time,event,detail");
@@ -120,7 +120,7 @@ namespace Boreal.Animals
             Row(population, time, manager.TotalPopulation, manager.OffscreenTotal, manager.SpeciesAliveCount,
                 total.births, total.births - total.sexualBirths, total.sexualBirths, total.deaths,
                 total.starvationDeaths, total.predationDeaths, total.oldAgeDeaths, total.coldDeaths,
-                total.heatDeaths, total.venomDeaths, total.OtherDeaths, manager.IsAtPopulationCeiling,
+                total.heatDeaths, total.venomDeaths, total.thirstDeaths, total.OtherDeaths, manager.IsAtPopulationCeiling,
                 manager.IsAtSeaPopulationCeiling, manager.simulationSpeed, manager.AchievedSimulationSpeed,
                 SeasonClock.Active != null ? SeasonClock.Active.SeasonName : "None",
                 SeasonClock.IsRunning ? SeasonClock.Active.EffectiveStrength : 0f, manager.OffscreenPopulation != null,

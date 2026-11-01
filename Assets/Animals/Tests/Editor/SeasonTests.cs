@@ -212,7 +212,7 @@ namespace Boreal.Animals.Tests
             StringAssert.StartsWith("Season summary: year 2 winter, 300-400 s (seasons on): ", line);
             StringAssert.Contains("animals 3 -> 8, lowest 3, highest 9, off-screen 0", line);
             StringAssert.Contains("births 7 (5 clones, 2 from two parents)", line);
-            StringAssert.Contains("deaths 4: starvation 1, predation 0, old age 1, cold 1, heat 0, venom 0, other 1", line);
+            StringAssert.Contains("deaths 4: starvation 1, thirst 0, predation 0, old age 1, cold 1, heat 0, venom 0, other 1", line);
             StringAssert.Contains("meals: 30 plant, 1 meat", line);
             StringAssert.Contains("energy at end 58% on average", line);
             StringAssert.Contains("plants on average: 175 shown (50 in the sea), 30 under snow", line);

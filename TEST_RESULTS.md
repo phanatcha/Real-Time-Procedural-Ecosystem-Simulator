@@ -1,4 +1,8 @@
-# Latest verification — 1 November 2026, second round
+# Latest verification — 1 November 2026, third round
+
+**279 passed, 0 failed, 0 skipped** in Unity 6000.4.1f1 after thirst (item 27) ([NUnit XML](Logs/TestResults/20261101T165334883659Z/results.xml)). Two new Play Mode tests: a thirsty animal walks to water and drinks until nearly full; an animal with no water dies of thirst. The first run caught animals stopping their drink at the thirst threshold, now fixed.
+
+# Second round, 1 November 2026
 
 **277 passed, 0 failed, 0 skipped** in Unity 6000.4.1f1 after the founder start, the cold cost, the 5% mutation cost, the inspector, the species tree and the god tools ([NUnit XML](Logs/TestResults/20261101T160428677684Z/results.xml)). New: `GodToolsTests` for the schedule parser; the off-screen population tests expect the new cold cost.
 

@@ -14,6 +14,9 @@ namespace Boreal.Animals
         [Tooltip("What reaching a fully fertile partner is worth to an animal looking for a mate, as a fraction of " +
                  "its maximum energy, weighed against the energy food would give it.")]
         [Min(0f)] public float mateValue = 0.5f;
+        [Tooltip("How much of its maximum energy a drink is worth to an animal with no water left, scaled down " +
+                 "towards the thirst threshold, where it is worth nothing.")]
+        [Min(0f)] public float thirstValue = 1f;
 
         [Header("Threat Response")]
         [FormerlySerializedAs("fleeAfterBeingAttacked")]
@@ -77,6 +80,13 @@ namespace Boreal.Animals
             {
                 bestUtility = meatUtility;
                 bestDecision = new AnimalDecision(AgentIntent.SeekMeat, perception.nearestMeat);
+            }
+
+            float drinkUtility = ScoreDrink(self, perception);
+            if (drinkUtility > bestUtility)
+            {
+                bestUtility = drinkUtility;
+                bestDecision = new AnimalDecision(AgentIntent.Drink, drinkingSpot: perception.drinkingSpot);
             }
 
             float mateUtility = ScoreMate(self, perception.mate, perception.mateDistance, perception.mateFertility);
@@ -211,6 +221,20 @@ namespace Boreal.Animals
             float travelTime = distance / self.GetCurrentMovementSpeed();
             float travelCost = travelTime * self.CurrentEnergyDrainPerSecond * travelEnergyWeight;
             return UsableEnergy(self, self.EstimateDigestibleEnergy(food)) - travelCost;
+        }
+
+        // Water is worth more the thirstier the animal is: nothing at the thirst threshold, its whole energy store
+        // (times Thirst Value) when it has none left, so a dying animal goes to water before food.
+        float ScoreDrink(SeekFood self, AnimalPerception perception)
+        {
+            if (!perception.hasDrinkingSpot)
+            {
+                return float.NegativeInfinity;
+            }
+
+            float travelTime = perception.drinkingSpotDistance / self.GetCurrentMovementSpeed();
+            float travelCost = travelTime * self.CurrentEnergyDrainPerSecond * travelEnergyWeight;
+            return thirstValue * self.maxEnergy * self.ThirstUrgency - travelCost;
         }
 
         // Energy only counts up to what still fits under the animal's maximum, so a full animal gains nothing

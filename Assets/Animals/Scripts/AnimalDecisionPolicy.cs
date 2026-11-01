@@ -11,7 +11,9 @@ namespace Boreal.Animals
         HuntPrey,
         FightThreat,
         Flee,
-        SeekMate
+        SeekMate,
+        // Walk to fresh water and drink (item 27).
+        Drink
     }
 
     public struct AnimalThreat
@@ -43,6 +45,10 @@ namespace Boreal.Animals
         public float mateDistance;
         // The chance a courtship with the mate ends in a child.
         public float mateFertility;
+        // The nearest place to drink, only looked for while the animal is thirsty.
+        public bool hasDrinkingSpot;
+        public Vector3 drinkingSpot;
+        public float drinkingSpotDistance;
         public List<AnimalThreat> threats;
 
         public bool HasThreats => threats != null && threats.Count > 0;
@@ -55,15 +61,17 @@ namespace Boreal.Animals
         public SeekFood preyTarget;
         public Vector3 fleeDirection;
         public SeekFood mateTarget;
+        public Vector3 drinkingSpot;
 
         public AnimalDecision(AgentIntent intent, FoodItem foodTarget = null, SeekFood preyTarget = null,
-                              Vector3 fleeDirection = default, SeekFood mateTarget = null)
+                              Vector3 fleeDirection = default, SeekFood mateTarget = null, Vector3 drinkingSpot = default)
         {
             this.intent = intent;
             this.foodTarget = foodTarget;
             this.preyTarget = preyTarget;
             this.fleeDirection = fleeDirection;
             this.mateTarget = mateTarget;
+            this.drinkingSpot = drinkingSpot;
         }
     }
 

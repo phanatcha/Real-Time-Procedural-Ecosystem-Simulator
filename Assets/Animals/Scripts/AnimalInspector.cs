@@ -133,6 +133,7 @@ namespace Boreal.Animals
             text.Append($"{Lower(animal.Activity)}{(animal.IsInWater ? ", in water" : "")}   age {animal.CurrentAge:0} of " +
                         $"{animal.maxLifespan:0} s, {youth}\n");
             text.Append($"energy {animal.currentEnergy:0} of {animal.maxEnergy:0} ({animal.CurrentEnergyDrainPerSecond:0.00}/s)   " +
+                        (animal.enableThirst ? $"water {animal.currentHydration:0} of {animal.maxHydration:0}{(animal.IsThirsty ? ", thirsty" : "")}   " : "") +
                         $"health {animal.currentHealth:0} of {animal.maxHealth:0}   stamina {animal.currentStamina:0} of {animal.maxStamina:0}\n");
             AnimalTemperature thermal = animal.ThermalResponse;
             if (thermal != null && thermal.HasTemperatureSample)
