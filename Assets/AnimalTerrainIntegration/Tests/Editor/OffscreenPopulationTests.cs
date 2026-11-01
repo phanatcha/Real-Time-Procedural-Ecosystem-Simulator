@@ -120,8 +120,8 @@ namespace Boreal.AnimalTerrainIntegration.Tests
             Assert.That(Rules.CarryingCapacity(Founder(energyUse: 2f), PlantEnergy, Mild), Is.EqualTo(expected / 2f).Within(1e-4f));
             Assert.That(Rules.CarryingCapacity(founder, PlantEnergy * 2f, Mild), Is.EqualTo(expected * 2f).Within(1e-4f));
             Assert.Less(Rules.CarryingCapacity(Founder(diet: 0.9f), PlantEnergy, Mild), expected);
-            // 40 °C below the comfort range: two stress units, so double energy use.
-            Assert.That(Rules.CarryingCapacity(founder, PlantEnergy, -56f), Is.EqualTo(expected / 2f).Within(1e-4f));
+            // 40 °C below the comfort range: two stress units at 1.5 extra each, so four times the energy use.
+            Assert.That(Rules.CarryingCapacity(founder, PlantEnergy, -56f), Is.EqualTo(expected / 4f).Within(1e-4f));
         }
 
         [Test]
@@ -129,11 +129,12 @@ namespace Boreal.AnimalTerrainIntegration.Tests
         {
             // Comfortable: torpor costs and saves nothing.
             Assert.AreEqual(1f, Rules.ThermalEnergyMultiplier(-16f, 18f, 0f, 1f), 1e-5f);
-            // 12 °C below the comfort range: 0.6 stress units, so 1.3 times the energy without torpor and half that with it.
-            Assert.AreEqual(1.3f, Rules.ThermalEnergyMultiplier(-16f, 18f, -28f), 1e-5f);
-            Assert.AreEqual(0.65f, Rules.ThermalEnergyMultiplier(-16f, 18f, -28f, 1f), 1e-5f);
-            // 5 °C below it, torpor is half on.
-            Assert.AreEqual(1.125f * 0.75f, Rules.ThermalEnergyMultiplier(-16f, 18f, -21f, 1f), 1e-5f);
+            // 12 °C below the comfort range: 0.6 stress units at 1.5 extra each, so 1.9 times the energy without torpor
+            // and half that with it.
+            Assert.AreEqual(1.9f, Rules.ThermalEnergyMultiplier(-16f, 18f, -28f), 1e-5f);
+            Assert.AreEqual(0.95f, Rules.ThermalEnergyMultiplier(-16f, 18f, -28f, 1f), 1e-5f);
+            // 5 °C below it, 0.25 stress units: 1.375 times the energy, and torpor is half on.
+            Assert.AreEqual(1.375f * 0.75f, Rules.ThermalEnergyMultiplier(-16f, 18f, -21f, 1f), 1e-5f);
         }
 
         [Test]

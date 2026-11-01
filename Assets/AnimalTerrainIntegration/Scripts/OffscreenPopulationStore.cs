@@ -51,7 +51,7 @@ namespace Boreal.AnimalTerrainIntegration
             minimumDietEfficiency = 0.2f,
             reproductionCooldown = 60f,
             degreesPerStressUnit = 20f,
-            extraEnergyDrainPerStressUnit = 0.5f,
+            extraEnergyDrainPerStressUnit = 1.5f,
             maximumStress = 3f,
             torporEnergySaving = 0.5f,
             torporFullAtStress = 0.5f,

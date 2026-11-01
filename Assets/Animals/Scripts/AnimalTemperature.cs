@@ -17,7 +17,11 @@ namespace Boreal.Animals
         public bool enableTemperatureEffects = true;
         [Tooltip("Degrees beyond the comfort range that produce one unit of stress.")]
         [Min(0.1f)] public float degreesPerStressUnit = 20f;
-        [Min(0f)] public float extraEnergyDrainPerStressUnit = 0.5f;
+        [Tooltip("Extra energy use per unit of temperature stress: at 1.5, an animal 10 °C beyond its comfort range " +
+                 "(stress 0.5) uses 75% more energy and one 20 °C beyond it 2.5 times as much, so a hard winter " +
+                 "starves animals that haven't the fur, the torpor or the reserves for it. Until November 2026 this " +
+                 "was 0.5, and no animal ever died of the cold.")]
+        [Min(0f)] public float extraEnergyDrainPerStressUnit = 1.5f;
         [Tooltip("Stress where movement or recovery penalties begin. Damage begins at stress 1.")]
         [Range(0f, 0.99f)] public float severeStressThreshold = 0.5f;
         [Range(0.05f, 1f)] public float minimumColdMovementMultiplier = 0.5f;
