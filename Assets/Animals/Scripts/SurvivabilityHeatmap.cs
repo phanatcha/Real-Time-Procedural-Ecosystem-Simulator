@@ -212,6 +212,10 @@ namespace Boreal.Animals
         [Range(32, 256)] public int resolution = 128;
         [Tooltip("Real seconds between recalculations while shown, so the map follows the evolving species.")]
         [Min(1f)] public float refreshInterval = 20f;
+        [Tooltip("Score the current season's temperatures instead of the base climate's, and redo the map as the " +
+                 "season moves on. Off, the map shows where animals should do well over a whole year.")]
+        public bool scoreCurrentSeason;
+        int scoredSeasonStep = -1;
         [Tooltip("Real milliseconds per frame spent recalculating, so the map fills in without a hitch.")]
         [Min(0.5f)] public float millisecondsPerFrame = 3f;
         [Tooltip("Save the first complete map of each world as a top-down PNG, with statistics, in the " +
@@ -294,7 +298,9 @@ namespace Boreal.Animals
                 ForgetMap();
             }
 
-            if (nextCell < 0 && Time.unscaledTime >= nextRefreshTime) BeginRecalculation();
+            // Scoring the season, the map is redone whenever the season clock moves on a step.
+            bool seasonMoved = scoreCurrentSeason && SeasonClock.Step != scoredSeasonStep;
+            if (nextCell < 0 && (Time.unscaledTime >= nextRefreshTime || seasonMoved)) BeginRecalculation();
             if (nextCell >= 0) ContinueRecalculation();
         }
 
@@ -390,6 +396,7 @@ namespace Boreal.Animals
             Shader.SetGlobalTexture(HeatmapId, texture);
             Shader.SetGlobalVector(RectId, new Vector4(-extent, -extent, 0.5f / extent, 0.5f / extent));
             Shader.SetGlobalFloat(WaterId, scoresSea ? 1f : 0f);
+            scoredSeasonStep = SeasonClock.Step;
             nextCell = 0;
         }
 
@@ -460,7 +467,7 @@ namespace Boreal.Animals
                 return;
             }
 
-            cell.celsius = Celsius(environment);
+            cell.celsius = Celsius(environment, scoreCurrentSeason);
             Score(index, cell, HabitableCell);
         }
 
@@ -583,6 +590,11 @@ namespace Boreal.Animals
             }
 
             text.AppendLine(temperature.Describe());
+            text.AppendLine(scoreCurrentSeason && SeasonClock.IsRunning
+                ? $"Temperatures are the current season's: {SeasonClock.Active.SeasonName.ToLowerInvariant()} of year " +
+                  $"{SeasonClock.Active.Year}, {SeasonClock.TemperatureShiftCelsius(SeasonClock.Current):+0.#;-0.#;0} C " +
+                  "from the base climate"
+                : "Temperatures are the base climate's, without the season");
             text.AppendLine($"Food counts as plentiful at {food.plentifulNutritionPerMinute:0.#} nutrition per minute per plant cell");
             return text.ToString();
         }
@@ -651,19 +663,25 @@ namespace Boreal.Animals
             }
         }
 
-        // The temperature an animal would feel here in the base climate, without the season. The terrain provider only
-        // answers for loaded terrain, so its conversion is applied to the sample directly; an override or another
-        // provider goes through the system.
-        static float Celsius(in EnvironmentSample environment)
+        // The temperature an animal would feel here: in the base climate, without the season, or in the current season
+        // when asked. The terrain provider only answers for loaded terrain, so its conversion is applied to the sample
+        // directly, shifted by the season as the provider shifts it; an override or another provider goes through the
+        // system.
+        static float Celsius(in EnvironmentSample environment, bool currentSeason)
         {
             TemperatureSystem system = TemperatureSystem.Active;
             if (system != null && !system.useGlobalOverride && system.provider is ProceduralTerrainTemperatureProvider terrain)
             {
-                return ProceduralTerrainTemperatureProvider.NormalizedToCelsius(environment.temperature,
+                float normalized = currentSeason
+                    ? SeasonalEnvironment.Evaluate(environment, SeasonClock.Current).temperature
+                    : environment.temperature;
+                return ProceduralTerrainTemperatureProvider.NormalizedToCelsius(normalized,
                     terrain.coldestTemperatureCelsius, terrain.warmestTemperatureCelsius);
             }
 
-            TemperatureSystem.TryGetClimateTemperatureAt(environment.position, out float celsius);
+            float celsius;
+            if (currentSeason) TemperatureSystem.TryGetTemperatureAt(environment.position, out celsius);
+            else TemperatureSystem.TryGetClimateTemperatureAt(environment.position, out celsius);
             return celsius;
         }
 
