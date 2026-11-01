@@ -186,8 +186,9 @@ namespace Boreal.TerrainGeneration.Tests
 
         // World seeds use the whole int range. The vegetation hash used to add seed * 13.7 to the cell position it
         // hashes, which lost the position to float rounding and gave every cell in a row the same plant offset.
-        [Test]
-        public void PlantsDoNotLineUpWithAFullRangeWorldSeed()
+        [TestCase(false)]
+        [TestCase(true)]
+        public void PlantsDoNotLineUpWithAFullRangeWorldSeed(bool trees)
         {
             MeshSettings meshes = Object.Instantiate(AssetDatabase.LoadAssetAtPath<MeshSettings>(Folder + "MeshSettings.asset"));
             try
@@ -198,7 +199,7 @@ namespace Boreal.TerrainGeneration.Tests
                 seeds.ApplyTo(environment);
                 heights.erosionSettings.enabled = false;
 
-                float cellSize = vegetation.grass.cellSize;
+                float cellSize = trees ? vegetation.trees.cellSize : vegetation.grass.cellSize;
                 Vector2 half = Vector2.one * meshes.meshWorldSize * 0.5f;
                 Dictionary<Vector2Int, float> offsetInCell = new Dictionary<Vector2Int, float>();
                 for (int chunkY = -2; chunkY <= 2; chunkY++)
@@ -210,7 +211,7 @@ namespace Boreal.TerrainGeneration.Tests
                             heights, centre / meshes.meshScale);
                         VegetationPlacementData placements = VegetationGenerator.GeneratePlacements(centre - half, centre + half,
                             map, heights.minHeight, heights.maxHeight, vegetation, environment, meshes.numVertsPerLine, meshes.meshScale);
-                        foreach (VegetationInstance grass in placements.grass)
+                        foreach (VegetationInstance grass in (trees ? placements.trees : placements.grass))
                         {
                             float cellX = grass.position.x / cellSize;
                             Vector2Int cell = new Vector2Int(Mathf.FloorToInt(cellX), Mathf.FloorToInt(grass.position.z / cellSize));
@@ -223,12 +224,12 @@ namespace Boreal.TerrainGeneration.Tests
                 int sameOffset = 0;
                 foreach (KeyValuePair<Vector2Int, float> entry in offsetInCell)
                 {
-                    if (!offsetInCell.TryGetValue(entry.Key + Vector2Int.right, out float next)) continue;
+                    if (!offsetInCell.TryGetValue(entry.Key + (trees ? Vector2Int.up : Vector2Int.right), out float next)) continue;
                     neighbours++;
                     if (Mathf.Abs(entry.Value - next) < 0.001f) sameOffset++;
                 }
 
-                Assert.Greater(neighbours, 20, "Too little grass near the start to judge.");
+                Assert.Greater(neighbours, 20, "Too few neighboring plants near the start to judge.");
                 Assert.Less(sameOffset, neighbours / 10);
             }
             finally

@@ -4,6 +4,31 @@ namespace Boreal.TerrainGeneration
 {
     public static class ValueNoise
     {
+        // Integer cell hashing avoids spacing resonances and preserves every bit of the world seed.
+        // Each purpose gets an independent stream. Top 24 bits map exactly to floats in [0, 1).
+        public static float CellHash(int x, int z, int seed, int type, int stream)
+        {
+            unchecked
+            {
+                uint h = Mix((uint)seed ^ 0x9e3779b9u);
+                h = Mix(h ^ (uint)x);
+                h = Mix(h ^ (uint)z);
+                h = Mix(h ^ (uint)type);
+                h = Mix(h ^ (uint)stream);
+                return (h >> 8) * (1f / 16777216f);
+            }
+        }
+
+        static uint Mix(uint h)
+        {
+            unchecked
+            {
+                h ^= h >> 16; h *= 0x7feb352du;
+                h ^= h >> 15; h *= 0x846ca68bu;
+                return h ^ (h >> 16);
+            }
+        }
+
         static float Frac(float x)
         {
             return x - Mathf.Floor(x);

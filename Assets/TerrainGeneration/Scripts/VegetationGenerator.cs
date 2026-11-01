@@ -74,18 +74,14 @@ namespace Boreal.TerrainGeneration
             int gzMin = Mathf.FloorToInt(chunkWorldMin.y / cellSize) - 1;
             int gzMax = Mathf.CeilToInt(chunkWorldMax.y / cellSize) + 1;
 
-            // The seed moves the points the hashes below read by up to 235 m, in 1024 steps. Hash21 loses precision
-            // far from the origin, and world seeds use the whole int range, so seed * 13.7 would line plants up in rows.
-            float saltBase = (seed & 1023) * 0.2293f + typeSalt * 91.3f;
-
             for (int gx = gxMin; gx <= gxMax; gx++)
             {
                 for (int gz = gzMin; gz <= gzMax; gz++)
                 {
                     Vector2 cellOrigin = new Vector2(gx * cellSize, gz * cellSize);
 
-                    float hx = ValueNoise.Hash21(cellOrigin + new Vector2(saltBase, 7.11f));
-                    float hz = ValueNoise.Hash21(cellOrigin + new Vector2(saltBase, 33.9f));
+                    float hx = ValueNoise.CellHash(gx, gz, seed, typeSalt, 0);
+                    float hz = ValueNoise.CellHash(gx, gz, seed, typeSalt, 1);
                     Vector2 worldPos = cellOrigin + new Vector2(hx, hz) * cellSize;
 
                     if (worldPos.x < chunkWorldMin.x || worldPos.x >= chunkWorldMax.x ||
@@ -103,17 +99,17 @@ namespace Boreal.TerrainGeneration
 
                     float localDensity = EnvironmentSampler.GetResourceDensity(
                         environmentSample, environmentDefinitions, settings, resourceType);
-                    float densityRoll = ValueNoise.Hash21(cellOrigin + new Vector2(saltBase, 61.7f));
+                    float densityRoll = ValueNoise.CellHash(gx, gz, seed, typeSalt, 2);
                     if (localDensity <= 0f || densityRoll >= localDensity) continue;
                     // Placement only: the simulation's rock density still follows settings.maxSlope.
                     if ((typeSalt == 3 || typeSalt == 4) && environmentSample.slope > CliffSlope) continue;
 
-                    float variantRoll = ValueNoise.Hash21(cellOrigin + new Vector2(saltBase, 88.3f));
+                    float variantRoll = ValueNoise.CellHash(gx, gz, seed, typeSalt, 3);
                     int variant = typeSalt == 4
                         ? ChooseBushVariant(environmentSample, variantRoll)
                         : Mathf.Clamp(Mathf.FloorToInt(variantRoll * variantCount), 0, variantCount - 1);
-                    float rotRoll = ValueNoise.Hash21(cellOrigin + new Vector2(saltBase, 5.5f));
-                    float scaleRoll = ValueNoise.Hash21(cellOrigin + new Vector2(saltBase, 44.4f));
+                    float rotRoll = ValueNoise.CellHash(gx, gz, seed, typeSalt, 4);
+                    float scaleRoll = ValueNoise.CellHash(gx, gz, seed, typeSalt, 5);
 
                     Quaternion spin = Quaternion.Euler(0, rotRoll * 360f, 0);
                     Quaternion slopeAlign = Quaternion.FromToRotation(Vector3.up, environmentSample.surfaceNormal);
