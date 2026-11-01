@@ -61,6 +61,8 @@ namespace Boreal.Animals
         public float torpor;
         [Tooltip("Average mutation rate gene: how many times the base mutation chances members' children mutate at.")]
         public float mutationRate;
+        [Tooltip("Average litter size gene: how many young a member's birth has on average.")]
+        public float litterSize;
         [Tooltip("Average number of harmful mutations carried, each adding to energy use.")]
         public float harmfulMutations;
         [Tooltip("Share of the living members with each perk (0-1), indexed by AnimalPerk.")]
@@ -906,6 +908,7 @@ namespace Boreal.Animals
             record.sexualDrive = Mathf.Lerp(record.sexualDrive, agent.sexualDrive, weight);
             record.breedingThreshold = Mathf.Lerp(record.breedingThreshold, agent.reproductionThreshold, weight);
             record.mutationRate = Mathf.Lerp(record.mutationRate, agent.mutationRate, weight);
+            record.litterSize = Mathf.Lerp(record.litterSize, agent.litterSize, weight);
             record.harmfulMutations = Mathf.Lerp(record.harmfulMutations, agent.HarmfulMutations, weight);
             if (record.perkShares == null || record.perkShares.Length != AnimalGenome.PerkCount)
             {

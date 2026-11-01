@@ -29,7 +29,10 @@ namespace Boreal.Animals
         Torpor,
         // 0.25 to 4: multiplies every mutation chance when this genome is copied for a child (see CreateChild), so how
         // fast a lineage evolves also evolves. It raises the chance of harmful mutations too.
-        MutationRate
+        MutationRate,
+        // 1 to 4: how many young a birth has on average. The energy a birth hands over is split between them, so a
+        // bigger litter means weaker young (see SeekFood.TryGiveBirth).
+        LitterSize
     }
 
     // Where a body part can grow on the capsule body. Paired sites grow the same part mirrored left and right.
@@ -271,6 +274,8 @@ namespace Boreal.Animals
             AnimalGene.Torpor => new AnimalGeneDefinition(0f, 1f, GeneMutationStyle.Additive, 1f),
             // Proportional, so it steps by a share of its value and halving takes about as many mutations as doubling.
             AnimalGene.MutationRate => new AnimalGeneDefinition(0.25f, 4f, GeneMutationStyle.Proportional, 0.01f),
+            // Additive, so a mutation moves it by a tenth of a child at the default magnitude.
+            AnimalGene.LitterSize => new AnimalGeneDefinition(1f, 4f, GeneMutationStyle.Additive, 1f),
             _ => throw new System.ArgumentOutOfRangeException(nameof(gene), gene, null)
         };
 

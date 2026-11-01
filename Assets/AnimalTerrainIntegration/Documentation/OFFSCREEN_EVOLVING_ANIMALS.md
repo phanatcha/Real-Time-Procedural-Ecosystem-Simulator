@@ -49,6 +49,7 @@ N(t) = room / (1 + (room − N) / N · e^(−r·t))
 - **Hunting and tall forest food** are not modelled off-screen.
 - **Mating** is not modelled off-screen: populations grow at the same rate whatever their sexual drive, and genomes are not recombined.
 - **Breeding threshold:** off-screen populations grow at the same rate whatever their breeding threshold gene. Torpor is included: it lowers energy use in the cold, as it does for live animals.
+- **Litter size and juvenile growth** are not modelled off-screen: populations grow at the same rate whatever their litter size gene, and animals that come back from off-screen numbers are full-grown, whatever their age.
 - **Harvest efficiency (0.5)** is an estimate. Compare the live density near the camera with the off-screen density to tune it.
 
 ## Tests

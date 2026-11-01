@@ -119,6 +119,22 @@ namespace Boreal.Animals
         [InspectorName("Maximum Lifespan (Simulated Seconds)")]
         [Min(0.01f)] public float maxLifespan = 200f;
 
+        [Header("Juvenile Growth")]
+        [Tooltip("Share of its adult size, speed, vision and feeding reach a newborn starts with. It grows to full " +
+                 "size by its maturity time. Founders placed by a scene and animals back from off-screen numbers are " +
+                 "full-grown.")]
+        [Range(0.1f, 1f)] public float newbornSizeFraction = 0.4f;
+        [Tooltip("Energy spent growing from newborn to adult, as a share of the adult body's own meat (Carcass Body " +
+                 "Energy times body mass). It is paid as the body fills out, on top of upkeep, so maturing sooner is a " +
+                 "shorter but costlier youth rather than a free advantage.")]
+        [Min(0f)] public float growthEnergyCost = 0.5f;
+        // Size and ability relative to the adult, from Newborn Size Fraction up to 1.
+        private float growth = 1f;
+        private float adultVisionRadius;
+        private float lastBuiltGrowth = 1f;
+        // Set on a newborn before its first frame. Founders and animals from off-screen populations keep it false.
+        [System.NonSerialized] public bool bornInSimulation;
+
         [Header("Behavior Settings")]
         public float actionTimer = 5f;
         public float wanderRadius = 50f;
@@ -181,6 +197,10 @@ namespace Boreal.Animals
         [Tooltip("Simulated seconds after giving birth before this animal can reproduce again. Without it, " +
                  "every meal can become a birth and populations explode.")]
         [Min(0f)] public float reproductionCooldown = 60f;
+        [Tooltip("Inherited (the litter size gene, 1 to 4). How many young a birth has on average; the fraction is the " +
+                 "chance of one more. The energy the birth hands over is split equally between them, so a bigger litter " +
+                 "means weaker young. Off-screen populations grow at their usual rate whatever it is.")]
+        [Range(1f, 4f)] public float litterSize = 1f;
         [Tooltip("Percent chance per gene per birth that it mutates, at a mutation rate of 1.")]
         [Range(0f, 100f)] public float mutationChance = 5f;
         [Min(0f)] public float mutationMagnitude = 0.1f;
@@ -270,12 +290,17 @@ namespace Boreal.Animals
         public float HealthFraction => currentHealth / Mathf.Max(0.01f, maxHealth);
         public float StaminaFraction => currentStamina / Mathf.Max(0.01f, maxStamina);
         // A neck adds reach on top of the body's own; legs add it by lifting the whole animal.
-        public float FeedingReach => Mathf.Max(0f, baseFeedingReach) * Mathf.Max(0.01f, bodyHeight) +
-                                     bodyEffects.extraFeedingReach;
+        public float FeedingReach => (Mathf.Max(0f, baseFeedingReach) * Mathf.Max(0.01f, bodyHeight) +
+                                      bodyEffects.extraFeedingReach) * growth;
+        // How far this animal has grown towards its adult size, speed, vision and reach: 1 once mature.
+        public float Growth => growth;
         public float CurrentFoodInteractionRange => foodInteractionRange * Mathf.Max(0.01f, bodyBulk);
         public float CurrentAttackRange => attackRange * Mathf.Max(0.01f, bodyBulk);
-        // Includes the weight of body parts, which also feeds the carcass and the metabolism.
-        public float BodyMassFactor
+        // Includes the weight of body parts, which also feeds the carcass and the metabolism. A young animal has the
+        // mass of its current size, so it leaves a small carcass.
+        public float BodyMassFactor => AdultBodyMassFactor * growth * growth * growth;
+        // The mass the body has, or will have, full-grown.
+        public float AdultBodyMassFactor
         {
             get
             {
@@ -439,6 +464,7 @@ namespace Boreal.Animals
             maxLifespan = Mathf.Max(0.01f, maxLifespan);
             dietAffinity = Mathf.Clamp01(dietAffinity);
             InitializeMetabolicReference();
+            BeginGrowth();
             RefreshMetabolicRate();
             thermalResponse.ResetRuntimeState();
             RefreshMovementSpeed();
@@ -500,6 +526,7 @@ namespace Boreal.Animals
             if (isDying || deltaTime <= 0f) return;
             float unscaledDeltaTime = Time.unscaledDeltaTime;
             currentAge += deltaTime;
+            if (growth < 1f) UpdateGrowth();
 
             if (currentAge >= maxLifespan)
             {
@@ -1410,7 +1437,7 @@ namespace Boreal.Animals
             float baseSpeed = inWater
                 ? (geneMoveSpeed > 0f ? geneMoveSpeed : moveSpeed) * waterMovement.SpeedMultiplier(bodyEffects.swimmingAbility)
                 : moveSpeed * snowSpeedMultiplier;
-            agent.speed = Mathf.Max(0.01f, baseSpeed * multiplier * temperatureMultiplier);
+            agent.speed = Mathf.Max(0.01f, baseSpeed * growth * multiplier * temperatureMultiplier);
         }
 
         // The animal is in water when its NavMesh position is down on the flat water surface. Water changes its
@@ -1998,61 +2025,97 @@ namespace Boreal.Animals
             Destroy(gameObject);
         }
 
-        // Clones itself: the child gets a copy of this genome, with all of its harmful mutations, mutated at this
-        // animal's mutation rate, and half this animal's energy.
+        // Clones itself: each child gets a copy of this genome, with all of its harmful mutations, mutated at this
+        // animal's mutation rate, and a share of half this animal's energy.
         void Reproduce()
         {
-            TryGiveBirth(CreateChildGenome(genome, out bool mutated), mutated, null);
+            TryGiveBirth(null);
         }
 
-        // The child takes each gene, body site and perk from a random parent, and each parent's harmful mutations
-        // with a 50% chance each, then mutates at the mutation rate it took. Each parent gives it a share of its
-        // energy. Returns false when the child had nowhere to be born.
+        // Each child takes each gene, body site and perk from a random parent, and each parent's harmful mutations
+        // with a 50% chance each, then mutates at the mutation rate it took. Each parent gives the litter a share of
+        // its energy. Returns false when the first child had nowhere to be born.
         bool ReproduceWith(SeekFood partner)
         {
-            AnimalGenome childGenome = CreateChildGenome(AnimalGenome.Recombine(genome, partner.genome), out bool mutated);
-            return TryGiveBirth(childGenome, mutated, partner);
+            return TryGiveBirth(partner);
         }
 
-        AnimalGenome CreateChildGenome(AnimalGenome inherited, out bool mutated)
+        AnimalGenome CreateChildGenome(SeekFood partner, out bool mutated)
         {
+            AnimalGenome inherited = partner == null ? genome : AnimalGenome.Recombine(genome, partner.genome);
             return inherited.CreateChild(mutationChance, mutationMagnitude, bodyPlanMutation, perkFlipChance,
                                          harmfulMutationChance, out mutated);
         }
 
-        // The child is born beside this animal, with a partner as its second parent or none for a clone.
-        bool TryGiveBirth(AnimalGenome childGenome, bool mutated, SeekFood partner)
+        // How many young this birth has: the litter size gene's whole part, plus one more with the fraction as the
+        // chance, so 1.3 is one child or, three times in ten, two.
+        int LitterCount()
         {
+            float size = Mathf.Clamp(litterSize, 1f, 4f);
+            int young = Mathf.FloorToInt(size);
+            return young + (Random.value < size - young ? 1 : 0);
+        }
+
+        // The young are born beside this animal, with a partner as their second parent or none for clones. Each gets
+        // its own genome and an equal share of the energy the birth hands over, which is the same amount whatever the
+        // litter size, so reproduction never creates energy. Nothing is paid when the first child has nowhere to be.
+        bool TryGiveBirth(SeekFood partner)
+        {
+            int young = LitterCount();
+            AnimalGenome firstGenome = CreateChildGenome(partner, out bool firstMutated);
             // The child's genome comes first, because whether it can swim decides where it can be born.
-            bool childSwims = waterMovement.CanSwimDeepWater(AnimalBodyPlan.Evaluate(childGenome).swimmingAbility);
-            if (!TryFindBirthPosition(childSwims, out Vector3 spawnPosition))
+            if (!TryFindBirthPosition(ChildCanSwimDeepWater(firstGenome), out Vector3 firstPosition))
             {
                 // Out in deep water a child that can't swim would have nowhere to be: try again a little later.
                 reproductionCooldownTimer = PostponedBirthDelay;
                 return false;
             }
 
-            float childEnergy;
+            float handedOver;
             if (partner == null)
             {
-                childEnergy = currentEnergy * 0.5f;
-                currentEnergy -= childEnergy;
+                handedOver = currentEnergy * 0.5f;
+                currentEnergy -= handedOver;
             }
             else
             {
-                childEnergy = PayForChild() + partner.PayForChild();
+                handedOver = PayForChild() + partner.PayForChild();
             }
             reproductionCooldownTimer = reproductionCooldown;
 
+            float energyEach = handedOver / young;
+            Bear(firstGenome, firstMutated, partner, firstPosition, energyEach);
+            for (int index = 1; index < young; index++)
+            {
+                AnimalGenome childGenome = CreateChildGenome(partner, out bool mutated);
+                if (!TryFindBirthPosition(ChildCanSwimDeepWater(childGenome), out Vector3 position))
+                {
+                    // A later child with nowhere to be born isn't born, and its share stays with this parent.
+                    currentEnergy += energyEach;
+                    continue;
+                }
+                Bear(childGenome, mutated, partner, position, energyEach);
+            }
+            return true;
+        }
+
+        bool ChildCanSwimDeepWater(AnimalGenome childGenome)
+        {
+            return waterMovement.CanSwimDeepWater(AnimalBodyPlan.Evaluate(childGenome).swimmingAbility);
+        }
+
+        void Bear(AnimalGenome childGenome, bool mutated, SeekFood partner, Vector3 spawnPosition, float childEnergy)
+        {
             GameObject child = Instantiate(gameObject, spawnPosition, transform.rotation);
             SeekFood childScript = child.GetComponent<SeekFood>();
             if (childScript == null)
             {
-                return true;
+                return;
             }
 
             childScript.currentEnergy = childEnergy;
             childScript.currentAge = 0f;
+            childScript.bornInSimulation = true;
             childScript.generation = Mathf.Max(generation, partner != null ? partner.generation : 0) + 1;
             childScript.firstParent = this;
             childScript.secondParent = partner;
@@ -2069,8 +2132,6 @@ namespace Boreal.Animals
             {
                 SpeciesManager.Instance.RecordReproduction(this, mutated, sexual: partner != null);
             }
-
-            return true;
         }
 
         // One parent's share of a child of two parents. Paying it also starts this parent's rest before breeding again.
@@ -2169,6 +2230,7 @@ namespace Boreal.Animals
             captured[AnimalGene.BreedingThreshold] = reproductionThreshold;
             captured[AnimalGene.Torpor] = thermalResponse.torpor;
             captured[AnimalGene.MutationRate] = mutationRate;
+            captured[AnimalGene.LitterSize] = litterSize;
             return captured;
         }
 
@@ -2192,6 +2254,7 @@ namespace Boreal.Animals
             reproductionThreshold = genome[AnimalGene.BreedingThreshold];
             thermalResponse.torpor = genome[AnimalGene.Torpor];
             mutationRate = genome[AnimalGene.MutationRate];
+            litterSize = genome[AnimalGene.LitterSize];
             harmfulMutations = genome.HarmfulMutations;
         }
 
@@ -2216,12 +2279,55 @@ namespace Boreal.Animals
             bodyBulk = Mathf.Clamp(bodyBulk, minimumBodyBulk, maximumBodyBulk);
             bodyHeight = Mathf.Clamp(bodyHeight, minimumBodyHeight, maximumBodyHeight);
             transform.localScale = Vector3.Scale(referenceLocalScale,
-                                                 new Vector3(bodyBulk, bodyHeight, bodyBulk));
+                                                 new Vector3(bodyBulk, bodyHeight, bodyBulk) * growth);
 
-            agent.radius = Mathf.Max(0.01f, referenceAgentRadius * bodyBulk);
-            agent.height = Mathf.Max(0.01f, referenceAgentHeight * bodyHeight);
+            agent.radius = Mathf.Max(0.01f, referenceAgentRadius * bodyBulk * growth);
+            agent.height = Mathf.Max(0.01f, referenceAgentHeight * bodyHeight * growth);
             // Legs stand the body up off the ground. The agent's offset is in the scaled local space.
             agent.baseOffset = referenceAgentBaseOffset * bodyHeight + LegLift / Mathf.Max(0.01f, transform.lossyScale.y);
+        }
+
+        // Newborns start at Newborn Size Fraction of their adult size, speed, vision and feeding reach and grow to full
+        // size by their maturity time, paying for the body mass they put on. Growing costs energy, so maturing sooner
+        // is a shorter but costlier youth rather than a free advantage. Founders and animals back from off-screen
+        // numbers are full-grown.
+        void BeginGrowth()
+        {
+            adultVisionRadius = visionRadius;
+            if (!bornInSimulation) return;
+
+            growth = GrowthAt(MaturityProgress);
+            lastBuiltGrowth = growth;
+            visionRadius = adultVisionRadius * growth;
+            ApplyBodyProportions();
+        }
+
+        float GrowthAt(float maturityProgress)
+        {
+            return Mathf.Lerp(Mathf.Clamp(newbornSizeFraction, 0.1f, 1f), 1f, Mathf.Clamp01(maturityProgress));
+        }
+
+        void UpdateGrowth()
+        {
+            float previous = growth;
+            growth = GrowthAt(MaturityProgress);
+            if (growth <= previous) return;
+
+            // Mass goes with the cube of size, so the cost falls as the body fills out: a share of the adult body's own
+            // meat, spread over the youth. An animal that can't pay starves like any other.
+            float massGained = growth * growth * growth - previous * previous * previous;
+            currentEnergy = Mathf.Max(0f, currentEnergy - growthEnergyCost * Mathf.Max(0f, carcassBodyEnergy) *
+                                                           AdultBodyMassFactor * massGained);
+            visionRadius = adultVisionRadius * growth;
+
+            // The body, its parts and its upkeep follow in steps of 5%, so a growing animal doesn't rebuild its mesh
+            // every frame.
+            if (growth - lastBuiltGrowth < 0.05f && growth < 1f) return;
+            lastBuiltGrowth = growth;
+            ApplyBodyProportions();
+            RefreshMovementSpeed();
+            RefreshMetabolicRate();
+            BuildBodyView();
         }
 
         void InitializeMetabolicReference()
@@ -2257,13 +2363,14 @@ namespace Boreal.Animals
             float bulkRatio = Mathf.Max(0.01f, bodyBulk) / referenceBodyBulk;
             float heightRatio = Mathf.Max(0.01f, bodyHeight) / referenceBodyHeight;
             // Body parts add their weight; their other advantages (speed, strength, vision) are charged below.
+            // A young animal is cheaper to run while it is small; growing is charged separately (UpdateGrowth).
             float relativeMassBurden = bulkRatio * bulkRatio *
                                        Mathf.Lerp(1f, heightRatio,
                                                   Mathf.Clamp01(heightMassContribution)) *
-                                       (1f + bodyEffects.partsMass);
+                                       (1f + bodyEffects.partsMass) * growth * growth * growth;
 
             float weightedTraitCost =
-                (Mathf.Max(0.01f, moveSpeed) / referenceMoveSpeed) * speedMetabolicWeight +
+                (Mathf.Max(0.01f, moveSpeed) * growth / referenceMoveSpeed) * speedMetabolicWeight +
                 (Mathf.Max(0.01f, strength) / referenceStrength) * strengthMetabolicWeight +
                 relativeMassBurden * bodyMassMetabolicWeight +
                 (Mathf.Max(0.01f, visionRadius) / referenceVisionRadius) * visionMetabolicWeight +
