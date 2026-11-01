@@ -21,6 +21,8 @@ parser.add_argument('--speed', default='50', help='Simulation speed once the fou
 parser.add_argument('--seasons', default='1', help='0 switches seasons off for a control run')
 parser.add_argument('--maps', default='1', help='0 skips the top-down maps at the end')
 parser.add_argument('--minutes', default='40', help='Wall-clock limit for the run')
+parser.add_argument('--experiment', help='Recorder experiment label; defaults to "soak <seed>"')
+parser.add_argument('--harmful-chance', help='Harmful mutation chance in per cent set on every animal, for item 46 comparisons')
 parser.add_argument('--output', type=Path, help='Defaults to Logs/SoakRuns/<seed>-<UTC timestamp>')
 parser.add_argument('--editor', type=Path, help='Unity executable; defaults to the project version in Unity Hub')
 parser.add_argument('--license-channel', help='Existing local Unity licensing channel, if needed')
@@ -64,6 +66,10 @@ command = [str(editor), '-batchmode', '-projectPath', str(project), '-logFile', 
            '-executeMethod', 'Boreal.Soak.Editor.SoakRun.Run', '-soakSeed', args.seed, '-soakYears', args.years,
            '-soakSpeed', args.speed, '-soakSeasons', args.seasons, '-soakMaps', args.maps,
            '-soakMinutes', args.minutes, '-soakOutput', str(output), '-soakRevision', revision]
+if args.experiment:
+    command += ['-soakExperiment', args.experiment]
+if args.harmful_chance is not None:
+    command += ['-soakHarmfulChance', args.harmful_chance]
 if channel:
     command += ['-licensingIpc', channel]
 print(f'Test copy: {project}\nOutput: {output}', flush=True)

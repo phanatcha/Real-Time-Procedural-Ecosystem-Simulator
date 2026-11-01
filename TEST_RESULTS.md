@@ -1,3 +1,21 @@
+# Latest verification — 1 November 2026
+
+**268 passed, 0 failed, 0 skipped** in Unity 6000.4.1f1 after juvenile growth, the litter size gene, the panel chart and the heatmap's season input ([NUnit XML](Logs/TestResults/20261101T151541325480Z/results.xml)). Two new Play Mode tests: a newborn starts at the newborn size fraction, is full-grown at maturity and paid for growing; a litter of three shares the birth energy equally.
+
+# Previous verification — 29 October 2026
+
+**266 passed, 0 failed, 0 skipped** in Unity 6000.4.1f1 after the high-priority backlog follow-up.
+
+- [NUnit XML](Logs/TestResults/20261029T125629673218Z/results.xml)
+- [Unity test log](Logs/TestResults/20261029T125629673218Z/editor.log)
+- Added vegetation hash distribution/full-seed/stream regressions and actual spruce placement coverage.
+- Added continuous breeding-wait episode tests and a live-animal CSV cross-check at 1× and 50×.
+- Added automatic-vs-explicit revision label coverage.
+- Full Terrain smoke run with maps: corrected soak duration recorded 400.014 s for a 400 s request (41 strictly increasing CSV observations), with recording closed before map capture. Evidence: `Logs/SoakRuns/2026-10-29-priority-review/`.
+- The captured tree distribution is scattered; the pre-existing black ground in batch rendering remains unresolved.
+
+The previous verification below is retained as history.
+
 # Unity test results — 28 October 2026
 
 Final run: **257 passed, 0 failed, 0 skipped** in Unity 6000.4.1f1. Tests ran from the command line against a separate project copy with graphics enabled. The original open editor was not controlled or closed.
