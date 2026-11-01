@@ -228,6 +228,141 @@ namespace Boreal.Animals.Tests
             Assert.Greater(walker.moveSpeed, capsule.moveSpeed, "Legs should make the animal faster.");
         }
 
+        [UnityTest]
+        public IEnumerator CeilingWaitsAndRecordedCountsMatchLiveAnimalsAtNormalAndFastSpeed()
+        {
+            EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
+            yield return new EnterPlayMode(ReloadsDomain);
+            BakeNavMesh(CreateGround(Vector3.zero, 60f));
+            SpeciesManager manager = StartSimulation();
+            manager.enableSafetyPause = false;
+            manager.populationCeiling = 1;
+            SeekFood animal = CreateAnimal(Vector3.zero, Genome(sexualDrive: 0f, maturityTime: 5f), 1f, 10f);
+            var recorder = manager.gameObject.AddComponent<SimulationRunRecorder>();
+            recorder.sourceRevision = "test";
+            recorder.sampleInterval = 0.1f;
+            yield return null;
+            yield return null;
+            string directory = recorder.OutputDirectory;
+            try
+            {
+                foreach (float speed in new[] { 1f, 50f })
+                {
+                    manager.simulationSpeed = speed;
+                    float started = Time.time;
+                    float deadline = Time.realtimeSinceStartup + 10f;
+                    while (Time.time < started + 1f && Time.realtimeSinceStartup < deadline) yield return null;
+                    Assert.GreaterOrEqual(Time.time - started, 1f);
+                }
+                Assert.AreEqual(1, manager.TotalPopulation);
+                Assert.AreEqual(0, Telemetry().reproductionEvents);
+                Assert.AreEqual(1, manager.BreedingWaitEpisodes);
+                Assert.Greater(manager.BreedingWaitSeconds, 1.5);
+                recorder.enabled = false;
+                string[] rows = System.IO.File.ReadAllLines(System.IO.Path.Combine(directory, "population.csv"));
+                string[] columns = rows[0].Split(',');
+                string[] final = rows[rows.Length - 1].Split(',');
+                Assert.AreEqual(manager.TotalPopulation.ToString(), final[System.Array.IndexOf(columns, "live")]);
+                Assert.AreEqual(manager.BreedingWaitEpisodes.ToString(), final[System.Array.IndexOf(columns, "breeding_wait_episodes")]);
+                Assert.AreEqual(manager.BreedingWaitSeconds, double.Parse(final[System.Array.IndexOf(columns, "breeding_wait_seconds")],
+                    System.Globalization.CultureInfo.InvariantCulture), 0.0001);
+                manager.ResetSimulation();
+                Assert.AreEqual(0, manager.BreedingWaitEpisodes);
+                Assert.AreEqual(0, manager.BreedingWaitSeconds);
+            }
+            finally
+            {
+                recorder.enabled = false;
+                if (directory != null && System.IO.Directory.Exists(directory)) System.IO.Directory.Delete(directory, true);
+            }
+        }
+
+        // Juvenile growth (item 47): a newborn starts at a fraction of its parent's size, speed, vision and reach, pays
+        // energy as it grows, and is full-grown once mature.
+        [UnityTest]
+        public IEnumerator NewbornsStartSmallAndGrowToFullSizeByMaturity()
+        {
+            EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
+            yield return new EnterPlayMode(ReloadsDomain);
+
+            BakeNavMesh(CreateGround(Vector3.zero, 60f));
+            StartSimulation();
+            SeekFood parent = CreateAnimal(Vector3.zero, Genome(sexualDrive: 0f, maturityTime: 5f), energyFraction: 1f, age: 10f);
+
+            float deadline = Time.time + 20f;
+            while (AnimalCount() < 2 && Time.time < deadline) yield return null;
+            yield return null;
+            SeekFood child = Child(parent);
+            Assert.IsNotNull(child, "No clone was born within 20 simulated seconds.");
+
+            float fraction = child.newbornSizeFraction;
+            Assert.That(child.Growth, Is.EqualTo(fraction).Within(0.05f), "A newborn starts at the newborn size fraction.");
+            Assert.That(child.transform.localScale.x, Is.EqualTo(parent.transform.localScale.x * fraction).Within(0.05f));
+            Assert.That(child.FeedingReach, Is.EqualTo(parent.FeedingReach * fraction).Within(0.3f));
+            Assert.That(child.visionRadius, Is.EqualTo(parent.visionRadius * fraction).Within(1f));
+            Assert.Less(child.GetComponent<NavMeshAgent>().speed, parent.GetComponent<NavMeshAgent>().speed * 0.6f,
+                        "A newborn should be much slower than its parent.");
+            float energyAtBirth = child.currentEnergy;
+
+            deadline = Time.time + 10f;
+            while (!child.IsMature && Time.time < deadline) yield return null;
+            yield return null;
+            Assert.IsTrue(child.IsMature, "The child did not mature within 10 simulated seconds.");
+            Assert.That(child.Growth, Is.EqualTo(1f).Within(0.001f));
+            Assert.That(child.transform.localScale.x, Is.EqualTo(parent.transform.localScale.x).Within(0.01f));
+            Assert.That(child.visionRadius, Is.EqualTo(parent.visionRadius).Within(0.5f));
+            // Growing cost more than upkeep alone: the adult body's meat times Growth Energy Cost, less the newborn mass.
+            float upkeep = child.CurrentEnergyDrainPerSecond * child.maturityTime;
+            float growthCost = child.growthEnergyCost * child.carcassBodyEnergy * child.AdultBodyMassFactor *
+                               (1f - fraction * fraction * fraction);
+            Assert.Greater(energyAtBirth - child.currentEnergy, upkeep + 0.5f * growthCost,
+                           "Growing up should have cost energy on top of upkeep.");
+        }
+
+        // Litter size (item 16): a gene of exactly 3 gives three young at every birth, sharing the energy one child
+        // would have had.
+        [UnityTest]
+        public IEnumerator LittersShareTheBirthEnergyBetweenTheYoung()
+        {
+            EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
+            yield return new EnterPlayMode(ReloadsDomain);
+
+            BakeNavMesh(CreateGround(Vector3.zero, 60f));
+            StartSimulation();
+            AnimalGenome genome = Genome(sexualDrive: 0f, maturityTime: 5f);
+            genome[AnimalGene.LitterSize] = 3f;
+            SeekFood parent = CreateAnimal(Vector3.zero, genome, energyFraction: 1f, age: 10f);
+
+            float deadline = Time.time + 20f;
+            while (AnimalCount() < 2 && Time.time < deadline) yield return null;
+            yield return null;
+            SeekFood[] animals = Object.FindObjectsByType<SeekFood>(FindObjectsSortMode.None);
+            Assert.AreEqual(4, animals.Length, "A litter of three should be born together.");
+            Assert.AreEqual(3, Telemetry().reproductionEvents, "Each child counts as a birth.");
+
+            float total = 0f;
+            float first = -1f;
+            foreach (SeekFood animal in animals)
+            {
+                if (animal == parent) continue;
+                Assert.AreEqual(3f, animal.litterSize, "The young inherit the litter size gene.");
+                if (first < 0f) first = animal.currentEnergy;
+                Assert.That(animal.currentEnergy, Is.EqualTo(first).Within(0.5f), "The young share the energy equally.");
+                total += animal.currentEnergy;
+            }
+            // The parent kept half of what it had; the litter got the other half between them.
+            Assert.That(total, Is.EqualTo(parent.currentEnergy).Within(4f));
+        }
+
+        static SeekFood Child(SeekFood parent)
+        {
+            foreach (SeekFood animal in Object.FindObjectsByType<SeekFood>(FindObjectsSortMode.None))
+            {
+                if (animal != parent && animal.bornInSimulation) return animal;
+            }
+            return null;
+        }
+
         [UnityTearDown]
         public IEnumerator LeavePlayMode()
         {

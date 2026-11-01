@@ -76,6 +76,8 @@ namespace Boreal.Animals
         public int fightResponses;
         public int fleeResponses;
         public int reproductionEvents;
+        public int breedingWaitEpisodes;
+        public double breedingWaitSeconds;
         public int mutatedOffspring;
         [Tooltip("Births with two parents. The rest are clones.")]
         public int sexualOffspring;
@@ -265,6 +267,8 @@ namespace Boreal.Animals
         public float WorldStartTime { get; private set; }
         // Time does not distinguish regenerations while paused, or two resets in one frame.
         public int WorldRevision { get; private set; }
+        public int BreedingWaitEpisodes { get; private set; }
+        public double BreedingWaitSeconds { get; private set; }
         // Refreshed at every species census. Founders are generation 0.
         public float AverageGeneration { get; private set; }
         public int HighestGeneration { get; private set; }
@@ -467,6 +471,8 @@ namespace Boreal.Animals
             censusTimer = 0f;
             WorldStartTime = Time.time;
             WorldRevision++;
+            BreedingWaitEpisodes = 0;
+            BreedingWaitSeconds = 0;
             AverageGeneration = 0f;
             HighestGeneration = 0;
         }
@@ -692,6 +698,15 @@ namespace Boreal.Animals
         }
 
         // sexual is true for a child of two parents, counted once, for the parent it was born beside.
+        public void RecordBreedingWait(SeekFood agent, bool entered, float seconds)
+        {
+            if (agent == null || !activeAgents.Contains(agent) || seconds <= 0f) return;
+            SpeciesTelemetryRecord record = GetOrCreateTelemetry(agent.speciesName);
+            if (entered) { BreedingWaitEpisodes++; record.breedingWaitEpisodes++; }
+            BreedingWaitSeconds += seconds;
+            record.breedingWaitSeconds += seconds;
+        }
+
         public void RecordReproduction(SeekFood parent, bool offspringMutated, bool sexual = false)
         {
             if (parent == null)

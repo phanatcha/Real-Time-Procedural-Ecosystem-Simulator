@@ -597,10 +597,18 @@ namespace Boreal.Animals
 
         // Ready to breed (mature, fed up to the reproduction threshold, rested since its last birth and below the
         // population ceiling), the animal clones itself or starts looking for a mate, as its sexual drive decides.
+        readonly BreedingWaitTracker breedingWait = new BreedingWaitTracker();
+
         void UpdateBreeding(float deltaTime)
         {
             bool atPopulationCeiling = SpeciesManager.Instance != null &&
                                        SpeciesManager.Instance.IsAtPopulationCeilingFor(inWater);
+            SpeciesManager manager = SpeciesManager.Instance;
+            bool eligible = IsMature && maxEnergy > 0f && reproductionCooldownTimer <= 0f &&
+                currentEnergy >= maxEnergy * (seekingMate ? minimumMateEnergyFraction : reproductionThreshold);
+            bool blocked = eligible && atPopulationCeiling;
+            bool entered = breedingWait.Observe(blocked, deltaTime, manager != null ? manager.WorldRevision : 0);
+            if (blocked && manager != null) manager.RecordBreedingWait(this, entered, deltaTime);
             if (seekingMate)
             {
                 UpdateMateSearch(deltaTime, atPopulationCeiling);

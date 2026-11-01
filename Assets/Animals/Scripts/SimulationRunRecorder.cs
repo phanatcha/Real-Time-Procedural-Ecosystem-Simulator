@@ -14,8 +14,15 @@ namespace Boreal.Animals
     public sealed class SimulationRunRecorder : MonoBehaviour
     {
         [Min(0.1f)] public float sampleInterval = 10f;
-        [Tooltip("Revision and dirty-state label for this build. Set before recording experiments.")]
+        [Tooltip("Explicit revision label, or unrecorded to resolve the Git commit automatically in the Editor.")]
         public string sourceRevision = "unrecorded";
+        // Supplied by the Editor assembly. Runtime builds can set sourceRevision explicitly.
+        public static Func<string> RevisionProvider { get; set; }
+        public static string ResolveRevision(string explicitRevision)
+        {
+            if (!string.IsNullOrWhiteSpace(explicitRevision) && explicitRevision != "unrecorded") return explicitRevision;
+            return RevisionProvider?.Invoke() ?? "unrecorded";
+        }
         public string experiment = "exploratory";
         public string OutputDirectory { get; private set; }
 
@@ -30,7 +37,7 @@ namespace Boreal.Animals
         [Serializable]
         sealed class RunMetadata
         {
-            public int schemaVersion = 1;
+            public int schemaVersion = 2;
             public string startedUtc, sourceRevision, experiment, unityVersion, worldSeed;
             public float sampleInterval;
             public bool offscreenEnabled;
@@ -80,7 +87,7 @@ namespace Boreal.Animals
             FoodSpawner food = FindAnyObjectByType<FoodSpawner>();
             RunMetadata metadata = new RunMetadata
             {
-                startedUtc = DateTime.UtcNow.ToString("O"), sourceRevision = sourceRevision,
+                startedUtc = DateTime.UtcNow.ToString("O"), sourceRevision = ResolveRevision(sourceRevision),
                 experiment = experiment, unityVersion = Application.unityVersion,
                 worldSeed = SeedManager.Instance != null ? SeedManager.Instance.SeedString : "unrecorded",
                 sampleInterval = (float)Interval, offscreenEnabled = manager.OffscreenPopulation != null,
@@ -90,8 +97,8 @@ namespace Boreal.Animals
                 representativeAnimalSettings = representative != null ? JsonUtility.ToJson(representative) : ""
             };
             File.WriteAllText(Path.Combine(OutputDirectory, "metadata.json"), JsonUtility.ToJson(metadata, true));
-            population = Open("population.csv", "time,live,offscreen,species_alive,births,cloned_births,sexual_births,deaths,starvation,predation,old_age,cold,heat,venom,other,land_ceiling,sea_ceiling,requested_speed,achieved_speed,season,season_strength,offscreen_enabled");
-            species = Open("species.csv", "time,species,parent,origin,extinction,live,offscreen,births,sexual_births,deaths");
+            population = Open("population.csv", "time,live,offscreen,species_alive,births,cloned_births,sexual_births,deaths,starvation,predation,old_age,cold,heat,venom,other,land_ceiling,sea_ceiling,requested_speed,achieved_speed,season,season_strength,offscreen_enabled,breeding_wait_episodes,breeding_wait_seconds");
+            species = Open("species.csv", "time,species,parent,origin,extinction,live,offscreen,births,sexual_births,deaths,breeding_wait_episodes,breeding_wait_seconds");
             traits = Open("traits.csv", "time,species,trait,live_sample_count,mean,standard_deviation,minimum,maximum");
             Debug.Log("Recording simulation to " + OutputDirectory, this);
         }
@@ -113,7 +120,8 @@ namespace Boreal.Animals
                 total.heatDeaths, total.venomDeaths, total.OtherDeaths, manager.IsAtPopulationCeiling,
                 manager.IsAtSeaPopulationCeiling, manager.simulationSpeed, manager.AchievedSimulationSpeed,
                 SeasonClock.Active != null ? SeasonClock.Active.SeasonName : "None",
-                SeasonClock.IsRunning ? SeasonClock.Active.EffectiveStrength : 0f, manager.OffscreenPopulation != null);
+                SeasonClock.IsRunning ? SeasonClock.Active.EffectiveStrength : 0f, manager.OffscreenPopulation != null,
+                manager.BreedingWaitEpisodes, manager.BreedingWaitSeconds);
 
             var groups = new Dictionary<string, List<AnimalGenome>>();
             foreach (SeekFood animal in manager.ActiveAgents)
@@ -128,7 +136,8 @@ namespace Boreal.Animals
                 manager.SpeciesPopulation.TryGetValue(record.speciesName, out int live);
                 Row(species, time, record.speciesName, record.parentSpeciesName, record.originTime,
                     record.extinctionTime, live, manager.OffscreenPopulation?.CountOffscreen(record.speciesName) ?? 0,
-                    record.reproductionEvents, record.sexualOffspring, record.deaths);
+                    record.reproductionEvents, record.sexualOffspring, record.deaths,
+                    record.breedingWaitEpisodes, record.breedingWaitSeconds);
                 groups.TryGetValue(record.speciesName, out var genomes);
                 // Empty populations have blank trait values, not misleading zero-valued genes. Their history remains.
                 for (int gene = 0; gene < AnimalGenome.GeneCount; gene++)

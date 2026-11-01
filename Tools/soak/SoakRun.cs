@@ -99,7 +99,8 @@ namespace Boreal.Soak.Editor
             float yearsSinceStart = clock.Year - 1 + clock.YearProgress;
             SeekFood[] animals = Object.FindObjectsByType<SeekFood>(FindObjectsSortMode.None);
             SpeciesManager manager = SpeciesManager.Instance;
-            float simulated = yearsSinceStart * clock.yearLength;
+            // YearProgress includes the starting season offset; experiment duration must not.
+            float simulated = manager != null ? Mathf.Max(0f, Time.time - manager.WorldStartTime) : 0f;
 
             if (simulated - SessionState.GetFloat(Key + "LastStatus", -1f) >= 50f)
             {
@@ -129,12 +130,16 @@ namespace Boreal.Soak.Editor
                     ShotOverAnimals(animals, Path.Combine(Out, label + "-animals.png"));
                 }
 
-                if (yearsSinceStart >= SessionState.GetFloat(Key + "Years", 5f) || animals.Length == 0 && SessionState.GetBool(Key + "Fast", false))
+                if (simulated >= SessionState.GetFloat(Key + "Years", 5f) * clock.yearLength || animals.Length == 0 && SessionState.GetBool(Key + "Fast", false))
                 {
                     Debug.Log(animals.Length == 0 ? "Soak: every animal has died." : "Soak: reached the target years.");
                     SimulationRunRecorder recorder = Object.FindAnyObjectByType<SimulationRunRecorder>();
-                    if (recorder != null) SessionState.SetString(Key + "Recording", recorder.OutputDirectory ?? "");
-                    if (manager != null) manager.simulationSpeed = 1f;
+                    if (recorder != null)
+                    {
+                        SessionState.SetString(Key + "Recording", recorder.OutputDirectory ?? "");
+                        recorder.enabled = false; // Final observation before maps; render time is not experiment time.
+                    }
+                    if (manager != null) { manager.simulationSpeed = 0f; Time.timeScale = 0f; }
                     stage = SessionState.GetBool(Key + "Maps", true) ? 1 : 3;
                     SessionState.SetInt(Key + "Stage", stage);
                     if (stage == 1) RequestMap("");
