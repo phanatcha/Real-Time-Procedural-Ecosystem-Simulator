@@ -59,6 +59,9 @@ namespace Boreal.Animals
         [Tooltip("Simulated seconds for an eaten plant to regrow at the ideal growth temperature. Longer " +
                  "regrowth means less food per area, so fewer animals can live there.")]
         [Min(1f)] public float baseRegrowSeconds = 90f;
+        [Tooltip("Multiplies regrowth everywhere, on top of temperature and the season. God tools lower it for a " +
+                 "drought (item 31); a new world puts it back to 1.")]
+        [Min(0f)] public float growthMultiplier = 1f;
         [Tooltip("Sites too cold to regrow faster than this fraction of the ideal rate get no plant.")]
         [Range(0.01f, 1f)] public float minimumGrowthRate = 0.05f;
 
@@ -329,7 +332,7 @@ namespace Boreal.Animals
                     site.plant = null;
                     if (site.regrowProgress < 1f)
                     {
-                        site.regrowProgress += deltaTime * site.seasonalGrowth / site.regrowSeconds;
+                        site.regrowProgress += deltaTime * site.seasonalGrowth * growthMultiplier / site.regrowSeconds;
                         if (site.regrowProgress < 1f) continue;
                     }
 
@@ -474,6 +477,27 @@ namespace Boreal.Animals
             loadedTileCount++;
             plantSiteCount += tile.sites.Count;
             tile.shown = Time.unscaledTime - tile.lastNeededTime <= unloadDelay;
+        }
+
+        // Puts plants down on walkable ground within radius of centre, for god tools (item 31). They are eaten like
+        // any plant but belong to no site, so nothing regrows where they stood. Returns how many were placed.
+        public int DropPlants(Vector3 centre, float radius, int count)
+        {
+            if (foodPrefab == null || terrainWorld == null || spawnedFoodParent == null) return 0;
+            FoodItem profile = foodPrefab.GetComponent<FoodItem>();
+            float nutrition = profile != null ? profile.nutritionValue : baseNutrition;
+            int placed = 0;
+            for (int attempt = 0; attempt < count * 4 && placed < count; attempt++)
+            {
+                Vector2 offset = Random.insideUnitCircle * radius;
+                Vector3 candidate = centre + new Vector3(offset.x, 0f, offset.y);
+                if (!terrainWorld.TryFindWalkableGround(candidate, 10f, out Vector3 ground)) continue;
+                GameObject plantObject = Instantiate(foodPrefab, ground + Vector3.up, Quaternion.identity, spawnedFoodParent);
+                if (!plantObject.activeSelf) plantObject.SetActive(true);
+                plantObject.GetComponent<FoodItem>().Configure(FoodType.Plant, nutrition);
+                placed++;
+            }
+            return placed;
         }
 
         void CreatePlant(PlantSite site)

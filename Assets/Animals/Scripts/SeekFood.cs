@@ -1949,6 +1949,12 @@ namespace Boreal.Animals
             }
         }
 
+        // Kills the animal outright, for god tools such as a mass extinction. It leaves a carcass like any death.
+        public void Kill(AgentDeathCause cause)
+        {
+            if (!isDying) Die(cause, null);
+        }
+
         public void TakeDamage(float amount, SeekFood attacker = null)
         {
             if (isDying || amount <= 0f)
@@ -2049,8 +2055,10 @@ namespace Boreal.Animals
         AnimalGenome CreateChildGenome(SeekFood partner, out bool mutated)
         {
             AnimalGenome inherited = partner == null ? genome : AnimalGenome.Recombine(genome, partner.genome);
-            return inherited.CreateChild(mutationChance, mutationMagnitude, bodyPlanMutation, perkFlipChance,
-                                         harmfulMutationChance, out mutated);
+            // God tools can raise or lower every animal's mutation chances for a while (SpeciesManager.mutationMultiplier).
+            float boost = SpeciesManager.Instance != null ? Mathf.Max(0f, SpeciesManager.Instance.mutationMultiplier) : 1f;
+            return inherited.CreateChild(mutationChance * boost, mutationMagnitude, bodyPlanMutation,
+                                         perkFlipChance * boost, harmfulMutationChance * boost, out mutated);
         }
 
         // How many young this birth has: the litter size gene's whole part, plus one more with the fraction as the

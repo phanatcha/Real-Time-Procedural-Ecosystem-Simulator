@@ -27,7 +27,8 @@ namespace Boreal.Animals
         public string OutputDirectory { get; private set; }
 
         SpeciesManager manager;
-        StreamWriter population, species, traits;
+        StreamWriter population, species, traits, events;
+        int eventsWritten;
         float worldStart;
         int worldRevision = -1;
         double lastSample = -1;
@@ -100,6 +101,8 @@ namespace Boreal.Animals
             population = Open("population.csv", "time,live,offscreen,species_alive,births,cloned_births,sexual_births,deaths,starvation,predation,old_age,cold,heat,venom,other,land_ceiling,sea_ceiling,requested_speed,achieved_speed,season,season_strength,offscreen_enabled,breeding_wait_episodes,breeding_wait_seconds");
             species = Open("species.csv", "time,species,parent,origin,extinction,live,offscreen,births,sexual_births,deaths,breeding_wait_episodes,breeding_wait_seconds");
             traits = Open("traits.csv", "time,species,trait,live_sample_count,mean,standard_deviation,minimum,maximum");
+            events = Open("events.csv", "time,event,detail");
+            eventsWritten = 0;
             Debug.Log("Recording simulation to " + OutputDirectory, this);
         }
 
@@ -152,7 +155,14 @@ namespace Boreal.Animals
                     WriteTrait(time, record.speciesName, "Perk_" + p, genomes, g => g.HasPerk(p) ? 1 : 0);
                 }
             }
-            population.Flush(); species.Flush(); traits.Flush();
+            // Outside interventions (god tools) since the last sample, with the time they happened at.
+            IReadOnlyList<SpeciesManager.SimulationEvent> happened = manager.Events;
+            for (; eventsWritten < happened.Count; eventsWritten++)
+            {
+                SpeciesManager.SimulationEvent happening = happened[eventsWritten];
+                Row(events, happening.time, happening.kind, happening.detail);
+            }
+            population.Flush(); species.Flush(); traits.Flush(); events.Flush();
             lastSample = time;
         }
 
@@ -201,7 +211,11 @@ namespace Boreal.Animals
             finally
             {
                 try { species?.Dispose(); }
-                finally { try { traits?.Dispose(); } finally { population = species = traits = null; } }
+                finally
+                {
+                    try { traits?.Dispose(); }
+                    finally { try { events?.Dispose(); } finally { population = species = traits = events = null; } }
+                }
             }
         }
     }

@@ -65,6 +65,7 @@ namespace Boreal.Soak.Editor
             recorder.sourceRevision = Arg("soakRevision", "unrecorded");
             recorder.experiment = Arg("soakExperiment", "soak " + seed);
             SessionState.SetFloat(Key + "HarmfulChance", float.Parse(Arg("soakHarmfulChance", "-1"), CultureInfo.InvariantCulture));
+            SessionState.SetString(Key + "Events", Arg("soakEvents", ""));
 
             Debug.Log($"Soak: starting {seed} for {SessionState.GetFloat(Key + "Years", 0f)} years, output {output}");
             EditorApplication.update += Tick;
@@ -126,6 +127,11 @@ namespace Boreal.Soak.Editor
                     Debug.Log($"Soak: founder {founder.name} at x {p.x:0} z {p.z:0} (height {p.y:0})");
                 }
                 if (harmfulChance >= 0f) Debug.Log($"Soak: harmful mutation chance set to {harmfulChance}% on the founders");
+                // God tools scheduled for the run, e.g. "drought@800:200x0.2,extinction@1200x0.5" (GodTools.TryParse).
+                string events = SessionState.GetString(Key + "Events", "");
+                GodTools tools = Object.FindAnyObjectByType<GodTools>();
+                if (!string.IsNullOrEmpty(events) && tools != null)
+                    Debug.Log($"Soak: scheduled {tools.ScheduleAll(events)} god tool interventions from \"{events}\"");
                 Debug.Log($"Soak: {animals.Length} founders at t={simulated:0} s, speeding up to {manager.simulationSpeed}x");
             }
 

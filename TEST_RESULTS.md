@@ -1,4 +1,8 @@
-# Latest verification — 1 November 2026
+# Latest verification — 1 November 2026, second round
+
+**277 passed, 0 failed, 0 skipped** in Unity 6000.4.1f1 after the founder start, the cold cost, the 5% mutation cost, the inspector, the species tree and the god tools ([NUnit XML](Logs/TestResults/20261101T160428677684Z/results.xml)). New: `GodToolsTests` for the schedule parser; the off-screen population tests expect the new cold cost.
+
+# Earlier on 1 November 2026
 
 **268 passed, 0 failed, 0 skipped** in Unity 6000.4.1f1 after juvenile growth, the litter size gene, the panel chart and the heatmap's season input ([NUnit XML](Logs/TestResults/20261101T151541325480Z/results.xml)). Two new Play Mode tests: a newborn starts at the newborn size fraction, is full-grown at maturity and paid for growing; a litter of three shares the birth energy equally.
 

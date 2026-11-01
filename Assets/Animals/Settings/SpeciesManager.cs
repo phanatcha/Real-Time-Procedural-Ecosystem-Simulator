@@ -271,6 +271,30 @@ namespace Boreal.Animals
         public int WorldRevision { get; private set; }
         public int BreedingWaitEpisodes { get; private set; }
         public double BreedingWaitSeconds { get; private set; }
+
+        [Header("God Tools")]
+        [Tooltip("Multiplies every mutation chance at birth for all animals, on top of each animal's mutation rate " +
+                 "gene. God tools raise it for a while (item 31); a new world puts it back to 1.")]
+        [Min(0f)] public float mutationMultiplier = 1f;
+
+        // Something done to the world from outside the simulation, such as a god tool, with the simulated time it
+        // happened at. The run recorder saves them, so experiments can be repeated.
+        public struct SimulationEvent
+        {
+            public float time;
+            public string kind;
+            public string detail;
+        }
+
+        readonly List<SimulationEvent> events = new List<SimulationEvent>();
+        public IReadOnlyList<SimulationEvent> Events => events;
+
+        public void RecordEvent(string kind, string detail)
+        {
+            float time = Mathf.Max(0f, Time.time - WorldStartTime);
+            events.Add(new SimulationEvent { time = time, kind = kind, detail = detail });
+            Debug.Log($"Event at {time:0} s: {kind}, {detail}", this);
+        }
         // Refreshed at every species census. Founders are generation 0.
         public float AverageGeneration { get; private set; }
         public int HighestGeneration { get; private set; }
@@ -475,6 +499,8 @@ namespace Boreal.Animals
             WorldRevision++;
             BreedingWaitEpisodes = 0;
             BreedingWaitSeconds = 0;
+            events.Clear();
+            mutationMultiplier = 1f;
             AverageGeneration = 0f;
             HighestGeneration = 0;
         }
