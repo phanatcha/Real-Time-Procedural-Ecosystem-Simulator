@@ -218,7 +218,7 @@ namespace Boreal.Animals
 
         static int PerkBit(AnimalPerk perk) => 1 << (int)perk;
 
-        // How much the harmful mutations multiply energy use: 1 plus the cost of each, e.g. 1.1 for five at 0.02.
+        // How much the harmful mutations multiply energy use: 1 plus the cost of each, e.g. 1.25 for five at 0.05.
         public float EnergyUseMultiplier(float costPerHarmfulMutation) =>
             1f + harmfulMutations * Mathf.Max(0f, costPerHarmfulMutation);
 

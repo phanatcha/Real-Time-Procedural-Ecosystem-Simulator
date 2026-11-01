@@ -215,8 +215,8 @@ namespace Boreal.Animals
                  "keeps all of its parent's; a child of two parents inherits each of each parent's with a 50% chance, " +
                  "so sexual lineages can shed them while cloning lineages only gain them (Muller's ratchet).")]
         [Range(0f, 100f)] public float harmfulMutationChance = 10f;
-        [Tooltip("How much each harmful mutation adds to energy use: 0.02 adds 2% per mutation.")]
-        [Min(0f)] public float harmfulMutationEnergyCost = 0.02f;
+        [Tooltip("How much each harmful mutation adds to energy use: 0.05 adds 5% per mutation, so five cost 25%. At 0.02, twelve five-year runs showed no selection against the load at all.")]
+        [Min(0f)] public float harmfulMutationEnergyCost = 0.05f;
         [SerializeField, Tooltip("Harmful mutations this animal carries, for reference.")]
         private int harmfulMutations;
 
