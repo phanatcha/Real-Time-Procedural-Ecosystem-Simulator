@@ -277,6 +277,12 @@ namespace Boreal.Animals
         public float SnowSpeedMultiplier => snowSpeedMultiplier;
         public float CurrentAge => currentAge;
         public int Generation => generation;
+        public SeekFood FirstParent => firstParent;
+        public SeekFood SecondParent => secondParent;
+        // What the animal is doing now, for the inspector.
+        public string Activity => currentState.ToString();
+        public string BodyPlanDescription => bodyPlan;
+        public string PerkDescription => perks;
         public int HarmfulMutations => harmfulMutations;
         public bool HasPerk(AnimalPerk perk) => genome != null && genome.IsValid && genome.HasPerk(perk);
         public bool CanEatSpoiledFood => perkEffects.canEatSpoiledFood;
