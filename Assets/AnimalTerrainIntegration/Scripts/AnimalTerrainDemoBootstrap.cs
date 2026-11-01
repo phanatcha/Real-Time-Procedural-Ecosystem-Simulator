@@ -22,6 +22,11 @@ namespace Boreal.AnimalTerrainIntegration
         [Tooltip("Founders start within this distance of the simulation focus, then spread across the island. " +
                  "Plants load around the camera and the animals; tune them on the Food Spawner component.")]
         [Min(10f)] public float animalSpawnRadius = 120f;
+        [Tooltip("How far around the simulation focus to look for the best place to start, in metres. Candidate " +
+                 "centres are scored by the walkable land and plant food within the spawn radius, by the food " +
+                 "spawner's own rules, so the founders start on real habitat rather than a shore or a strait. " +
+                 "The camera moves with them. 0 starts exactly at the focus.")]
+        [Min(0f)] public float startSearchRadius = 600f;
         public bool createWorldBorders = true;
 
         [Header("Founder Species")]
@@ -47,6 +52,8 @@ namespace Boreal.AnimalTerrainIntegration
         Material foodMaterial;
         Coroutine ecosystemBuild;
         bool hasBuiltEcosystem;
+        // Where the founders are placed: the simulation focus, or the best spot found near it.
+        Vector3 founderCentre;
 
         void Awake()
         {
@@ -182,7 +189,7 @@ namespace Boreal.AnimalTerrainIntegration
             yield return null;
 
             // Only the founders' area is built up front; afterwards navigation grows with the animals.
-            Vector3 center = simulationFocus.position;
+            Vector3 center = ChooseFounderStart();
             float founderAreaRadius = animalSpawnRadius * 2f;
             habitatNavigation.RequestArea(center, founderAreaRadius);
             float deadline = Time.realtimeSinceStartup + 30f;
@@ -256,7 +263,7 @@ namespace Boreal.AnimalTerrainIntegration
                     if (direction.sqrMagnitude < 0.0001f) direction = Vector2.right;
                     offset = direction.normalized * Random.Range(animalSpawnRadius, fallbackRadius);
                 }
-                Vector3 candidate = simulationFocus.position + new Vector3(offset.x, 0f, offset.y);
+                Vector3 candidate = founderCentre + new Vector3(offset.x, 0f, offset.y);
                 if (!habitatNavigation.TryProjectToNavigation(candidate, 40f, out Vector3 position)) continue;
 
                 if (singleFounderSpecies)
@@ -275,9 +282,75 @@ namespace Boreal.AnimalTerrainIntegration
             if (created < founderAnimalCount)
             {
                 Debug.LogWarning($"Placed {created} of {founderAnimalCount} requested founders. " +
-                                 habitatNavigation.DescribeArea(simulationFocus.position, fallbackRadius), this);
+                                 habitatNavigation.DescribeArea(founderCentre, fallbackRadius), this);
             }
             return created;
+        }
+
+        // The best place to start within Start Search Radius of the simulation focus: the candidate centre whose
+        // spawn radius holds the most walkable land and plant food, with a small preference for staying near the
+        // focus. On FOREST-001 the focus sits in a strait, which put the founders on two islands' shore lowlands.
+        Vector3 ChooseFounderStart()
+        {
+            Vector3 focus = simulationFocus.position;
+            founderCentre = focus;
+            float search = Mathf.Max(0f, startSearchRadius);
+            if (search <= 0f || terrainWorld == null || foodSpawner == null) return focus;
+
+            float spacing = Mathf.Max(20f, animalSpawnRadius * 0.4f);
+            int steps = Mathf.CeilToInt(search / spacing);
+            float bestScore = ScoreStart(focus);
+            Vector3 best = focus;
+            for (int gx = -steps; gx <= steps; gx++)
+            {
+                for (int gz = -steps; gz <= steps; gz++)
+                {
+                    if (gx == 0 && gz == 0) continue;
+                    Vector3 candidate = focus + new Vector3(gx * spacing, 0f, gz * spacing);
+                    float distance = new Vector2(gx, gz).magnitude * spacing;
+                    if (distance > search) continue;
+                    // Nearer wins a tie, so good ground beside the focus beats slightly better ground far away.
+                    float score = ScoreStart(candidate) * (1f - 0.25f * distance / search);
+                    if (score <= bestScore) continue;
+                    bestScore = score;
+                    best = candidate;
+                }
+            }
+
+            if (best != focus)
+            {
+                Debug.Log($"Founders start {Vector3.Distance(best, focus):0} m from the simulation focus, at " +
+                          $"x {best.x:0} z {best.z:0}, where the spawn radius holds more walkable land and plant food.",
+                          this);
+                // The camera keeps its offset from the focus, so the founders are in view.
+                Camera camera = Camera.main;
+                if (camera != null) camera.transform.position += best - focus;
+            }
+            founderCentre = best;
+            return best;
+        }
+
+        // Walkable land within the spawn radius of a centre, and the plant food it grows per minute by the food
+        // spawner's own rules, sampled on three rings. Each walkable point counts a little even where nothing grows,
+        // so the founders can at least move.
+        float ScoreStart(Vector3 centre)
+        {
+            const int Rings = 3;
+            const int PointsPerRing = 8;
+            float total = 0f;
+            for (int ring = 0; ring < Rings; ring++)
+            {
+                float radius = animalSpawnRadius * (ring + 0.5f) / Rings;
+                for (int index = 0; index < PointsPerRing; index++)
+                {
+                    float angle = (index + 0.5f * ring) * Mathf.PI * 2f / PointsPerRing;
+                    Vector3 point = centre + new Vector3(Mathf.Cos(angle) * radius, 0f, Mathf.Sin(angle) * radius);
+                    if (!terrainWorld.TryGetWalkableSample(point, out EnvironmentSample sample)) continue;
+                    if (!TemperatureSystem.TryGetClimateTemperatureAt(point, out float celsius)) celsius = 2f;
+                    total += 0.2f + foodSpawner.EstimateNutritionPerMinute(sample, celsius);
+                }
+            }
+            return total;
         }
 
         // The founder is a plain "cell": a capsule lying on the ground with no body parts. Legs, necks, horns
