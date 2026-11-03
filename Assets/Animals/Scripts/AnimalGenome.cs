@@ -32,7 +32,14 @@ namespace Boreal.Animals
         MutationRate,
         // 1 to 4: how many young a birth has on average. The energy a birth hands over is split between them, so a
         // bigger litter means weaker young (see SeekFood.TryGiveBirth).
-        LitterSize
+        LitterSize,
+        // 0 to 1, starting at 0.5 in founders: three markers that are inherited and mutate like any gene but do
+        // nothing and don't count towards genetic distance (item 56). They wander by chance alone, so how far they
+        // move in a run is how far any gene could move by luck; a real gene has been selected only when it moves well
+        // outside their spread (traits.csv).
+        MarkerA,
+        MarkerB,
+        MarkerC
     }
 
     // Where a body part can grow on the capsule body. Paired sites grow the same part mirrored left and right.
@@ -64,7 +71,10 @@ namespace Boreal.Animals
         Venom,
         Camouflage,
         Regeneration,
-        ScavengerGut
+        ScavengerGut,
+        // Does nothing and doesn't count towards genetic distance: the perks' yardstick (item 56). With the same 1%
+        // flip each way, chance alone takes it to about 9% of animals after 10 generations and 17% after 20.
+        Marker
     }
 
     // How the body plan changes at birth. Chances are percentages per birth at a mutation rate of 1; the mutation
@@ -171,7 +181,7 @@ namespace Boreal.Animals
         // Declared after GeneCount because static fields initialise in order.
         static readonly float[] DistanceScales = BuildDistanceScales();
         static readonly float TotalDistanceWeight = SumDistanceWeights() + BodySiteDistanceWeight * SiteCount +
-                                                    PerkDistanceWeight * PerkCount;
+                                                    PerkDistanceWeight * CountedPerks();
 
         // The parts each site can grow, indexed by BodySite.
         static readonly BodyPartType[][] AllowedParts =
@@ -276,6 +286,9 @@ namespace Boreal.Animals
             AnimalGene.MutationRate => new AnimalGeneDefinition(0.25f, 4f, GeneMutationStyle.Proportional, 0.01f),
             // Additive, so a mutation moves it by a tenth of a child at the default magnitude.
             AnimalGene.LitterSize => new AnimalGeneDefinition(1f, 4f, GeneMutationStyle.Additive, 1f),
+            // Markers step like the other 0-1 additive genes and weigh nothing towards genetic distance.
+            AnimalGene.MarkerA or AnimalGene.MarkerB or AnimalGene.MarkerC =>
+                new AnimalGeneDefinition(0f, 1f, GeneMutationStyle.Additive, 1f, 0f),
             _ => throw new System.ArgumentOutOfRangeException(nameof(gene), gene, null)
         };
 
@@ -539,10 +552,24 @@ namespace Boreal.Animals
 
             for (int perk = 0; perk < PerkCount; perk++)
             {
-                if (first.HasPerk((AnimalPerk)perk) != second.HasPerk((AnimalPerk)perk)) total += PerkDistanceWeight;
+                if (CountsTowardsDistance((AnimalPerk)perk) &&
+                    first.HasPerk((AnimalPerk)perk) != second.HasPerk((AnimalPerk)perk)) total += PerkDistanceWeight;
             }
 
             return total / TotalDistanceWeight;
+        }
+
+        // Every perk but the marker, which is only a yardstick.
+        public static bool CountsTowardsDistance(AnimalPerk perk) => perk != AnimalPerk.Marker;
+
+        static int CountedPerks()
+        {
+            int counted = 0;
+            for (int perk = 0; perk < PerkCount; perk++)
+            {
+                if (CountsTowardsDistance((AnimalPerk)perk)) counted++;
+            }
+            return counted;
         }
 
         // 0 to 1. The same part differs by its size difference; different parts differ by their sizes combined,

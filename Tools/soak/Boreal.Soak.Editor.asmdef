@@ -3,7 +3,8 @@
     "rootNamespace": "Boreal.Soak.Editor",
     "references": [
         "Boreal.Animals",
-        "Boreal.Core"
+        "Boreal.Core",
+        "Boreal.TerrainGeneration"
     ],
     "includePlatforms": [
         "Editor"

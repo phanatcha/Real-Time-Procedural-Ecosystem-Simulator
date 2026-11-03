@@ -12,6 +12,7 @@ namespace Boreal.Animals
     //   flees; costs energy
     // - regeneration: slowly heals while the animal has energy; costs energy
     // - scavenger gut: can eat spoiled carcasses, which nothing else can; digests plants worse
+    // - marker: nothing at all; a yardstick for how far chance alone spreads a perk (item 56)
     // Body plates already cover armour.
     public readonly struct PerkEffects
     {
@@ -91,6 +92,7 @@ namespace Boreal.Animals
             AnimalPerk.Camouflage => "camouflage",
             AnimalPerk.Regeneration => "regeneration",
             AnimalPerk.ScavengerGut => "scavenger gut",
+            AnimalPerk.Marker => "marker (no effect)",
             _ => perk.ToString()
         };
 

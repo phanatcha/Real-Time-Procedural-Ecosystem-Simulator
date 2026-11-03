@@ -2563,6 +2563,10 @@ namespace Boreal.Animals
             captured[AnimalGene.Torpor] = thermalResponse.torpor;
             captured[AnimalGene.MutationRate] = mutationRate;
             captured[AnimalGene.LitterSize] = litterSize;
+            // Founders start the markers in the middle, so chance can move them either way.
+            captured[AnimalGene.MarkerA] = 0.5f;
+            captured[AnimalGene.MarkerB] = 0.5f;
+            captured[AnimalGene.MarkerC] = 0.5f;
             return captured;
         }
 

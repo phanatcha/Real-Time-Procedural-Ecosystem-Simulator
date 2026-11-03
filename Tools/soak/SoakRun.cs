@@ -71,6 +71,7 @@ namespace Boreal.Soak.Editor
             SessionState.SetFloat(Key + "HarmfulChance", float.Parse(Arg("soakHarmfulChance", "-1"), CultureInfo.InvariantCulture));
             SessionState.SetString(Key + "Events", Arg("soakEvents", ""));
             SessionState.SetBool(Key + "Thirst", Arg("soakThirst", "1") == "1");
+            SessionState.SetBool(Key + "DayNight", Arg("soakDayNight", "1") == "1");
 
             // The founders' start search (item 9) lives in AnimalTerrainIntegration, which this assembly can't
             // reference, so it is set by its serialized name.
@@ -118,6 +119,12 @@ namespace Boreal.Soak.Editor
                 Debug.Log("Soak: seasons switched off for this run");
             }
 
+            if (!SessionState.GetBool(Key + "DayNight", true) && DayClock.Active != null && DayClock.Active.dayAndNight)
+            {
+                DayClock.Active.dayAndNight = false;
+                Debug.Log("Soak: day and night switched off for this run");
+            }
+
             float yearsSinceStart = clock.Year - 1 + clock.YearProgress;
             SeekFood[] animals = Object.FindObjectsByType<SeekFood>(FindObjectsSortMode.None);
             SpeciesManager manager = SpeciesManager.Instance;
@@ -153,7 +160,8 @@ namespace Boreal.Soak.Editor
                     if (animal.IsThirsty) thirsty++;
                 }
                 FoodSpawner food = Object.FindAnyObjectByType<FoodSpawner>();
-                Debug.Log($"Soak: t={simulated:0} s year {clock.Year} {clock.SeasonName}, animals {animals.Length}, " +
+                Debug.Log($"Soak: t={simulated:0} s year {clock.Year} {clock.SeasonName}, " +
+                          $"day {DayClock.Current.day} {DayClock.ClockTime(DayClock.Current.timeOfDay)}, animals {animals.Length}, " +
                           $"species {(manager != null ? manager.SpeciesAliveCount : -1)}, " +
                           $"achieved speed {(manager != null ? manager.AchievedSimulationSpeed : 0f):0.0}x, " +
                           $"in water {inWater}, swimmers {swimmers}, thirsty {thirsty}, drinking {drinking}, " +
@@ -201,13 +209,30 @@ namespace Boreal.Soak.Editor
                     ShotOverAnimals(animals, Path.Combine(Out, label + "-animals.png"));
                 }
 
-                // And from the camera at each season's height: full autumn colour, deepest snow and ice.
+                // And from the camera at each season's height (full autumn colour, deepest snow and ice), at the next
+                // noon and the next midnight, so seasons and nights compare shot to shot. Without day and night, at once.
                 int height = Mathf.FloorToInt(yearsSinceStart * 4f);
                 if (height != SessionState.GetInt(Key + "LastHeight", -1))
                 {
                     SessionState.SetInt(Key + "LastHeight", height);
                     string season = new[] { "spring", "summer", "fall", "winter" }[height % 4];
-                    Shot(Camera.main, Path.Combine(Out, $"y{clock.Year}-{height:00}-height-of-{season}-camera.png"));
+                    SessionState.SetString(Key + "HeightLabel", $"y{clock.Year}-{height:00}-height-of-{season}");
+                    SessionState.SetBool(Key + "NoonDue", true);
+                    SessionState.SetBool(Key + "MidnightDue", DayClock.IsRunning);
+                }
+
+                Boreal.TerrainGeneration.DayState now = DayClock.Current;
+                string heightLabel = SessionState.GetString(Key + "HeightLabel", "");
+                if (SessionState.GetBool(Key + "NoonDue", false) &&
+                    (!DayClock.IsRunning || now.timeOfDay >= 0.5f && now.timeOfDay < 0.6f))
+                {
+                    SessionState.SetBool(Key + "NoonDue", false);
+                    Shot(Camera.main, Path.Combine(Out, heightLabel + "-noon-camera.png"));
+                }
+                if (SessionState.GetBool(Key + "MidnightDue", false) && DayClock.IsRunning && now.timeOfDay < 0.1f)
+                {
+                    SessionState.SetBool(Key + "MidnightDue", false);
+                    Shot(Camera.main, Path.Combine(Out, heightLabel + "-midnight-camera.png"));
                 }
 
                 if (simulated >= SessionState.GetFloat(Key + "Years", 5f) * clock.yearLength || animals.Length == 0 && SessionState.GetBool(Key + "Fast", false))

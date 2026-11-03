@@ -300,6 +300,8 @@ namespace Boreal.Animals
             }
 
             text.Append($"<b>Simulated time</b> {FormatDuration(simulatedSeconds)}{DescribeSeason()}\n");
+            string day = DayClock.Describe();
+            if (day.Length > 0) text.Append(day.TrimStart()).Append('\n');
 
             bool seaCeiling = manager.seaPopulationCeiling > 0;
             string ceiling = manager.populationCeiling <= 0 ? ""

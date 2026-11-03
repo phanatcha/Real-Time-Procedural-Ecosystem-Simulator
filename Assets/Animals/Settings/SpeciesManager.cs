@@ -1,6 +1,7 @@
 
 using System.Collections.Generic;
 using System.Text;
+using Boreal.World;
 using UnityEngine;
 
 namespace Boreal.Animals
@@ -274,6 +275,8 @@ namespace Boreal.Animals
         public int WorldRevision { get; private set; }
         public int BreedingWaitEpisodes { get; private set; }
         public double BreedingWaitSeconds { get; private set; }
+        // Deaths in this world while it was night (the day clock's daylight under half), for the run recorder.
+        public int DeathsAtNight { get; private set; }
 
         [Header("God Tools")]
         [Tooltip("Multiplies every mutation chance at birth for all animals, on top of each animal's mutation rate " +
@@ -502,6 +505,7 @@ namespace Boreal.Animals
             WorldRevision++;
             BreedingWaitEpisodes = 0;
             BreedingWaitSeconds = 0;
+            DeathsAtNight = 0;
             events.Clear();
             mutationMultiplier = 1f;
             AverageGeneration = 0f;
@@ -644,6 +648,7 @@ namespace Boreal.Animals
                 TotalPopulation = Mathf.Max(0, TotalPopulation - 1);
                 SpeciesTelemetryRecord record = GetOrCreateTelemetry(speciesName);
                 record.deaths++;
+                if (WorldDay.Current.IsNight) DeathsAtNight++;
                 if (deathCause == AgentDeathCause.Starvation) record.starvationDeaths++;
                 if (deathCause == AgentDeathCause.Predation) record.predationDeaths++;
                 if (deathCause == AgentDeathCause.OldAge) record.oldAgeDeaths++;

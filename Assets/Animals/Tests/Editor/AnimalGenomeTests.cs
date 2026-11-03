@@ -702,6 +702,26 @@ namespace Boreal.Animals.Tests
             Assert.AreEqual(0, AnimalGenome.GroupByDistance(new AnimalGenome[0], 0.1f).Count);
         }
 
+        // The markers are a yardstick (item 56): they differ between animals as any gene does, but never count
+        // towards genetic distance, so species splits and fertility are as before.
+        [Test]
+        public void MarkersDontCountTowardsGeneticDistance()
+        {
+            AnimalGenome first = CreateMidpointGenome();
+            AnimalGenome second = first.Clone();
+            second[AnimalGene.MarkerA] = 0f;
+            second[AnimalGene.MarkerB] = 1f;
+            second[AnimalGene.MarkerC] = 0.9f;
+            second.SetPerk(AnimalPerk.Marker, true);
+
+            Assert.AreEqual(0f, AnimalGenome.Distance(first, second), 1e-6f);
+            Assert.IsFalse(AnimalGenome.CountsTowardsDistance(AnimalPerk.Marker));
+            Assert.AreEqual(1f, AnimalPerks.Evaluate(second).energyUseMultiplier, 1e-6f, "the marker costs nothing");
+
+            second.SetPerk(AnimalPerk.Venom, true);
+            Assert.Greater(AnimalGenome.Distance(first, second), 0f, "real perks still count");
+        }
+
         static AnimalGenome CreateGenomeWithDiet(float dietAffinity)
         {
             AnimalGenome genome = CreateMidpointGenome();

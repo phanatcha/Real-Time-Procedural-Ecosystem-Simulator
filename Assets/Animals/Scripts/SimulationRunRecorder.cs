@@ -4,6 +4,7 @@ using System.Globalization;
 using System.IO;
 using System.Text;
 using Boreal.Core;
+using Boreal.TerrainGeneration;
 using UnityEngine;
 
 namespace Boreal.Animals
@@ -38,11 +39,13 @@ namespace Boreal.Animals
         [Serializable]
         sealed class RunMetadata
         {
-            public int schemaVersion = 3;
+            // 4: population.csv gained the time of day, light, moon and deaths at night (item 70); traits.csv the
+            // marker genes and perk (item 56).
+            public int schemaVersion = 4;
             public string startedUtc, sourceRevision, experiment, unityVersion, worldSeed;
             public float sampleInterval;
             public bool offscreenEnabled;
-            public string managerSettings, seasonSettings, foodSettings, representativeAnimalSettings;
+            public string managerSettings, seasonSettings, dayClockSettings, foodSettings, representativeAnimalSettings;
         }
 
         void OnEnable() { manager = GetComponent<SpeciesManager>(); failed = false; }
@@ -94,11 +97,12 @@ namespace Boreal.Animals
                 sampleInterval = (float)Interval, offscreenEnabled = manager.OffscreenPopulation != null,
                 managerSettings = JsonUtility.ToJson(manager),
                 seasonSettings = SeasonClock.Active != null ? JsonUtility.ToJson(SeasonClock.Active) : "",
+                dayClockSettings = DayClock.Active != null ? JsonUtility.ToJson(DayClock.Active) : "",
                 foodSettings = food != null ? JsonUtility.ToJson(food) : "",
                 representativeAnimalSettings = representative != null ? JsonUtility.ToJson(representative) : ""
             };
             File.WriteAllText(Path.Combine(OutputDirectory, "metadata.json"), JsonUtility.ToJson(metadata, true));
-            population = Open("population.csv", "time,live,offscreen,species_alive,births,cloned_births,sexual_births,deaths,starvation,predation,old_age,cold,heat,venom,thirst,other,land_ceiling,sea_ceiling,requested_speed,achieved_speed,season,season_strength,offscreen_enabled,breeding_wait_episodes,breeding_wait_seconds");
+            population = Open("population.csv", "time,live,offscreen,species_alive,births,cloned_births,sexual_births,deaths,starvation,predation,old_age,cold,heat,venom,thirst,other,land_ceiling,sea_ceiling,requested_speed,achieved_speed,season,season_strength,offscreen_enabled,breeding_wait_episodes,breeding_wait_seconds,day,time_of_day,daylight,light,moon_phase,deaths_at_night");
             species = Open("species.csv", "time,species,parent,origin,extinction,live,offscreen,births,sexual_births,deaths,breeding_wait_episodes,breeding_wait_seconds");
             traits = Open("traits.csv", "time,species,trait,live_sample_count,mean,standard_deviation,minimum,maximum");
             events = Open("events.csv", "time,event,detail");
@@ -117,6 +121,7 @@ namespace Boreal.Animals
         void Sample(double time)
         {
             EcosystemTally total = EcosystemTally.Of(manager.Telemetry.Values);
+            DayState day = DayClock.Current;
             Row(population, time, manager.TotalPopulation, manager.OffscreenTotal, manager.SpeciesAliveCount,
                 total.births, total.births - total.sexualBirths, total.sexualBirths, total.deaths,
                 total.starvationDeaths, total.predationDeaths, total.oldAgeDeaths, total.coldDeaths,
@@ -124,7 +129,8 @@ namespace Boreal.Animals
                 manager.IsAtSeaPopulationCeiling, manager.simulationSpeed, manager.AchievedSimulationSpeed,
                 SeasonClock.Active != null ? SeasonClock.Active.SeasonName : "None",
                 SeasonClock.IsRunning ? SeasonClock.Active.EffectiveStrength : 0f, manager.OffscreenPopulation != null,
-                manager.BreedingWaitEpisodes, manager.BreedingWaitSeconds);
+                manager.BreedingWaitEpisodes, manager.BreedingWaitSeconds, day.day, day.timeOfDay, day.daylight,
+                day.light, day.moonPhase, manager.DeathsAtNight);
 
             var groups = new Dictionary<string, List<AnimalGenome>>();
             foreach (SeekFood animal in manager.ActiveAgents)
