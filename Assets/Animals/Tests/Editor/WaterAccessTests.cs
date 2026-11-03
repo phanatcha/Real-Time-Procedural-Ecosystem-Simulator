@@ -193,6 +193,56 @@ namespace Boreal.Animals.Tests
                             "a shore that drops straight into deep water is only open to swimmers");
         }
 
+        // Rivers and lakes have areas of their own so they can freeze; where a river meets the sea, the sea wins.
+        [Test]
+        public void FreshWaterHasItsOwnAreasAndTheSeaWinsAtRiverMouths()
+        {
+            WaterAccess.Corner land = WaterAccess.Corner.Land;
+            WaterAccess.Corner freshShallow = WaterAccess.Corner.Water(0.4f, fresh: true);
+            WaterAccess.Corner freshDeep = WaterAccess.Corner.Water(4f, deadZone: true, fresh: true);
+            WaterAccess.Corner sea = WaterAccess.Corner.Water(0.4f);
+
+            Assert.AreEqual(WaterAccess.Surface.FreshShallowWater,
+                            WaterAccess.ClassifyTriangle(land, freshShallow, freshShallow, WadingDepth));
+            Assert.AreEqual(WaterAccess.Surface.FreshDeepWater,
+                            WaterAccess.ClassifyTriangle(freshShallow, freshDeep, freshDeep, WadingDepth),
+                            "lakes are never dead zones, so their ice has no holes");
+            Assert.AreEqual(WaterAccess.Surface.ShallowWater, WaterAccess.ClassifyTriangle(freshShallow, sea, sea, WadingDepth));
+            Assert.AreEqual(WaterAccess.FreshShallowWaterArea, WaterAccess.AreaOf(WaterAccess.Surface.FreshShallowWater));
+            Assert.AreEqual(WaterAccess.FreshDeepWaterArea, WaterAccess.AreaOf(WaterAccess.Surface.FreshDeepWater));
+            Assert.AreEqual(0, WaterAccess.LandAreas & WaterAccess.FreshWaterAreas);
+        }
+
+        // Frozen over, rivers and lakes are open to every animal and somewhere to wander to; they stay walkable while
+        // the ice thaws until half of it has gone.
+        [Test]
+        public void FrozenRiversAndLakesCanBeWalkedUntilHalfTheIceHasGone()
+        {
+            try
+            {
+                int deepFresh = 1 << WaterAccess.FreshDeepWaterArea;
+                WaterAccess.SetIce(0.9f);
+                Assert.IsFalse(WaterAccess.FreshWaterFrozen, "thin ice doesn't bear an animal");
+                Assert.AreEqual(0, WaterAccess.AreaMask(false) & deepFresh);
+                Assert.AreEqual(WaterAccess.LandAreas, WaterAccess.WalkableAreas);
+
+                WaterAccess.SetIce(1f);
+                Assert.IsTrue(WaterAccess.FreshWaterFrozen);
+                Assert.AreNotEqual(0, WaterAccess.AreaMask(false) & deepFresh);
+                Assert.AreEqual(0, WaterAccess.AreaMask(false) & (1 << WaterAccess.DeepWaterArea), "the sea never freezes");
+                Assert.AreNotEqual(0, WaterAccess.WalkableAreas & deepFresh);
+
+                WaterAccess.SetIce(0.6f);
+                Assert.IsTrue(WaterAccess.FreshWaterFrozen, "thawing ice still bears an animal");
+                WaterAccess.SetIce(0.4f);
+                Assert.IsFalse(WaterAccess.FreshWaterFrozen);
+            }
+            finally
+            {
+                WaterAccess.SetIce(0f);
+            }
+        }
+
         [Test]
         public void NothingIsInWaterWithoutAWaterSurface()
         {

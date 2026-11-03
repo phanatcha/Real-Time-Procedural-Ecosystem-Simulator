@@ -184,8 +184,13 @@ namespace Boreal.TerrainGeneration
             placement.Dispatch(kernel, groups, groups, 1);
 
             Bounds bounds = new Bounds(cameraPosition, new Vector3(radius * 2f + 10f, 400f, radius * 2f + 10f));
+            // Out of season (or under snow) every flower is shrunk away in the shader, so they aren't drawn at all.
+            SeasonalLookState season = SeasonalLook.Current;
+            bool flowersOut = season.flowersGone < 0.999f && season.snow < 0.5f;
             for (int i = 0; i < plants.Length; i++)
             {
+                if (i > 0 && !flowersOut) continue;
+
                 GraphicsBuffer.CopyCount(plants[i], arguments[i], sizeof(uint));
                 MaterialPropertyBlock block = properties[i];
                 block.SetBuffer(InstancesId, plants[i]);

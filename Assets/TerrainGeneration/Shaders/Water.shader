@@ -4,8 +4,9 @@ Shader "Custom/Water"
     // swells from a directional wave spectrum (WaveSpectrum builds them from the wind settings below) with the shorter
     // waves from the same spectrum on top as an FFT ocean (OceanFFT), turquoise over the shallows and cold deep blue
     // further out, sky reflection at grazing angles, pale highlights and a soft glow on wave crests, foam where the
-    // waves fold over and along the shore. Each tile's vertex colour (red) says how much the waves move it, so
-    // rivers and lakes stay calm. The lake and river bed settings are not used
+    // waves fold over and along the shore. Each tile's vertex colour says how much the waves move it (red), so
+    // rivers and lakes stay calm, and how fresh the water is (green): in winter rivers and lakes freeze over from the
+    // shore out (SeasonalLook's ice), and the sea never does. The lake and river bed settings are not used
     // here: WaterSurface hands them to the terrain shader, which draws the bed seen through the water.
     Properties
     {
@@ -163,6 +164,9 @@ Shader "Custom/Water"
             SAMPLER(sampler_WaterDetailDisplacement0);
             float4 _WaterDetail;
 
+            // Set globally by SeasonalLook: snow on the ground in x, and in w how far rivers and lakes have frozen over.
+            float4 _SeasonGround;
+
             struct Attributes
             {
                 float4 positionOS : POSITION;
@@ -177,6 +181,8 @@ Shader "Custom/Water"
                 // xy: where this point rests when the water is still, z: how much the waves move it here, w: how far
                 // the waves lifted it.
                 float4 wave : TEXCOORD2;
+                // 1 on rivers and lakes, 0 on the sea.
+                half fresh : TEXCOORD3;
             };
 
             // Pseudo-random numbers from a world position, without sine so large coordinates stay stable.
@@ -258,6 +264,7 @@ Shader "Custom/Water"
                 output.positionCS = TransformWorldToHClip(positionWS);
                 output.fogFactor = ComputeFogFactor(output.positionCS.z);
                 output.wave = float4(restWS.xz, weight, offset.y);
+                output.fresh = input.color.g;
                 return output;
             }
 
@@ -392,6 +399,35 @@ Shader "Custom/Water"
                 half3 foamColour = _FoamColor.rgb * (ambient + sunLight * (0.4 + 0.6 * NdotL));
                 colour = lerp(colour, foamColour, foam);
                 alpha = lerp(alpha, 1.0, foam);
+
+                // Ice on rivers and lakes in winter. It forms in the shallows first and closes over the deep water last,
+                // with a ragged edge; covered (ice 1) it is the solid ice animals walk on. Pale where it is thick and
+                // white, darker and clearer in patches, with cracks, a dusting of snow and a smooth glint.
+                half iceCover = _SeasonGround.w * smoothstep(0.3, 0.7, input.fresh);
+                if (iceCover > 0.001)
+                {
+                    float iceNoise = ValueNoise(restXZ * 0.08) * 0.6 + ValueNoise(restXZ * 0.31) * 0.4;
+                    float iceDepth = saturate(waterDepth / 6.0);
+                    half frozen = saturate((iceCover * 1.1 - (iceDepth * 0.75 + iceNoise * 0.25)) / 0.06);
+
+                    float clear = smoothstep(0.35, 0.75, ValueNoise(restXZ * 0.05 + 17.3));
+                    half3 iceColour = lerp(half3(0.8, 0.89, 0.94), half3(0.42, 0.58, 0.68), clear * 0.7);
+                    float crackNoise = ValueNoise(restXZ * 0.45 + 3.1);
+                    half crack = 1.0 - smoothstep(0.0, 0.035, abs(crackNoise - 0.5));
+                    iceColour *= 1.0 - 0.35 * crack * (1.0 - smoothstep(40.0, 120.0, distanceToCamera));
+                    half dusting = saturate(_SeasonGround.x * (0.6 + 0.8 * ValueNoise(restXZ * 0.13 + 9.7)) - 0.2);
+                    iceColour = lerp(iceColour, half3(0.95, 0.97, 1.0), dusting);
+
+                    half3 up = half3(0.0, 1.0, 0.0);
+                    half iceLight = saturate(dot(up, mainLight.direction));
+                    half3 iceAmbient = SampleSH(up);
+                    float3 iceHalf = normalize(float3(mainLight.direction) + float3(viewDirWS));
+                    half3 iceGlint = sunLight * (pow(saturate(dot(up, iceHalf)), 120.0) * 0.6 * (1.0 - dusting));
+                    half3 iceLit = iceColour * (iceAmbient + sunLight * iceLight) + iceGlint;
+
+                    colour = lerp(colour, iceLit, frozen);
+                    alpha = lerp(alpha, 1.0, frozen);
+                }
 
                 // The survivability heatmap's sea, lit like the foam.
                 if (_SurvivalHeatmapWater > 0.5 && _SurvivalHeatmapOpacity > 0.0)

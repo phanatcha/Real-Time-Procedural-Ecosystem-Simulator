@@ -25,11 +25,31 @@ namespace Boreal.TerrainGeneration
         WoodSorrel
     }
 
+    // What the seasons do to a part of a plant, as the Custom/Vegetation shader reads it from the mesh's third UV set
+    // (SeasonalLook times it). The numbers are stored in the mesh, so don't reorder them.
+    public enum SeasonalPart
+    {
+        // Bark, stems, mushrooms: unchanged all year.
+        Fixed = 0,
+        // Birch and bush leaves: fresh green in spring, yellow to red in fall, then they drop, leaving the twigs.
+        Leaf = 1,
+        // Spruce needles: green all year, snow settles on them.
+        Needles = 2,
+        // Berries on the island's bushes: there from late summer to mid fall.
+        Fruit = 3,
+        // Leaves of plants animals eat: they colour in fall but stay, so food can still be found in winter.
+        LastingLeaf = 4,
+        // Rock: snow settles on it.
+        Rock = 5
+    }
+
     // Low-poly trees, grass and rocks in a soft, painterly style (after Genshin Impact) for the Custom/Vegetation shader.
     // Vertex colours carry the look: rgb is the colour, already graded from dark insides to bright tips, and alpha is how
     // flexible the part is, which the shader uses for wind sway and for light shining through leaves (0 for rock and
     // trunks, up to 1 for treetops). Foliage normals point away from the middle of each clump rather than off each
-    // face, so a whole tier or clump shades as one soft volume.
+    // face, so a whole tier or clump shades as one soft volume. The third UV set says what the seasons do to each part
+    // (x the SeasonalPart; y a 0-1 number for the leaf clump or berry, so they turn and drop one by one; z where its fall
+    // colour lies, 0 golden yellow to 1 deep red).
     public static class VegetationMeshBuilder
     {
         // Norway spruce: tall, narrow and dark, a short bare trunk under drooping, scalloped tiers that taper to a thin
@@ -41,6 +61,7 @@ namespace Boreal.TerrainGeneration
             MeshParts mesh = new MeshParts();
             if (height <= 0f) height = SpruceHeight(rng);
             mesh.AddCylinder(Vector3.zero, height * 0.6f, 0.24f, 0.12f, far ? 4 : 8, trunkColour, 0.03f);
+            mesh.Season(SeasonalPart.Needles);
 
             const int tiers = 8;
             float tierHeight = 2.7f;
@@ -68,6 +89,93 @@ namespace Boreal.TerrainGeneration
         public const float SpruceSkirt = 1.4f;
         public static float SpruceRadius(float tierFraction) => Mathf.Lerp(2.6f, 0.6f, Mathf.Clamp01(tierFraction));
 
+        // Downy birch (bjørk), the broadleaf of Norway's spruce forests: a slender white trunk banded with black, branches
+        // rising from its upper half into an airy crown of leaf clumps, with fine twigs that are all that is left in
+        // winter. Its leaves turn golden in fall and drop (SeasonalPart.Leaf). height 0 picks one between 10 and 14 m; a
+        // thin leader always ends exactly at height, so the far birch is as tall as the near one.
+        // far: the same birch for distant chunks, under a quarter of the triangles: no twigs, plainer trunk and fewer
+        // clumps.
+        public static Mesh BuildBirch(Color barkColour, Color leafColour, System.Random rng, float height = 0f,
+                                      bool far = false)
+        {
+            MeshParts mesh = new MeshParts();
+            if (height <= 0f) height = BirchHeight(rng);
+            Color marks = new Color(0.17f, 0.15f, 0.14f);
+            Color wood = new Color(0.3f, 0.26f, 0.23f);
+            Vector3 lean = new Vector3(Next(rng) - 0.5f, 0f, Next(rng) - 0.5f) * 0.5f;
+            float trunkTop = height * 0.78f;
+
+            // The trunk in white stretches with thin black bands between them, narrowing as it rises.
+            int sides = far ? 4 : 6;
+            float y = 0f;
+            bool dark = false;
+            while (y < trunkTop - 0.01f)
+            {
+                float length = far ? trunkTop : dark ? 0.08f + 0.08f * Next(rng) : 0.6f + 0.9f * Next(rng);
+                float top = Mathf.Min(trunkTop, y + length);
+                mesh.AddBranch(lean * (y / height), lean * (top / height) + Vector3.up * top,
+                               Mathf.Lerp(0.2f, 0.07f, y / trunkTop), Mathf.Lerp(0.2f, 0.07f, top / trunkTop), sides,
+                               dark ? marks : barkColour, 0.02f, Mathf.Lerp(0.02f, 0.12f, top / trunkTop));
+                y = top;
+                dark = !dark && !far;
+            }
+
+            Vector3 crownTop = lean * (trunkTop / height) + Vector3.up * trunkTop;
+            mesh.AddBranch(crownTop, Vector3.up * height, 0.07f, 0.015f, far ? 3 : 4, wood, 0.12f, 0.35f);
+
+            // Branches from about a third of the way up, longest low down, angled up and out round the trunk; birch
+            // twigs droop at their ends.
+            int branches = far ? 4 : 7;
+            float firstAngle = Next(rng) * Mathf.PI * 2f;
+            List<Vector3> clumpCentres = new List<Vector3>();
+            for (int i = 0; i < branches; i++)
+            {
+                float t = (i + 0.5f) / branches;
+                float baseHeight = Mathf.Lerp(height * 0.36f, height * 0.74f, t);
+                float angle = firstAngle + i * 2.4f + (Next(rng) - 0.5f) * 0.6f;
+                Vector3 outward = new Vector3(Mathf.Cos(angle), 0f, Mathf.Sin(angle));
+                float reach = Mathf.Lerp(2.6f, 1.4f, t) * (0.85f + 0.3f * Next(rng));
+                Vector3 start = lean * (baseHeight / height) + Vector3.up * baseHeight;
+                Vector3 end = start + outward * reach + Vector3.up * reach * (0.9f + 0.5f * Next(rng));
+                mesh.AddBranch(start, end, 0.05f, 0.018f, far ? 3 : 4, wood, 0.1f, 0.4f);
+                clumpCentres.Add(end + Vector3.up * 0.2f);
+                clumpCentres.Add(Vector3.Lerp(start, end, 0.55f) + outward * 0.5f + Vector3.up * 0.3f);
+
+                if (far) continue;
+                int twigs = 2 + rng.Next(2);
+                for (int j = 0; j < twigs; j++)
+                {
+                    Vector3 from = Vector3.Lerp(start, end, 0.45f + 0.5f * j / twigs);
+                    float twigAngle = angle + (Next(rng) - 0.5f) * 2f;
+                    Vector3 twigOut = new Vector3(Mathf.Cos(twigAngle), 0f, Mathf.Sin(twigAngle));
+                    float twigLength = 0.8f + 0.7f * Next(rng);
+                    Vector3 to = from + twigOut * twigLength + Vector3.up * (0.25f - 0.6f * Next(rng)) * twigLength;
+                    mesh.AddBranch(from, to, 0.018f, 0.006f, 3, wood * 0.9f, 0.4f, 0.7f);
+                }
+            }
+
+            // The crown closes over the leader without reaching its tip.
+            clumpCentres.Add(Vector3.up * (height - 1.7f) + lean * 0.8f);
+            clumpCentres.Add(Vector3.up * (height - 2.6f) + lean * 0.8f + new Vector3(0.6f, 0f, -0.4f));
+            int clumps = far ? 5 : clumpCentres.Count;
+            for (int i = 0; i < clumps; i++)
+            {
+                // Far away a few large clumps stand in for the crown: the top two and some branch ends.
+                Vector3 centre = far ? clumpCentres[(clumpCentres.Count - 1 - i * 3 + clumpCentres.Count) % clumpCentres.Count]
+                                     : clumpCentres[i];
+                centre.y = Mathf.Min(centre.y, height - 1.7f);
+                float radius = (far ? 1.35f : 0.85f + 0.3f * Next(rng)) * (centre.y > height - 3f ? 0.8f : 1f);
+                float tip = Mathf.InverseLerp(height * 0.3f, height, centre.y);
+                Color shade = leafColour * Mathf.Lerp(0.85f, 1.1f, tip) * (0.92f + 0.16f * Next(rng));
+                mesh.Season(SeasonalPart.Leaf, Next(rng), 0.25f * Next(rng));
+                mesh.AddClump(centre, new Vector3(radius, radius * 0.75f, radius), shade, Mathf.Lerp(0.5f, 0.9f, tip), 0, rng);
+            }
+
+            return mesh.Build();
+        }
+
+        public static float BirchHeight(System.Random rng) => 10f + (float)rng.NextDouble() * 4f;
+
         // Bright new growth at the tips of a spruce's branches, centred on the origin: the leaves FoodSpawner's tall
         // food stands for.
         public static Mesh BuildShoots(Color colour, System.Random rng)
@@ -94,9 +202,9 @@ namespace Boreal.TerrainGeneration
             switch (kind)
             {
                 case ForestFood.Bilberry:
-                    return BuildBerryBush(colours.bushLeafColour, colours.bilberryColour, false, rng);
+                    return BuildBerryBush(colours.bushLeafColour, colours.bilberryColour, false, rng, true);
                 case ForestFood.Raspberry:
-                    return BuildBerryBush(colours.bushLeafColour, colours.raspberryColour, true, rng);
+                    return BuildBerryBush(colours.bushLeafColour, colours.raspberryColour, true, rng, true);
             }
 
             MeshParts mesh = new MeshParts();
@@ -115,7 +223,10 @@ namespace Boreal.TerrainGeneration
         // wide bilberry (blåbær) bush or, upright, a taller raspberry (bringebær) bush. BushSize scales the whole bush.
         public const float BushSize = 1.5f;
 
-        public static Mesh BuildBerryBush(Color leafColour, Color berryColour, bool upright, System.Random rng)
+        // edible: drawn for a plant animals eat, whose leaves and berries stay through winter so it can still be found;
+        // the island's other bushes lose their berries after fall and their leaves before winter.
+        public static Mesh BuildBerryBush(Color leafColour, Color berryColour, bool upright, System.Random rng,
+                                          bool edible = false)
         {
             MeshParts mesh = new MeshParts();
             float spread = (upright ? 0.3f : 0.4f) * BushSize;
@@ -142,6 +253,9 @@ namespace Boreal.TerrainGeneration
                                    : Around(rng, spread, height * (0.4f + 0.2f * Next(rng)));
                 radii[i] = new Vector3(radius, radius * 0.8f, radius);
                 Color shade = leafColour * (crown ? 1.1f : 0.85f) * (0.92f + 0.16f * Next(rng));
+                // Bilberry leaves turn crimson in fall, raspberry ones yellow to orange.
+                mesh.Season(edible ? SeasonalPart.LastingLeaf : SeasonalPart.Leaf, Next(rng),
+                            upright ? 0.3f + 0.3f * Next(rng) : 0.75f + 0.25f * Next(rng));
                 mesh.AddClump(centres[i], radii[i], shade, 0.3f, 0, rng);
             }
 
@@ -152,6 +266,8 @@ namespace Boreal.TerrainGeneration
                 int clump = 3 + rng.Next(clumps - 3);
                 float angle = Next(rng) * Mathf.PI * 2f;
                 Vector3 outward = new Vector3(Mathf.Cos(angle), 0f, Mathf.Sin(angle));
+                mesh.Season(edible ? SeasonalPart.LastingLeaf : SeasonalPart.Leaf, Next(rng),
+                            upright ? 0.4f : 0.85f);
                 mesh.AddLeaf(centres[clump] + outward * (radii[clump].x * 0.8f), outward, 0.18f * BushSize, 0.07f * BushSize,
                              0.06f * BushSize, leafColour * 1.15f, 0.35f);
             }
@@ -165,6 +281,7 @@ namespace Boreal.TerrainGeneration
                 Vector3 outward = new Vector3(Next(rng) - 0.5f, Next(rng) * 0.8f + 0.1f, Next(rng) - 0.5f).normalized;
                 Vector3 position = centres[clump] + Vector3.Scale(outward, radii[clump]) * 1.04f;
                 float size = berrySize * (0.85f + 0.3f * Next(rng));
+                mesh.Season(edible ? SeasonalPart.Fixed : SeasonalPart.Fruit, Next(rng));
                 mesh.AddBerry(position, size, upright ? 1.25f : 1f, berryColour * (0.9f + 0.2f * Next(rng)));
             }
 
@@ -452,6 +569,7 @@ namespace Boreal.TerrainGeneration
         public static Mesh BuildRock(Color colourA, Color colourB, Color mossColour, System.Random rng)
         {
             MeshParts mesh = new MeshParts();
+            mesh.Season(SeasonalPart.Rock);
             Vector3 size = new Vector3(0.55f + 0.15f * (float)rng.NextDouble(), 0.38f + 0.12f * (float)rng.NextDouble(),
                                        0.45f + 0.15f * (float)rng.NextDouble());
             mesh.AddBoulder(size, colourA, colourB, mossColour, rng);
@@ -465,6 +583,16 @@ namespace Boreal.TerrainGeneration
             readonly List<Color> colours = new List<Color>();
             // Per vertex: xyz is the point a soft normal points away from, w how much of it replaces the face's normal.
             readonly List<Vector4> softNormals = new List<Vector4>();
+            // Per vertex: what the seasons do to it (see VegetationMeshBuilder).
+            readonly List<Vector3> seasons = new List<Vector3>();
+            Vector3 season;
+
+            // The seasonal part the parts added from now on belong to: the kind, a 0-1 number for when this clump or
+            // berry turns and drops, and where its fall colour lies (0 golden yellow, 1 deep red).
+            public void Season(SeasonalPart part, float roll = 0f, float fallColour = 0f)
+            {
+                season = new Vector3((float)part, roll, fallColour);
+            }
 
             int Add(Vector3 position, Color colour, float flexibility, Vector3 pivot, float soft)
             {
@@ -472,6 +600,7 @@ namespace Boreal.TerrainGeneration
                 colour.a = flexibility;
                 colours.Add(colour);
                 softNormals.Add(new Vector4(pivot.x, pivot.y, pivot.z, soft));
+                seasons.Add(season);
                 return vertices.Count - 1;
             }
 
@@ -503,6 +632,33 @@ namespace Boreal.TerrainGeneration
                     int a = start + i * 2;
                     int b = start + (i + 1) % sides * 2;
                     Vector3 axis = baseCentre + Vector3.up * height * 0.5f;
+                    Triangle(a, a + 1, b + 1, axis);
+                    Triangle(a, b + 1, b, axis);
+                }
+            }
+
+            // A tapering cylinder from start to end in any direction, without caps: a trunk section, branch or twig.
+            // Flexibility runs from startFlexibility to endFlexibility, so a branch sways more towards its tip.
+            public void AddBranch(Vector3 start, Vector3 end, float startRadius, float endRadius, int sides, Color colour,
+                                  float startFlexibility, float endFlexibility)
+            {
+                Vector3 direction = (end - start).normalized;
+                Vector3 across = Vector3.Cross(direction, Mathf.Abs(direction.y) > 0.95f ? Vector3.right : Vector3.up).normalized;
+                Vector3 other = Vector3.Cross(direction, across);
+                Vector3 axis = (start + end) * 0.5f;
+                int first = vertices.Count;
+                for (int i = 0; i < sides; i++)
+                {
+                    float angle = i / (float)sides * Mathf.PI * 2f;
+                    Vector3 offset = across * Mathf.Cos(angle) + other * Mathf.Sin(angle);
+                    Add(start + offset * startRadius, colour * 0.85f, startFlexibility, axis, 0f);
+                    Add(end + offset * endRadius, colour, endFlexibility, axis, 0f);
+                }
+
+                for (int i = 0; i < sides; i++)
+                {
+                    int a = first + i * 2;
+                    int b = first + (i + 1) % sides * 2;
                     Triangle(a, a + 1, b + 1, axis);
                     Triangle(a, b + 1, b, axis);
                 }
@@ -803,6 +959,7 @@ namespace Boreal.TerrainGeneration
                 mesh.SetVertices(vertices);
                 mesh.SetTriangles(triangles, 0);
                 mesh.SetColors(colours);
+                mesh.SetUVs(2, seasons);
                 mesh.RecalculateNormals();
 
                 Vector3[] normals = mesh.normals;

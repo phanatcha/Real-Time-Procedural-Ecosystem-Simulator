@@ -292,6 +292,8 @@ namespace Boreal.Animals
         public bool CanSwimDeepWater => waterMovement.CanSwimDeepWater(bodyEffects.swimmingAbility);
         public bool IsInWater => inWater;
         public bool IsInDeadZone => inDeadZone;
+        // Standing on a frozen river or lake: on the water surface, but walking as on land.
+        public bool IsOnIce => onIce;
         public float HydrationFraction => enableThirst && maxHydration > 0f ? Mathf.Clamp01(currentHydration / maxHydration) : 1f;
         public bool IsThirsty => enableThirst && HydrationFraction < thirstThreshold;
         // 0 at the thirst threshold, 1 with no water left. An animal already at the water keeps a quarter of the
@@ -419,6 +421,11 @@ namespace Boreal.Animals
         private float geneMoveSpeed;
         private bool inWater;
         private bool inDeadZone;
+        private bool onIce;
+        // Whether the area mask and costs were last set for frozen rivers and lakes, and whether this animal, unable
+        // to swim, was left on deep fresh water as the ice thawed and may still cross it to reach the shore.
+        private bool waterAccessFrozen;
+        private bool strandedOnThawingIce;
         private float snowSpeedMultiplier = 1f;
         private float snowSampleTimer;
         // The agent's offset standing on land and floating with the body half under water, and how far between
@@ -932,10 +939,7 @@ namespace Boreal.Animals
         }
 
         // Rivers and lakes; the sea is salt.
-        static bool IsFreshWater(in EnvironmentSample sample)
-        {
-            return sample.isValid && sample.isWater && (sample.riverStrength > 0.05f || sample.lakeStrength > 0.05f);
-        }
+        static bool IsFreshWater(in EnvironmentSample sample) => WaterAccess.IsFresh(sample);
 
         // The nearest fresh water in view and a place at its edge on the NavMesh where this animal can wade in, or
         // failing that stand, to drink. The spot is kept until it has been drunk from or given up on; the search itself runs at most
@@ -954,7 +958,8 @@ namespace Boreal.Animals
             // Animals wade in to drink, as real ones do: the spot is in the shallows when there are any by the water
             // found (lakes have a wadeable shelf inside a walkable bank), otherwise anywhere the animal can stand or
             // swim, which for a river in a gorge is the top of its bank.
-            if (!NavMesh.SamplePosition(water.Value, out NavMeshHit hit, 15f, 1 << WaterAccess.ShallowWaterArea) &&
+            // Through the ice in winter: animals break it at the edge (or eat the snow on it) and still drink.
+            if (!NavMesh.SamplePosition(water.Value, out NavMeshHit hit, 15f, WaterAccess.ShallowWaterAreas) &&
                 !NavMesh.SamplePosition(water.Value, out hit, 15f, WaterAccess.AreaMask(CanSwimDeepWater))) return false;
             if (IsRememberedUnreachableWater(hit.position)) return false;
 
@@ -1728,12 +1733,20 @@ namespace Boreal.Animals
             agent.speed = Mathf.Max(0.01f, baseSpeed * growth * multiplier * temperatureMultiplier);
         }
 
-        // The animal is in water when its NavMesh position is down on the flat water surface. Water changes its
-        // speed (RefreshMovementSpeed) and energy use (CurrentEnergyDrainPerSecond), and the body settles half under.
-        // Only swimmers reach dead zones, which are deep, so only they look for one under them.
+        // The animal is in water when its NavMesh position is down on the flat water surface, unless that is a frozen
+        // river or lake, where it walks on the ice. Water changes its speed (RefreshMovementSpeed) and energy use
+        // (CurrentEnergyDrainPerSecond), and the body settles half under. Only swimmers reach dead zones, which are
+        // deep, so only they look for one under them.
         void UpdateWater(float deltaTime)
         {
-            inWater = agent != null && agent.isOnNavMesh && WaterAccess.IsInWater(agent.nextPosition.y);
+            if (waterAccessFrozen != WaterAccess.FreshWaterFrozen || strandedOnThawingIce) RefreshFreshWaterAccess();
+
+            bool onWaterSurface = agent != null && agent.isOnNavMesh && WaterAccess.IsInWater(agent.nextPosition.y);
+            AnimalTerrainWorld iceWorld = AnimalTerrainWorld.Active;
+            onIce = onWaterSurface && WaterAccess.FreshWaterFrozen && iceWorld != null &&
+                    iceWorld.TryGetCachedSample(transform.position, out EnvironmentSample underfoot) &&
+                    WaterAccess.IsFresh(underfoot);
+            inWater = onWaterSurface && !onIce;
             inDeadZone = inWater && CanSwimDeepWater &&
                          NavMesh.SamplePosition(agent.nextPosition, out _, DeadZoneProbeRadius,
                                                 1 << WaterAccess.DeadZoneArea);
@@ -1774,11 +1787,12 @@ namespace Boreal.Animals
         {
             float ability = bodyEffects.swimmingAbility;
             swimmingAbility = ability;
-            agent.areaMask = WaterAccess.AreaMask(CanSwimDeepWater);
             float waterCost = waterMovement.PathCost(ability, bodyEffects.speedMultiplier);
             agent.SetAreaCost(WaterAccess.ShallowWaterArea, waterCost);
             agent.SetAreaCost(WaterAccess.DeepWaterArea, waterCost);
             agent.SetAreaCost(WaterAccess.DeadZoneArea, waterCost * SeaBiomeMap.CurrentRules.deadZoneEnergyCost);
+            strandedOnThawingIce = false;
+            RefreshFreshWaterAccess();
 
             // Floating puts the middle of the body at the waterline; legs and the lower half are under water.
             standingBaseOffset = agent.baseOffset;
@@ -1787,6 +1801,26 @@ namespace Boreal.Animals
                 ? -bodyFilter.sharedMesh.bounds.center.y
                 : standingBaseOffset;
             floatAmount = 0f;
+        }
+
+        // Rivers and lakes are water, priced as the sea is, until they freeze: then everyone may cross them, and the ice
+        // costs no more than land. When they thaw, an animal that can't swim and is still out on deep water keeps
+        // the right to cross it, at the water's cost, until it is back in the shallows or on land.
+        void RefreshFreshWaterAccess()
+        {
+            if (agent == null) return;
+
+            bool frozen = WaterAccess.FreshWaterFrozen;
+            int mask = WaterAccess.AreaMask(CanSwimDeepWater);
+            strandedOnThawingIce = !frozen && !CanSwimDeepWater && agent.isOnNavMesh &&
+                                   NavMesh.SamplePosition(agent.nextPosition, out _, 1f, 1 << WaterAccess.FreshDeepWaterArea);
+            if (strandedOnThawingIce) mask |= 1 << WaterAccess.FreshDeepWaterArea;
+            agent.areaMask = mask;
+
+            float waterCost = frozen ? 1f : waterMovement.PathCost(swimmingAbility, bodyEffects.speedMultiplier);
+            agent.SetAreaCost(WaterAccess.FreshShallowWaterArea, waterCost);
+            agent.SetAreaCost(WaterAccess.FreshDeepWaterArea, waterCost);
+            waterAccessFrozen = frozen;
         }
 
         public float GetCurrentMovementSpeed()
@@ -1909,10 +1943,11 @@ namespace Boreal.Animals
         }
 
         // Where the animal may choose to wander or flee to: swimmers anywhere they can swim except dead zones, everyone
-        // else only onto land. Routes there can still cross water when that is worth it.
+        // else only onto land, and out over rivers and lakes while they are frozen. Routes there can still cross water
+        // when that is worth it.
         int DestinationAreas => CanSwimDeepWater && agent != null
             ? agent.areaMask & ~(1 << WaterAccess.DeadZoneArea)
-            : WaterAccess.LandAreas;
+            : WaterAccess.WalkableAreas;
 
         void ClampDestinationCandidate(ref Vector3 candidate)
         {

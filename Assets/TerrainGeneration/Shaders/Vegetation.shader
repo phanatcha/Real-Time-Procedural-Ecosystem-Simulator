@@ -1,7 +1,9 @@
 // Trees, grass and rocks in a painterly style (after Genshin Impact) that keeps real shadows, sky light and ambient
 // occlusion. Stylisation blends the diffuse light from a smooth, realistic falloff (0) to a soft two-tone step with
 // cool shadows (1). Vertex colours carry the colour, and their alpha how flexible a part is: flexible parts sway in
-// the wind and let sunlight through (see VegetationMeshBuilder).
+// the wind and let sunlight through (see VegetationMeshBuilder). The third UV set says what the seasons do to each part
+// (VegetationMeshBuilder's SeasonalPart): with SeasonalLook's timing, birch and bush leaves turn fresh green in spring
+// and gold to red in fall, then drop clump by clump, berries come and go, and snow settles on upward faces.
 Shader "Custom/Vegetation"
 {
     Properties
@@ -27,6 +29,72 @@ Shader "Custom/Vegetation"
         float _WindSpeed;
         float4 _WindDirection;
     CBUFFER_END
+
+    // Set globally by SeasonalLook. Leaves: autumn colour, leaf fall, spring freshness, fruit gone. Ground: snow (the
+    // rest is for the terrain, grass and water).
+    float4 _SeasonLeaves;
+    float4 _SeasonGround;
+
+    float SeasonHash(float2 p)
+    {
+        p = frac(p * float2(123.34, 456.21));
+        p += dot(p, p + 45.32);
+        return frac(p.x * p.y);
+    }
+
+    float SeasonNoise(float2 p)
+    {
+        float2 cell = floor(p);
+        float2 f = frac(p);
+        float2 u = f * f * (3.0 - 2.0 * f);
+        return lerp(lerp(SeasonHash(cell), SeasonHash(cell + float2(1, 0)), u.x),
+                    lerp(SeasonHash(cell + float2(0, 1)), SeasonHash(cell + float2(1, 1)), u.x), u.y);
+    }
+
+    // 1 where a part is gone for the season, 0 where it is there: leaves once they have fallen, berries out of season.
+    // Each clump or berry has its own moment, nudged by place so neighbouring trees don't turn in step. Every pass
+    // clips on it, so fallen leaves leave no shadow either.
+    float SeasonHidden(float3 season, float3 positionWS)
+    {
+        int part = (int)round(season.x);
+        float moment = 0.02 + 0.96 * (season.y * 0.75 + SeasonNoise(positionWS.xz / 9.0) * 0.25);
+        if (part == 1) return step(moment, _SeasonLeaves.y);
+        if (part == 3) return step(moment, _SeasonLeaves.w);
+        return 0.0;
+    }
+
+    // A part's colour in this season: leaves fresh in spring and gold, orange or red in fall (leaves of food plants
+    // stay coloured through winter), and snow on faces turned to the sky. Brightness is kept, so the leaves' shading
+    // from dark insides to bright tips survives the change of colour.
+    float3 SeasonColour(float3 albedo, float3 season, float3 normalWS, float3 positionWS)
+    {
+        int part = (int)round(season.x);
+        float brightness = dot(albedo, float3(0.3, 0.59, 0.11));
+        if (part == 1 || part == 4)
+        {
+            float3 fall = season.z < 0.5 ? lerp(float3(0.95, 0.72, 0.12), float3(0.95, 0.42, 0.08), season.z * 2.0)
+                                         : lerp(float3(0.95, 0.42, 0.08), float3(0.72, 0.1, 0.07), season.z * 2.0 - 1.0);
+            fall *= brightness * 1.5 / dot(fall, float3(0.3, 0.59, 0.11));
+            float turned = part == 1 ? _SeasonLeaves.x : max(_SeasonLeaves.x, _SeasonLeaves.y * 0.85);
+            albedo = lerp(albedo, fall, saturate((turned - season.y * 0.4) / 0.6));
+            if (part == 1)
+            {
+                float3 fresh = float3(0.45, 0.72, 0.2) * (brightness * 1.25 / 0.6);
+                albedo = lerp(albedo, fresh, _SeasonLeaves.z * 0.55);
+            }
+        }
+
+        if (part != 1 && part != 3 && _SeasonGround.x > 0.001)
+        {
+            // Spruce tiers hold snow on their whole upper skirt, whose soft normals lean outwards.
+            float facingUp = part == 2 ? smoothstep(-0.1, 0.45, normalWS.y) * 1.4 : smoothstep(0.15, 0.7, normalWS.y);
+            float lying = _SeasonGround.x * facingUp *
+                          (0.7 + 0.6 * SeasonNoise(positionWS.xz / 3.0 + positionWS.y));
+            albedo = lerp(albedo, float3(0.9, 0.93, 0.97), smoothstep(0.2, 0.6, lying));
+        }
+
+        return albedo;
+    }
 
     // Sways flexible parts along the wind: a slow gust plus a faster flutter, out of step from place to place. Every
     // pass applies it, so shadows and depth move with what is drawn.
@@ -68,6 +136,7 @@ Shader "Custom/Vegetation"
                 float4 positionOS : POSITION;
                 float3 normalOS : NORMAL;
                 float4 color : COLOR;
+                float3 season : TEXCOORD2;
             };
 
             struct Varyings
@@ -77,21 +146,25 @@ Shader "Custom/Vegetation"
                 float3 normalWS : TEXCOORD1;
                 float fogFactor : TEXCOORD3;
                 float4 color : TEXCOORD4;
+                float hidden : TEXCOORD5;
             };
 
             Varyings vert(Attributes IN)
             {
                 Varyings OUT;
-                OUT.positionWS = ApplyWind(TransformObjectToWorld(IN.positionOS.xyz), IN.color.a);
+                float3 restWS = TransformObjectToWorld(IN.positionOS.xyz);
+                OUT.positionWS = ApplyWind(restWS, IN.color.a);
                 OUT.normalWS = normalize(TransformObjectToWorldNormal(IN.normalOS));
                 OUT.positionHCS = TransformWorldToHClip(OUT.positionWS);
                 OUT.fogFactor = ComputeFogFactor(OUT.positionHCS.z);
-                OUT.color = IN.color;
+                OUT.color = float4(SeasonColour(IN.color.rgb, IN.season, OUT.normalWS, restWS), IN.color.a);
+                OUT.hidden = SeasonHidden(IN.season, restWS);
                 return OUT;
             }
 
             float4 frag(Varyings IN, bool frontFace : SV_IsFrontFace) : SV_Target
             {
+                clip(0.5 - IN.hidden);
                 float3 normalWS = normalize(IN.normalWS);
                 if (!frontFace)
                 {
@@ -158,17 +231,21 @@ Shader "Custom/Vegetation"
                 float4 positionOS : POSITION;
                 float3 normalOS : NORMAL;
                 float4 color : COLOR;
+                float3 season : TEXCOORD2;
             };
 
             struct Varyings
             {
                 float4 positionCS : SV_POSITION;
+                float hidden : TEXCOORD0;
             };
 
             Varyings ShadowVert(Attributes IN)
             {
                 Varyings OUT;
-                float3 positionWS = ApplyWind(TransformObjectToWorld(IN.positionOS.xyz), IN.color.a);
+                float3 restWS = TransformObjectToWorld(IN.positionOS.xyz);
+                OUT.hidden = SeasonHidden(IN.season, restWS);
+                float3 positionWS = ApplyWind(restWS, IN.color.a);
                 float3 normalWS = TransformObjectToWorldNormal(IN.normalOS);
 
                 #if _CASTING_PUNCTUAL_LIGHT_SHADOW
@@ -191,6 +268,7 @@ Shader "Custom/Vegetation"
 
             half4 ShadowFrag(Varyings IN) : SV_Target
             {
+                clip(0.5 - IN.hidden);
                 return 0;
             }
             ENDHLSL
@@ -215,22 +293,27 @@ Shader "Custom/Vegetation"
             {
                 float4 positionOS : POSITION;
                 float4 color : COLOR;
+                float3 season : TEXCOORD2;
             };
 
             struct Varyings
             {
                 float4 positionCS : SV_POSITION;
+                float hidden : TEXCOORD0;
             };
 
             Varyings DepthVert(Attributes IN)
             {
                 Varyings OUT;
-                OUT.positionCS = TransformWorldToHClip(ApplyWind(TransformObjectToWorld(IN.positionOS.xyz), IN.color.a));
+                float3 restWS = TransformObjectToWorld(IN.positionOS.xyz);
+                OUT.positionCS = TransformWorldToHClip(ApplyWind(restWS, IN.color.a));
+                OUT.hidden = SeasonHidden(IN.season, restWS);
                 return OUT;
             }
 
             half DepthFrag(Varyings IN) : SV_Target
             {
+                clip(0.5 - IN.hidden);
                 return IN.positionCS.z;
             }
             ENDHLSL
@@ -254,19 +337,23 @@ Shader "Custom/Vegetation"
                 float4 positionOS : POSITION;
                 float3 normalOS : NORMAL;
                 float4 color : COLOR;
+                float3 season : TEXCOORD2;
             };
 
             struct Varyings
             {
                 float4 positionCS : SV_POSITION;
                 float3 normalWS : TEXCOORD0;
+                float hidden : TEXCOORD1;
             };
 
             Varyings DepthNormalsVert(Attributes IN)
             {
                 Varyings OUT;
-                OUT.positionCS = TransformWorldToHClip(ApplyWind(TransformObjectToWorld(IN.positionOS.xyz), IN.color.a));
+                float3 restWS = TransformObjectToWorld(IN.positionOS.xyz);
+                OUT.positionCS = TransformWorldToHClip(ApplyWind(restWS, IN.color.a));
                 OUT.normalWS = TransformObjectToWorldNormal(IN.normalOS);
+                OUT.hidden = SeasonHidden(IN.season, restWS);
                 return OUT;
             }
 
@@ -277,6 +364,7 @@ Shader "Custom/Vegetation"
             #endif
             )
             {
+                clip(0.5 - IN.hidden);
                 float3 normalWS = frontFace ? IN.normalWS : -IN.normalWS;
                 outNormalWS = half4(NormalizeNormalPerPixel(normalWS), 0.0);
             #ifdef _WRITE_RENDERING_LAYERS

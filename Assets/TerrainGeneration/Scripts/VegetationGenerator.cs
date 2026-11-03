@@ -22,8 +22,9 @@ namespace Boreal.TerrainGeneration
 
     public static class VegetationGenerator
     {
-        // Three Norway spruces, as VegetationTemplateCache.BuildTreeTemplates builds them.
-        const int TreeVariants = 3;
+        // Three Norway spruces and two birches, as VegetationTemplateCache.BuildTreeTemplates builds them.
+        public const int SpruceVariants = 3;
+        public const int BirchVariants = 2;
         const int GrassVariants = 3;
         const int RockVariants = 3;
         // Two bilberry bushes and a raspberry bush, as VegetationTemplateCache.BuildBushTemplates builds them.
@@ -43,9 +44,10 @@ namespace Boreal.TerrainGeneration
 
             Vector2 chunkWorldCentre = (chunkWorldMin + chunkWorldMax) * 0.5f;
 
-            GenerateType(vegSettings.trees, EnvironmentResourceType.Tree, data.trees, TreeVariants, 1,
+            GenerateType(vegSettings.trees, EnvironmentResourceType.Tree, data.trees, SpruceVariants, 1,
                 chunkWorldMin, chunkWorldMax, heightMap, terrainMinHeight, terrainMaxHeight,
-                environmentDefinitions, vegSettings.seed, chunkWorldCentre, numVertsPerLine, meshScale);
+                environmentDefinitions, vegSettings.seed, chunkWorldCentre, numVertsPerLine, meshScale,
+                vegSettings.birchShare);
             GenerateType(vegSettings.grass, EnvironmentResourceType.Grass, data.grass, GrassVariants, 2,
                 chunkWorldMin, chunkWorldMax, heightMap, terrainMinHeight, terrainMaxHeight,
                 environmentDefinitions, vegSettings.seed, chunkWorldCentre, numVertsPerLine, meshScale);
@@ -64,7 +66,7 @@ namespace Boreal.TerrainGeneration
             List<VegetationInstance> output, int variantCount, int typeSalt,
             Vector2 chunkWorldMin, Vector2 chunkWorldMax, HeightMap heightMap,
             float terrainMinHeight, float terrainMaxHeight, EnvironmentDefinitions environmentDefinitions,
-            int seed, Vector2 chunkWorldCentre, int numVertsPerLine, float meshScale)
+            int seed, Vector2 chunkWorldCentre, int numVertsPerLine, float meshScale, float birchShare = 0f)
         {
             if (settings == null || !settings.enabled) return;
 
@@ -105,8 +107,8 @@ namespace Boreal.TerrainGeneration
                     if ((typeSalt == 3 || typeSalt == 4) && environmentSample.slope > CliffSlope) continue;
 
                     float variantRoll = ValueNoise.CellHash(gx, gz, seed, typeSalt, 3);
-                    int variant = typeSalt == 4
-                        ? ChooseBushVariant(environmentSample, variantRoll)
+                    int variant = typeSalt == 4 ? ChooseBushVariant(environmentSample, variantRoll)
+                        : typeSalt == 1 ? ChooseTreeVariant(environmentSample, variantRoll, birchShare)
                         : Mathf.Clamp(Mathf.FloorToInt(variantRoll * variantCount), 0, variantCount - 1);
                     float rotRoll = ValueNoise.CellHash(gx, gz, seed, typeSalt, 4);
                     float scaleRoll = ValueNoise.CellHash(gx, gz, seed, typeSalt, 5);
@@ -125,6 +127,19 @@ namespace Boreal.TerrainGeneration
                     });
                 }
             }
+        }
+
+        // Birches grow among the spruces, more of them on moist ground. Returns 0-2 for a spruce and 3 or 4 for a birch.
+        static int ChooseTreeVariant(EnvironmentSample sample, float roll, float birchShare)
+        {
+            float birch = Mathf.Clamp01(birchShare * Mathf.Lerp(0.6f, 1.4f, Mathf.InverseLerp(0.3f, 0.7f, sample.moisture)));
+            if (roll < birch)
+            {
+                return SpruceVariants + Mathf.Min(BirchVariants - 1, Mathf.FloorToInt(roll / birch * BirchVariants));
+            }
+
+            float spruce = (roll - birch) / Mathf.Max(1f - birch, 1e-5f);
+            return Mathf.Clamp(Mathf.FloorToInt(spruce * SpruceVariants), 0, SpruceVariants - 1);
         }
 
         // Bilberry carpets the moist forest floor; raspberry takes drier, sunnier ground. Returns 0 or 1 for a bilberry
@@ -372,8 +387,9 @@ namespace Boreal.TerrainGeneration
             };
         }
 
-        // The tree meshes VegetationGenerator's tree variants index: three Norway spruces in two shades of green. far gets
-        // a simpler copy of each for distant chunks, just as tall, so trees don't jump when a chunk changes detail.
+        // The tree meshes VegetationGenerator's tree variants index: three Norway spruces in two shades of green, then two
+        // birches. far gets a simpler copy of each for distant chunks, just as tall, so trees don't jump when a chunk
+        // changes detail.
         public static Mesh[] BuildTreeTemplates(VegetationSettings settings, System.Random rng, out Mesh[] far)
         {
             Color[] foliage =
@@ -382,13 +398,22 @@ namespace Boreal.TerrainGeneration
                 Color.Lerp(settings.foliageColourA, settings.foliageColourB, 0.5f)
             };
             System.Random farRng = new System.Random(settings.seed + 1);
-            Mesh[] near = new Mesh[foliage.Length];
-            far = new Mesh[foliage.Length];
+            int count = VegetationGenerator.SpruceVariants + VegetationGenerator.BirchVariants;
+            Mesh[] near = new Mesh[count];
+            far = new Mesh[count];
             for (int i = 0; i < foliage.Length; i++)
             {
                 float height = VegetationMeshBuilder.SpruceHeight(rng);
                 near[i] = VegetationMeshBuilder.BuildTree(settings.trunkColour, foliage[i], rng, height);
                 far[i] = VegetationMeshBuilder.BuildTree(settings.trunkColour, foliage[i], farRng, height, true);
+            }
+
+            for (int i = foliage.Length; i < count; i++)
+            {
+                float height = VegetationMeshBuilder.BirchHeight(rng);
+                near[i] = VegetationMeshBuilder.BuildBirch(settings.birchBarkColour, settings.birchLeafColour, rng, height);
+                far[i] = VegetationMeshBuilder.BuildBirch(settings.birchBarkColour, settings.birchLeafColour, farRng,
+                                                          height, true);
             }
 
             return near;

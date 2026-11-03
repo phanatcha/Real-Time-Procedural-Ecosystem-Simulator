@@ -117,6 +117,13 @@ namespace Boreal.TerrainGeneration
         [Tooltip("Bright new growth on the spruces animals feed from (FoodSpawner's tall food).")]
         public Color freshShootColour = new Color(0.56f, 0.8f, 0.26f);
 
+        [Header("Birches")]
+        [Tooltip("Share of trees that are birches rather than spruces, more on moist ground. Birches show the seasons: " +
+                 "golden leaves in fall, bare twigs in winter.")]
+        [Range(0f, 1f)] public float birchShare = 0.25f;
+        public Color birchBarkColour = new Color(0.86f, 0.85f, 0.8f);
+        public Color birchLeafColour = new Color(0.3f, 0.5f, 0.17f);
+
         [Header("Grass colours")]
         public Color grassColourA = new Color(0.20f, 0.34f, 0.14f);
         public Color grassColourB = new Color(0.32f, 0.44f, 0.19f);

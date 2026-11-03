@@ -10,8 +10,10 @@ namespace Boreal.Animals
     // (SeasonState and SeasonalEnvironment): spring, summer, fall and winter, blended smoothly. Seasons shift the
     // temperature animals feel (through ProceduralTerrainTemperatureProvider), slow plant regrowth and bury ground
     // plants under snow (FoodSpawner), slow animals on snow (SeekFood), and do the same for animals kept as numbers
-    // off-screen (OffscreenPopulationStore). They change how well an animal does, never its genes. At the end of each
-    // season it writes a SeasonSummary line to the log. Adds itself to scenes with a SpeciesManager, with seasons on or
+    // off-screen (OffscreenPopulationStore). They change how well an animal does, never its genes. In hard winters
+    // rivers and lakes freeze over, and animals walk across them (WaterAccess). The island shows the time of year
+    // (SeasonalLook, SeasonalWeather): birches and bushes colour and drop their leaves, grass dries, snow lies and
+    // falls, and the ice closes over the water. At the end of each season it writes a SeasonSummary line to the log. Adds itself to scenes with a SpeciesManager, with seasons on or
     // off as Tools > Boreal Ecosystem > Seasons On was last set.
     [DefaultExecutionOrder(-800)]
     [DisallowMultipleComponent]
@@ -51,6 +53,16 @@ namespace Boreal.Animals
                  "winter; with that, full-strength winters starved 70-90% of the animals.")]
         [Range(0f, 1f)] public float maximumBuriedShare = 0.5f;
 
+        [Header("Ice")]
+        [Tooltip("Rivers and lakes freeze over in hard winters and animals walk across them, so groups a lake keeps " +
+                 "apart can meet. The sea never freezes.")]
+        public bool lakesFreeze = true;
+        [Tooltip("Ice starts to form when the season is this much colder than the base climate, in °C.")]
+        [Min(0f)] public float iceFormsColderBy = 6f;
+        [Tooltip("At this much colder, in °C, rivers and lakes are frozen over and bear animals. With the default " +
+                 "strength (0.7, winter 19 °C colder) and three years of easing in, that is from the second winter.")]
+        [Min(0f)] public float iceBearsColderBy = 10f;
+
         [Header("Log")]
         [Tooltip("Writes one line to the Console at the end of each season, starting \"Season summary\": animals, " +
                  "births, deaths by cause, meals, energy and plants. It also writes the season so far when every animal " +
@@ -65,6 +77,8 @@ namespace Boreal.Animals
         [SerializeField, Tooltip("Strength now, while seasons ease in.")] private float effectiveStrength;
         [SerializeField, Tooltip("What plant regrowth is multiplied by all year to balance the year's growth.")]
         private float growthBalance = 1f;
+        [SerializeField, Range(0f, 1f), Tooltip("How far rivers and lakes have frozen over.")]
+        private float iceCover;
 
         SeasonState state = Neutral;
         // startOfYear plus the years since the world began.
@@ -162,6 +176,7 @@ namespace Boreal.Animals
         void OnEnable()
         {
             Active = this;
+            if (!TryGetComponent(out SeasonalWeather _)) gameObject.AddComponent<SeasonalWeather>();
             Refresh();
         }
 
@@ -171,6 +186,8 @@ namespace Boreal.Animals
             {
                 Active = null;
                 WorldSeason.Reset();
+                WaterAccess.SetIce(0f);
+                SeasonalLook.Reset();
             }
         }
 
@@ -205,7 +222,27 @@ namespace Boreal.Animals
             currentYear = Year;
             progressThroughYear = YearProgress;
             WorldSeason.Current = Current;
+
+            bool running = IsRunning;
+            iceCover = running && lakesFreeze ? IceCover(state, iceFormsColderBy, iceBearsColderBy) : 0f;
+            WaterAccess.SetIce(iceCover);
+            SeasonalLook.Apply(running ? SeasonalLook.At(YearProgress, state.snowAmount, iceCover) : default);
         }
+
+        // How far rivers and lakes have frozen over in this season: none until it is formsColderBy °C colder than the
+        // base climate, covered at bearsColderBy. Without the terrain's temperature provider the shift is taken on its
+        // default range, -28 to 18 °C.
+        public static float IceCover(SeasonState season, float formsColderBy, float bearsColderBy)
+        {
+            float shift = TemperatureShiftCelsius(season);
+            if (float.IsNaN(shift)) shift = season.temperatureOffset * DefaultTemperatureRangeCelsius;
+            float colder = -shift;
+            if (bearsColderBy <= formsColderBy) return colder >= formsColderBy ? 1f : 0f;
+            return Mathf.Clamp01((colder - formsColderBy) / (bearsColderBy - formsColderBy));
+        }
+
+        // ProceduralTerrainTemperatureProvider's default range from coldest to warmest.
+        const float DefaultTemperatureRangeCelsius = 46f;
 
         // Starts a summary when a season begins and writes it when the season ends, or sooner when every animal has
         // died. A new world starts afresh.

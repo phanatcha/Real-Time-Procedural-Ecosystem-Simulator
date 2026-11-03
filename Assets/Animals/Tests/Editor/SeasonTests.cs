@@ -149,6 +149,22 @@ namespace Boreal.Animals.Tests
             Assert.AreEqual(raw.movementCost, adjusted.movementCost, Tolerance);
         }
 
+        // Ice forms once the season is 6 °C colder than the base climate and bears animals at 10 °C colder: in a
+        // full-strength winter (0.6 of the range colder), never in summer.
+        [Test]
+        public void RiversAndLakesFreezeOnlyInHardWinters()
+        {
+            SeasonState winter = SeasonState.For(BorealSeason.Winter);
+            Assert.AreEqual(1f, SeasonClock.IceCover(winter, 6f, 10f), Tolerance);
+            Assert.AreEqual(0f, SeasonClock.IceCover(SeasonState.For(BorealSeason.Summer), 6f, 10f), Tolerance);
+            Assert.AreEqual(0f, SeasonClock.IceCover(SeasonClock.Scale(winter, 0.1f), 6f, 10f), Tolerance,
+                            "a mild first winter leaves the water open");
+
+            float partly = SeasonClock.IceCover(SeasonClock.Scale(winter, 0.3f), 6f, 10f);
+            Assert.Greater(partly, 0f);
+            Assert.Less(partly, 1f);
+        }
+
         [Test]
         public void SeasonsAreNamedThroughTheYear()
         {

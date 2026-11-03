@@ -94,6 +94,9 @@ Shader "Custom/Terrain"
             float4 _SeaBedCoralSecond;
             float4 _SeaBedDeadZone;
 
+            // Set globally by SeasonalLook: snow lying on the ground in x, meadows dried to straw in y. Both 0 in summer.
+            float4 _SeasonGround;
+
             struct Attributes
             {
                 float4 positionOS : POSITION;
@@ -377,6 +380,26 @@ Shader "Custom/Terrain"
 
                 float variation = ValueNoise(IN.positionWS.xz * 0.07) * 2.0 - 1.0;
                 albedo *= 1.0 + variation * 0.06;
+
+                // The seasons on the land above the water: meadows dry to straw from fall to spring, and snow settles
+                // in winter, first in patches and on flat ground, last on slopes, where it slides off. Like the snow
+                // the animals wade through (SeasonalEnvironment), it is patchy and thins on steep ground.
+                float aboveWater = _TerrainWaterSurface > 0.5 ? smoothstep(0.05, 0.4, -waterDepth)
+                                                              : step(landThreshold, heightPercent);
+                if (_SeasonGround.y > 0.001)
+                {
+                    float straw = _SeasonGround.y * aboveWater * (0.45 + 0.35 * ValueNoise(IN.positionWS.xz / 23.0));
+                    albedo = lerp(albedo, albedo * float3(1.22, 1.0, 0.62) + float3(0.04, 0.025, 0.0), straw);
+                }
+                if (_SeasonGround.x > 0.001)
+                {
+                    float snowPatch = ValueNoise(IN.positionWS.xz / 31.0) * 0.7 + ValueNoise(IN.positionWS.xz / 7.0) * 0.3;
+                    float snowSlope = 1.0 - smoothstep(0.25, 0.6, slope);
+                    float lying = _SeasonGround.x * lerp(0.6, 1.4, snowPatch) * snowSlope * aboveWater;
+                    float snowCover = smoothstep(0.15, 0.55, lying);
+                    float3 snowColour = float3(0.9, 0.93, 0.97) * (0.95 + 0.08 * snowPatch);
+                    albedo = lerp(albedo, snowColour, snowCover);
+                }
 
                 // The survivability heatmap replaces the ground colour before lighting, so hills still read.
                 if (_SurvivalHeatmapOpacity > 0.0)

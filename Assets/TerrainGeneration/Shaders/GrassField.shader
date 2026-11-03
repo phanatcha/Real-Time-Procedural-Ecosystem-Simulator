@@ -2,7 +2,9 @@
 // GrassField.compute places each frame. Lit like Custom/Vegetation: real shadows, sky light and ambient occlusion,
 // with Stylisation blending towards soft two-tone light, light through the blades, a rim and wind. Flowers carry
 // their own vertex colours; the grass tuft's vertex red is height up the blade (see
-// VegetationMeshBuilder.BuildGrassTuft), turned into the grass colours here. Alpha is flexibility.
+// VegetationMeshBuilder.BuildGrassTuft), turned into the grass colours here. Alpha is flexibility. The seasons
+// (SeasonalLook) dry the grass to straw from fall, press it down under snow, and let the flowers bloom only from late
+// spring to midsummer.
 Shader "Custom/Grass Field"
 {
     Properties
@@ -75,6 +77,16 @@ Shader "Custom/Grass Field"
             float _FlowerScale;
             float _FlowerGlow;
 
+            // Set globally by SeasonalLook: x snow on the ground, y grass dried to straw, z share of flowers finished.
+            float4 _SeasonGround;
+
+            float Hash21(float2 p)
+            {
+                p = frac(p * float2(123.34, 456.21));
+                p += dot(p, p + 45.32);
+                return frac(p.x * p.y);
+            }
+
             struct Attributes
             {
                 float3 positionOS : POSITION;
@@ -109,6 +121,17 @@ Shader "Custom/Grass Field"
             {
                 Instance plant = _Instances[IN.instanceID];
                 float3 stretch = _IsFlower > 0.5 ? float3(_FlowerScale, _FlowerScale, _FlowerScale) : float3(1.0, _GrassHeight, 1.0);
+                // Flowers finish one by one, and snow buries what is left; grass lies flatter when dry and under snow.
+                float snow = _SeasonGround.x;
+                if (_IsFlower > 0.5)
+                {
+                    float finished = saturate((_SeasonGround.z - Hash21(plant.position.xz) * 0.95) * 20.0);
+                    stretch *= (1.0 - finished) * (1.0 - smoothstep(0.2, 0.5, snow));
+                }
+                else
+                {
+                    stretch.y *= lerp(1.0, 0.75, _SeasonGround.y) * lerp(1.0, 0.25, snow);
+                }
                 float s = sin(plant.yaw);
                 float c = cos(plant.yaw);
                 float3 local = IN.positionOS * plant.scale * stretch;
@@ -123,6 +146,13 @@ Shader "Custom/Grass Field"
                 float3 colour = _IsFlower > 0.5
                     ? IN.color.rgb * lerp(0.92, 1.08, plant.tint)
                     : lerp(_RootColour.rgb, _TipColour.rgb, IN.color.r) * lerp(_DryTint.rgb, _LushTint.rgb, plant.tint);
+                if (_IsFlower < 0.5)
+                {
+                    float3 straw = lerp(float3(0.62, 0.5, 0.3), float3(0.94, 0.83, 0.55), IN.color.r) *
+                                   lerp(0.9, 1.1, plant.tint);
+                    colour = lerp(colour, straw, _SeasonGround.y * lerp(0.75, 1.0, Hash21(plant.position.xz + 7.0)));
+                    colour = lerp(colour, float3(0.9, 0.93, 0.97), snow * 0.6 * IN.color.r);
+                }
 
                 OUT.color = float4(colour, IN.color.a);
                 return OUT;

@@ -15,7 +15,8 @@ namespace Boreal.Animals
     // - The sea grows its own plants, one kind per sea biome (see SeaFood), floating at the water surface and drawn
     //   as seagrass, kelp, coral or plankton (see SeaPlantLooks). Those in water too deep to wade are for swimmers only.
     // - Seasons (SeasonClock) change how fast plants regrow, and snow and withered grass hide ground plants, which
-    //   come back as they were once uncovered. Leaves up in the trees and sea plants are never buried.
+    //   come back as they were once uncovered. Leaves up in the trees and sea plants are never buried, except that
+    //   plants in rivers and lakes go under the ice in winter.
     // Plant positions come from a hash of the world seed and fixed world cells, so a seed always gives the
     // same layout. Tiles that nothing needs are unloaded but remember what was eaten, and keep regrowing.
     public class FoodSpawner : MonoBehaviour
@@ -359,12 +360,15 @@ namespace Boreal.Animals
         }
 
         // What the season does to a site: how fast it regrows, and for ground plants whether snow or withered grass
-        // hides it. Leaves up in the trees stay above the snow, and the sea has none.
+        // hides it. Leaves up in the trees stay above the snow, and the sea has none; plants in rivers and lakes are
+        // under the ice once it has closed over half the water.
         static void RefreshSeason(PlantSite site, SeasonConditions season, int seasonStep)
         {
             SeasonalGround effect = SeasonalGround.At(site.ground, season);
             site.seasonalGrowth = effect.growth;
-            site.buried = !site.isTall && site.seaBiome == SeaBiome.None && site.burialPoint >= effect.uncovered;
+            bool underIce = site.seaBiome != SeaBiome.None && WaterAccess.IceCover >= 0.5f && WaterAccess.IsFresh(site.ground);
+            site.buried = underIce ||
+                          !site.isTall && site.seaBiome == SeaBiome.None && site.burialPoint >= effect.uncovered;
             site.seasonStep = seasonStep;
         }
 

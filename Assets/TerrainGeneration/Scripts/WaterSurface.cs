@@ -9,8 +9,9 @@ namespace Boreal.TerrainGeneration
     // children of their chunk, so they stream in, hide and unload with the terrain. The water shader moves the waves from
     // world positions, so neighbouring tiles meet without seams: long Gerstner swells from WaveSpectrum, and, where the GPU
     // runs compute shaders, the shorter waves and their foam from OceanFFT. Each tile's vertex colour says how much the sea's waves
-    // move each point: none on rivers and lakes, less in the shallows. While the surface exists the terrain shader draws
-    // lake and river beds as sand and silt (from the water material) instead of painted-on blue.
+    // move each point: none on rivers and lakes, less in the shallows; green says how fresh it is, since rivers and lakes
+    // freeze in winter (SeasonalLook) and the sea doesn't. While the surface exists the terrain shader draws lake and
+    // river beds as sand and silt (from the water material) instead of painted-on blue.
     public class WaterSurface
     {
         public const string TileName = "Water Surface";
@@ -247,8 +248,8 @@ namespace Boreal.TerrainGeneration
             return material != null && material.HasProperty(property) ? material.GetColor(property) : fallback;
         }
 
-        // The chunk's tile: the shared grid, with each point's wave strength in its vertex colour (red), read from the
-        // chunk's own height map.
+        // The chunk's tile: the shared grid, with each point's wave strength (red) and fresh water (green) in its vertex
+        // colour, read from the chunk's own height map.
         Mesh BuildTileMesh(HeightMap heightMap, Vector2 chunkCentre)
         {
             // Samples stay a hair inside the chunk, where its height map is defined; both tiles of a shared edge then read
@@ -259,11 +260,11 @@ namespace Boreal.TerrainGeneration
             {
                 Vector2 position = chunkCentre + new Vector2(Mathf.Clamp(tileVertices[i].x, -half, half),
                                                              Mathf.Clamp(tileVertices[i].z, -half, half));
-                float strength = TerrainSurfaceSampler.TrySample(position, heightMap, chunkCentre,
-                    meshSettings.numVertsPerLine, meshSettings.meshScale, out TerrainSurfaceSample ground)
-                    ? WaveStrength(ground, Height)
-                    : 1f;
-                colours[i] = new Color(strength, 0f, 0f, 1f);
+                bool sampled = TerrainSurfaceSampler.TrySample(position, heightMap, chunkCentre,
+                    meshSettings.numVertsPerLine, meshSettings.meshScale, out TerrainSurfaceSample ground);
+                float strength = sampled ? WaveStrength(ground, Height) : 1f;
+                float fresh = sampled ? FreshWater.Amount(ground.riverStrength, ground.lakeStrength) : 0f;
+                colours[i] = new Color(strength, fresh, 0f, 1f);
             }
 
             Mesh mesh = new Mesh

@@ -49,6 +49,7 @@ namespace Boreal.Soak.Editor
             SessionState.SetFloat(Key + "WaterSeconds", 0f);
             SessionState.SetFloat(Key + "DrinkSeconds", 0f);
             SessionState.SetFloat(Key + "DrinkInWaterSeconds", 0f);
+            SessionState.SetFloat(Key + "IceSeconds", 0f);
             SessionState.SetBool(Key + "SeasonsOn", Arg("soakSeasons", "1") == "1");
             SessionState.SetInt(Key + "LastPeak", -1);
             SessionState.SetFloat(Key + "LastStatus", -1f);
@@ -125,15 +126,17 @@ namespace Boreal.Soak.Editor
 
             if (stage == 0)
             {
-                int wading = 0, drinkingNow = 0, drinkingInWater = 0;
+                int wading = 0, drinkingNow = 0, drinkingInWater = 0, onIce = 0;
                 foreach (SeekFood animal in animals)
                 {
                     if (animal.IsInWater) wading++;
+                    if (animal.IsOnIce) onIce++;
                     if (animal.IsDrinking) { drinkingNow++; if (animal.IsInWater) drinkingInWater++; }
                 }
                 float step = Time.deltaTime;
                 SessionState.SetFloat(Key + "WaterSeconds", SessionState.GetFloat(Key + "WaterSeconds", 0f) + wading * step);
                 SessionState.SetFloat(Key + "DrinkSeconds", SessionState.GetFloat(Key + "DrinkSeconds", 0f) + drinkingNow * step);
+                SessionState.SetFloat(Key + "IceSeconds", SessionState.GetFloat(Key + "IceSeconds", 0f) + onIce * step);
                 SessionState.SetFloat(Key + "DrinkInWaterSeconds",
                     SessionState.GetFloat(Key + "DrinkInWaterSeconds", 0f) + drinkingInWater * step);
             }
@@ -158,7 +161,9 @@ namespace Boreal.Soak.Editor
                           $"sea plants eaten {(food != null ? food.SeaPlantsEaten : -1)}, " +
                           $"animal-seconds in water {SessionState.GetFloat(Key + "WaterSeconds", 0f):0}, " +
                           $"drinking {SessionState.GetFloat(Key + "DrinkSeconds", 0f):0} of which in water " +
-                          $"{SessionState.GetFloat(Key + "DrinkInWaterSeconds", 0f):0}");
+                          $"{SessionState.GetFloat(Key + "DrinkInWaterSeconds", 0f):0}, " +
+                          $"ice {WaterAccess.IceCover:0.00}{(WaterAccess.FreshWaterFrozen ? " frozen" : "")}, " +
+                          $"animal-seconds on ice {SessionState.GetFloat(Key + "IceSeconds", 0f):0}");
             }
 
             if (stage == 0 && animals.Length > 0 && !SessionState.GetBool(Key + "Fast", false) && manager != null)
@@ -194,6 +199,15 @@ namespace Boreal.Soak.Editor
                     string label = $"y{clock.Year}-{peak:00}-{clock.SeasonName.Replace(' ', '-').ToLowerInvariant()}";
                     Shot(Camera.main, Path.Combine(Out, label + "-camera.png"));
                     ShotOverAnimals(animals, Path.Combine(Out, label + "-animals.png"));
+                }
+
+                // And from the camera at each season's height: full autumn colour, deepest snow and ice.
+                int height = Mathf.FloorToInt(yearsSinceStart * 4f);
+                if (height != SessionState.GetInt(Key + "LastHeight", -1))
+                {
+                    SessionState.SetInt(Key + "LastHeight", height);
+                    string season = new[] { "spring", "summer", "fall", "winter" }[height % 4];
+                    Shot(Camera.main, Path.Combine(Out, $"y{clock.Year}-{height:00}-height-of-{season}-camera.png"));
                 }
 
                 if (simulated >= SessionState.GetFloat(Key + "Years", 5f) * clock.yearLength || animals.Length == 0 && SessionState.GetBool(Key + "Fast", false))

@@ -11,8 +11,8 @@ namespace Boreal.Animals
     // ahead of where it can wander. Tile geometry is sampled from the terrain on background threads and
     // added to a single NavMesh that Unity updates in the background, so new tiles connect seamlessly.
     // With water included, each tile also carries the flat water surface as NavMesh areas for shallow water,
-    // deep water and dead zones (see WaterAccess and SeaBiomes), joined to the shore so animals can walk straight
-    // into the water.
+    // deep water and dead zones (see WaterAccess and SeaBiomes), with rivers and lakes in areas of their own so they
+    // can freeze, joined to the shore so animals can walk straight into the water.
     [DisallowMultipleComponent]
     public sealed class HabitatNavigation : MonoBehaviour
     {
@@ -55,8 +55,9 @@ namespace Boreal.Animals
             public bool geometryReady;
             public bool hasGround;
             public bool navigable;
-            // One mesh per NavMesh area the tile has: land, shallow water, deep water, dead zone.
-            public readonly List<Mesh> meshes = new List<Mesh>(4);
+            // One mesh per NavMesh area the tile has: land, shallow and deep water, dead zone, and shallow and deep
+            // fresh water.
+            public readonly List<Mesh> meshes = new List<Mesh>(6);
         }
 
         private sealed class TileGeometry
@@ -68,9 +69,12 @@ namespace Boreal.Animals
             public int[] shallowWaterTriangles;
             public int[] deepWaterTriangles;
             public int[] deadZoneTriangles;
+            public int[] freshShallowWaterTriangles;
+            public int[] freshDeepWaterTriangles;
 
             public bool IsEmpty => landTriangles.Length == 0 && shallowWaterTriangles.Length == 0 &&
-                                   deepWaterTriangles.Length == 0 && deadZoneTriangles.Length == 0;
+                                   deepWaterTriangles.Length == 0 && deadZoneTriangles.Length == 0 &&
+                                   freshShallowWaterTriangles.Length == 0 && freshDeepWaterTriangles.Length == 0;
         }
 
         private readonly Dictionary<Vector2Int, NavigationTile> tiles = new Dictionary<Vector2Int, NavigationTile>();
@@ -297,6 +301,9 @@ namespace Boreal.Animals
             AddSource(tile, geometry, geometry.shallowWaterTriangles, WaterAccess.ShallowWaterArea, "Shallow Water");
             AddSource(tile, geometry, geometry.deepWaterTriangles, WaterAccess.DeepWaterArea, "Deep Water");
             AddSource(tile, geometry, geometry.deadZoneTriangles, WaterAccess.DeadZoneArea, "Dead Zone");
+            AddSource(tile, geometry, geometry.freshShallowWaterTriangles, WaterAccess.FreshShallowWaterArea,
+                      "Fresh Shallow Water");
+            AddSource(tile, geometry, geometry.freshDeepWaterTriangles, WaterAccess.FreshDeepWaterArea, "Fresh Deep Water");
             tilesAwaitingUpdate.Add(geometry.coordinate);
         }
 
@@ -418,7 +425,7 @@ namespace Boreal.Animals
             }
 
             // Triangle indices for each kind of surface, indexed by WaterAccess.Surface.
-            List<int>[] surfaces = new List<int>[5];
+            List<int>[] surfaces = new List<int>[System.Enum.GetValues(typeof(WaterAccess.Surface)).Length];
             for (int surface = 0; surface < surfaces.Length; surface++) surfaces[surface] = new List<int>();
             for (int z = 0; z < cellsPerSide; z++)
             {
@@ -450,7 +457,9 @@ namespace Boreal.Animals
                 landTriangles = surfaces[(int)WaterAccess.Surface.Land].ToArray(),
                 shallowWaterTriangles = surfaces[(int)WaterAccess.Surface.ShallowWater].ToArray(),
                 deepWaterTriangles = surfaces[(int)WaterAccess.Surface.DeepWater].ToArray(),
-                deadZoneTriangles = surfaces[(int)WaterAccess.Surface.DeadZone].ToArray()
+                deadZoneTriangles = surfaces[(int)WaterAccess.Surface.DeadZone].ToArray(),
+                freshShallowWaterTriangles = surfaces[(int)WaterAccess.Surface.FreshShallowWater].ToArray(),
+                freshDeepWaterTriangles = surfaces[(int)WaterAccess.Surface.FreshDeepWater].ToArray()
             };
         }
 
@@ -470,7 +479,8 @@ namespace Boreal.Animals
             if (withWater && sample.isWater)
             {
                 vertex = new Vector3(position.x, waterLevel, position.y);
-                return WaterAccess.Corner.Water(waterLevel - sample.position.y, seaBiomes.IsDeadZone(sample));
+                return WaterAccess.Corner.Water(waterLevel - sample.position.y, seaBiomes.IsDeadZone(sample),
+                                                WaterAccess.IsFresh(sample));
             }
 
             if (!AnimalTerrainWorld.IsWalkable(sample, maximumSlope, excludeShore))
