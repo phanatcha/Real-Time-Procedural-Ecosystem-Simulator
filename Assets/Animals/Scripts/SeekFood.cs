@@ -212,7 +212,13 @@ namespace Boreal.Animals
         [Min(0.1f)] public float fleeDuration = 3f;
         [Tooltip("How long an attacker remains recognized as a threat after dealing damage.")]
         [Min(0.1f)] public float threatMemoryDuration = 5f;
+        [Tooltip("Every animal hunts its own species, whatever its diet. Off, only meat-leaning animals do (Hunt Own " +
+                 "Kind From Diet).")]
         public bool allowCannibalism;
+        [Tooltip("From this inherited diet (Diet Affinity) up an animal also hunts members of its own species that " +
+                 "aren't close kin (item 66). Founders start at 0.15, so only the most meat-leaning animals hunt at " +
+                 "first; above 1 only other species are hunted.")]
+        [Min(0f)] public float huntOwnKindFromDiet = 0.25f;
         [Tooltip("Prevents predation between parents, children, and siblings, including mutated offspring assigned to a new species.")]
         public bool avoidCloseKinPredation = true;
         [Range(0f, 1f)] public float carcassEnergyTransferEfficiency = 0.75f;
@@ -857,7 +863,7 @@ namespace Boreal.Animals
         void UpdateDecision(float deltaTime)
         {
             bool hasFoodTarget = IsCurrentFoodTargetAvailable();
-            bool hasPreyTarget = IsViablePrey(currentPreyTarget);
+            bool hasPreyTarget = CanAttack(currentPreyTarget);
             bool targetBecameInvalid = (currentState == State.Chasing && !hasFoodTarget) ||
                                        ((currentState == State.Hunting || currentState == State.Fighting) &&
                                         !hasPreyTarget) ||
@@ -943,7 +949,7 @@ namespace Boreal.Animals
                         ConsiderMate(other, visionRadiusSquared, ref perception, ref bestMateScore);
                     }
 
-                    if (!IsViablePrey(other))
+                    if (!IsOtherLivingAnimal(other))
                     {
                         continue;
                     }
@@ -952,7 +958,7 @@ namespace Boreal.Animals
                     float distance = Mathf.Sqrt(distanceSquared);
                     // Camouflaged animals are only spotted, as prey or as hunters, within part of the vision radius.
                     float spottingRadiusSquared = visionRadiusSquared * other.Visibility * other.Visibility;
-                    if (!IsTemporarilyAvoidedPrey(other) &&
+                    if (IsViablePrey(other) && !IsTemporarilyAvoidedPrey(other) &&
                         distanceSquared <= spottingRadiusSquared &&
                         distanceSquared < perception.nearestPreyDistance * perception.nearestPreyDistance)
                     {
@@ -1146,7 +1152,7 @@ namespace Boreal.Animals
             foreach (ThreatMemory memory in rememberedThreats)
             {
                 SeekFood attacker = memory.attacker;
-                if (memory.timeRemaining <= 0f || !IsViablePrey(attacker) || !manager.IsActiveAgent(attacker) ||
+                if (memory.timeRemaining <= 0f || !IsOtherLivingAnimal(attacker) || !manager.IsActiveAgent(attacker) ||
                     ContainsThreat(threats, attacker))
                 {
                     continue;
@@ -1257,7 +1263,7 @@ namespace Boreal.Animals
                     break;
 
                 case AgentIntent.FightThreat:
-                    if (IsViablePrey(decision.preyTarget))
+                    if (CanAttack(decision.preyTarget))
                     {
                         currentPreyTarget = decision.preyTarget;
                         currentState = State.Fighting;
@@ -1274,7 +1280,7 @@ namespace Boreal.Animals
                     break;
 
                 case AgentIntent.Flee:
-                    if (IsViablePrey(decision.preyTarget))
+                    if (IsOtherLivingAnimal(decision.preyTarget))
                     {
                         currentFleeThreat = decision.preyTarget;
                         currentFleeDirection = decision.fleeDirection;
@@ -1421,7 +1427,7 @@ namespace Boreal.Animals
             }
             else if (currentState == State.Hunting || currentState == State.Fighting)
             {
-                if (!IsViablePrey(currentPreyTarget))
+                if (!CanAttack(currentPreyTarget))
                 {
                     ClearTargets();
                     currentState = State.Idling;
@@ -1634,7 +1640,7 @@ namespace Boreal.Animals
 
         void TryAttack(SeekFood prey)
         {
-            if (attackCooldownTimer > 0f || !IsViablePrey(prey) ||
+            if (attackCooldownTimer > 0f || !CanAttack(prey) ||
                 currentEnergy < attackEnergyCost || currentStamina < attackStaminaCost)
             {
                 return;
@@ -1645,7 +1651,7 @@ namespace Boreal.Animals
             int attacksResolved = 0;
 
             while (!isDying && attackCooldownTimer <= 0f && attacksResolved < catchUpLimit &&
-                   IsViablePrey(prey) && currentEnergy >= attackEnergyCost &&
+                   CanAttack(prey) && currentEnergy >= attackEnergyCost &&
                    currentStamina >= attackStaminaCost)
             {
                 currentEnergy = Mathf.Max(0f, currentEnergy - attackEnergyCost);
@@ -1754,7 +1760,7 @@ namespace Boreal.Animals
             {
                 ThreatMemory memory = rememberedThreats[index];
                 memory.timeRemaining -= deltaTime;
-                if (!IsViablePrey(memory.attacker) || memory.timeRemaining <= 0f)
+                if (!IsOtherLivingAnimal(memory.attacker) || memory.timeRemaining <= 0f)
                 {
                     rememberedThreats.RemoveAt(index);
                 }
@@ -1763,7 +1769,7 @@ namespace Boreal.Animals
 
         void RememberThreat(SeekFood attacker)
         {
-            if (!IsViablePrey(attacker))
+            if (!IsOtherLivingAnimal(attacker))
             {
                 return;
             }
@@ -1957,7 +1963,7 @@ namespace Boreal.Animals
         {
             Vector3 away = direction;
             away.y = 0f;
-            if (away.sqrMagnitude < 0.01f && IsViablePrey(fallbackThreat))
+            if (away.sqrMagnitude < 0.01f && IsOtherLivingAnimal(fallbackThreat))
             {
                 away = transform.position - fallbackThreat.transform.position;
                 away.y = 0f;
@@ -2253,8 +2259,21 @@ namespace Boreal.Animals
                 return false;
             }
 
-            return allowCannibalism || possiblePrey.speciesName != speciesName;
+            return possiblePrey.speciesName != speciesName || allowCannibalism || HuntsOwnKind;
         }
+
+        // Whether this animal hunts members of its own species that aren't close kin (item 66).
+        public bool HuntsOwnKind => dietAffinity >= huntOwnKindFromDiet;
+
+        // Another animal still alive: one this animal can notice as a threat, remember and flee from. Prey is more
+        // than that, since an animal that hunts its own kind is a threat to plant-eaters that would never hunt it.
+        public bool IsOtherLivingAnimal(SeekFood other) => other != null && other != this && other.IsAlive;
+
+        // Prey, or an animal hunting or attacking this one, which it may fight back against whether or not it would
+        // ever hunt it.
+        bool CanAttack(SeekFood target) =>
+            IsViablePrey(target) ||
+            IsOtherLivingAnimal(target) && (IsRememberedThreat(target) || target.IsTargetingAsPrey(this));
 
         bool IsCloseRelative(SeekFood other)
         {
@@ -2420,7 +2439,7 @@ namespace Boreal.Animals
                 return;
             }
 
-            if (IsViablePrey(attacker))
+            if (IsOtherLivingAnimal(attacker))
             {
                 RememberThreat(attacker);
                 ClearTargets();

@@ -499,6 +499,80 @@ namespace Boreal.Animals.Tests
             }
         }
 
+        // Item 66: a hungry meat-leaning animal hunts a member of its own species that isn't close kin, and the kill
+        // counts as predation.
+        [UnityTest]
+        public IEnumerator MeatLeaningAnimalsHuntTheirOwnKind()
+        {
+            EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
+            yield return new EnterPlayMode(ReloadsDomain);
+
+            BakeNavMesh(CreateGround(Vector3.zero, 60f));
+            StartSimulation();
+            SeekFood hunter = CreateAnimal(new Vector3(-10f, 0f, 0f), Genome(diet: 0.6f), energyFraction: 0.4f, age: 10f);
+            SeekFood prey = CreateAnimal(new Vector3(10f, 0f, 0f), SlowGenome(), energyFraction: 0.9f, age: 10f);
+            yield return null;
+            Assert.IsTrue(hunter.HuntsOwnKind);
+            prey.currentHealth = 20f;
+
+            float deadline = Time.time + 30f;
+            while (prey != null && prey.IsAlive && Time.time < deadline) yield return null;
+            Assert.IsFalse(prey != null && prey.IsAlive, "The meat-leaning animal did not kill its own kind within 30 s.");
+            Assert.AreEqual(1, Telemetry().predationDeaths);
+        }
+
+        // Below Hunt Own Kind From Diet, an animal leaves its own species alone however hungry it is.
+        [UnityTest]
+        public IEnumerator PlantEatersLeaveTheirOwnKindAlone()
+        {
+            EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
+            yield return new EnterPlayMode(ReloadsDomain);
+
+            BakeNavMesh(CreateGround(Vector3.zero, 60f));
+            StartSimulation();
+            SeekFood hungry = CreateAnimal(new Vector3(-10f, 0f, 0f), Genome(), energyFraction: 0.4f, age: 10f);
+            SeekFood other = CreateAnimal(new Vector3(10f, 0f, 0f), SlowGenome(), energyFraction: 0.9f, age: 10f);
+            yield return null;
+            Assert.IsFalse(hungry.HuntsOwnKind);
+            Assert.IsFalse(hungry.IsViablePrey(other));
+            other.currentHealth = 20f;
+
+            float deadline = Time.time + 15f;
+            while (other.IsAlive && Time.time < deadline) yield return null;
+            Assert.IsTrue(other.IsAlive, "A plant-eater attacked its own kind.");
+            Assert.AreEqual(0, Telemetry().predationDeaths);
+        }
+
+        // A plant-eater would never hunt a meat-eater of its own kind, but it still sees one hunting it, and flees or
+        // fights back.
+        [UnityTest]
+        public IEnumerator PlantEatersNoticeAHunterOfTheirOwnKind()
+        {
+            EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
+            yield return new EnterPlayMode(ReloadsDomain);
+
+            BakeNavMesh(CreateGround(Vector3.zero, 60f));
+            StartSimulation();
+            SeekFood hunter = CreateAnimal(new Vector3(-10f, 0f, 0f), Genome(diet: 0.6f), energyFraction: 0.4f, age: 10f);
+            SeekFood prey = CreateAnimal(new Vector3(10f, 0f, 0f), Genome(), energyFraction: 0.9f, age: 10f);
+            yield return null;
+            Assert.IsFalse(prey.IsViablePrey(hunter));
+
+            float deadline = Time.time + 20f;
+            SpeciesTelemetryRecord record = Telemetry();
+            while (record.fleeResponses + record.fightResponses == 0 && Time.time < deadline) yield return null;
+            Assert.Greater(record.fleeResponses + record.fightResponses, 0,
+                           "The plant-eater never fled from or fought the hunter of its own kind.");
+        }
+
+        // A founder-like animal that walks at a third of the usual speed, so a hunter can catch it.
+        static AnimalGenome SlowGenome()
+        {
+            AnimalGenome genome = Genome();
+            genome[AnimalGene.MoveSpeed] = 2f;
+            return genome;
+        }
+
         // An equinox day at 62° N, at this time of day (0 midnight, 0.5 noon), as the day clock would publish it.
         static void SetTimeOfDay(float timeOfDay)
         {

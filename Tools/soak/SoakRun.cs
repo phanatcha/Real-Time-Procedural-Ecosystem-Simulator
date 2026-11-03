@@ -72,6 +72,7 @@ namespace Boreal.Soak.Editor
             SessionState.SetString(Key + "Events", Arg("soakEvents", ""));
             SessionState.SetBool(Key + "Thirst", Arg("soakThirst", "1") == "1");
             SessionState.SetBool(Key + "DayNight", Arg("soakDayNight", "1") == "1");
+            SessionState.SetBool(Key + "OwnKind", Arg("soakOwnKind", "1") == "1");
 
             // The founders' start search (item 9) lives in AnimalTerrainIntegration, which this assembly can't
             // reference, so it is set by its serialized name.
@@ -151,13 +152,14 @@ namespace Boreal.Soak.Editor
             if (simulated - SessionState.GetFloat(Key + "LastStatus", -1f) >= 50f)
             {
                 SessionState.SetFloat(Key + "LastStatus", simulated);
-                int inWater = 0, swimmers = 0, drinking = 0, thirsty = 0;
+                int inWater = 0, swimmers = 0, drinking = 0, thirsty = 0, hunters = 0;
                 foreach (SeekFood animal in animals)
                 {
                     if (animal.IsInWater) inWater++;
                     if (animal.CanSwimDeepWater) swimmers++;
                     if (animal.IsDrinking) drinking++;
                     if (animal.IsThirsty) thirsty++;
+                    if (animal.HuntsOwnKind) hunters++;
                 }
                 FoodSpawner food = Object.FindAnyObjectByType<FoodSpawner>();
                 Debug.Log($"Soak: t={simulated:0} s year {clock.Year} {clock.SeasonName}, " +
@@ -165,6 +167,7 @@ namespace Boreal.Soak.Editor
                           $"species {(manager != null ? manager.SpeciesAliveCount : -1)}, " +
                           $"achieved speed {(manager != null ? manager.AchievedSimulationSpeed : 0f):0.0}x, " +
                           $"in water {inWater}, swimmers {swimmers}, thirsty {thirsty}, drinking {drinking}, " +
+                          $"hunt own kind {hunters}, " +
                           $"sea plants shown {(food != null ? food.ShownSeaPlantCount : -1)}, " +
                           $"sea plants eaten {(food != null ? food.SeaPlantsEaten : -1)}, " +
                           $"animal-seconds in water {SessionState.GetFloat(Key + "WaterSeconds", 0f):0}, " +
@@ -186,6 +189,8 @@ namespace Boreal.Soak.Editor
                 {
                     if (harmfulChance >= 0f) founder.harmfulMutationChance = harmfulChance;
                     if (!SessionState.GetBool(Key + "Thirst", true)) founder.enableThirst = false;
+                    // Item 66 off: no diet is high enough to hunt the animals' own species.
+                    if (!SessionState.GetBool(Key + "OwnKind", true)) founder.huntOwnKindFromDiet = 2f;
                     Vector3 p = founder.transform.position;
                     Debug.Log($"Soak: founder {founder.name} at x {p.x:0} z {p.z:0} (height {p.y:0})");
                 }

@@ -129,7 +129,7 @@ namespace Boreal.Animals
             foreach (AnimalThreat threat in perception.threats)
             {
                 SeekFood attacker = threat.attacker;
-                if (!self.IsViablePrey(attacker))
+                if (!self.IsOtherLivingAnimal(attacker))
                 {
                     continue;
                 }

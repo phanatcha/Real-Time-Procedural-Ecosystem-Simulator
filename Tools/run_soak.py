@@ -24,6 +24,7 @@ parser.add_argument('--minutes', default='40', help='Wall-clock limit for the ru
 parser.add_argument('--experiment', help='Recorder experiment label; defaults to "soak <seed>"')
 parser.add_argument('--harmful-chance', help='Harmful mutation chance in per cent set on every animal, for item 46 comparisons')
 parser.add_argument('--thirst', default='1', help='0 switches thirst off on every animal')
+parser.add_argument('--own-kind', default='1', help='0 stops animals hunting their own species (item 66), for control runs')
 parser.add_argument('--daynight', default='1', help='0 switches day and night off (always midday), for control runs')
 parser.add_argument('--start-search', help='Founder start search radius in metres; 0 starts at the simulation focus as before item 9')
 parser.add_argument('--events', help='God tools to schedule, e.g. "drought@800:200x0.2,extinction@1200x0.5" (see GodTools.TryParse)')
@@ -76,7 +77,7 @@ if args.harmful_chance is not None:
     command += ['-soakHarmfulChance', args.harmful_chance]
 if args.events:
     command += ['-soakEvents', args.events]
-command += ['-soakThirst', args.thirst, '-soakDayNight', args.daynight]
+command += ['-soakThirst', args.thirst, '-soakDayNight', args.daynight, '-soakOwnKind', args.own_kind]
 if args.start_search is not None:
     command += ['-soakStartSearch', args.start_search]
 if channel:

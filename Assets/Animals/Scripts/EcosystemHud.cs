@@ -401,6 +401,7 @@ namespace Boreal.Animals
                         $"litter {now.litter:0.00} {Signed(now.litter - first.litter, "0.00")}");
             text.Append($"\n   perks: {AnimalPerks.DescribeShares(record.perkShares)}");
             text.Append($"\n   active: {DescribeChronotypes(manager, largest)}");
+            text.Append($"\n   hunters: {DescribeHunters(manager, largest, record.predationDeaths)}");
             text.Append($"\n   body parts: {DescribeBodyParts(manager, largest)}");
             text.Append($"\n   swimming ability: {swimmingSummary}");
         }
@@ -425,6 +426,21 @@ namespace Boreal.Animals
             float average = total / counted;
             return $"{SeekFood.DescribeChronotype(average)} ({average:0.00}, {lowest:0.00}-{highest:0.00}), " +
                    $"{100f * resting / counted:0}% resting now";
+        }
+
+        // How many of the species' animals hunt their own kind (item 66), and how many it has lost to hunters.
+        static string DescribeHunters(SpeciesManager manager, string species, int killed)
+        {
+            int counted = 0, hunters = 0;
+            foreach (SeekFood animal in manager.ActiveAgents)
+            {
+                if (animal == null || animal.speciesName != species) continue;
+                counted++;
+                if (animal.HuntsOwnKind) hunters++;
+            }
+
+            if (counted == 0) return "no animals in view";
+            return $"{100f * hunters / counted:0}% of those in view hunt their own kind, {killed} killed by hunters so far";
         }
 
         // The time of year and what it does compared with the terrain's base climate.
