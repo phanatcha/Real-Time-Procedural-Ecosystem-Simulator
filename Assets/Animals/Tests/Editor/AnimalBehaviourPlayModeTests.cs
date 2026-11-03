@@ -297,9 +297,11 @@ namespace Boreal.Animals.Tests
 
             float fraction = child.newbornSizeFraction;
             Assert.That(child.Growth, Is.EqualTo(fraction).Within(0.05f), "A newborn starts at the newborn size fraction.");
-            Assert.That(child.transform.localScale.x, Is.EqualTo(parent.transform.localScale.x * fraction).Within(0.05f));
-            Assert.That(child.FeedingReach, Is.EqualTo(parent.FeedingReach * fraction).Within(0.3f));
-            Assert.That(child.visionRadius, Is.EqualTo(parent.visionRadius * fraction).Within(1f));
+            // A frame or two of growth has happened by now, so compare with the growth the child has, not the fraction.
+            float grown = child.Growth;
+            Assert.That(child.transform.localScale.x, Is.EqualTo(parent.transform.localScale.x * grown).Within(0.05f));
+            Assert.That(child.FeedingReach, Is.EqualTo(parent.FeedingReach * grown).Within(0.3f));
+            Assert.That(child.visionRadius, Is.EqualTo(parent.visionRadius * grown).Within(1f));
             Assert.Less(child.GetComponent<NavMeshAgent>().speed, parent.GetComponent<NavMeshAgent>().speed * 0.6f,
                         "A newborn should be much slower than its parent.");
             float energyAtBirth = child.currentEnergy;

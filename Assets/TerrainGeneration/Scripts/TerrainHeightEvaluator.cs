@@ -76,6 +76,8 @@ namespace Boreal.TerrainGeneration
             }
 
             float lakeStrength = 0f;
+            float lakeBowlNoise = 0f;
+            float lakeBowlPresence = 0f;
             if (settings.lakeSettings != null && settings.lakeSettings.enabled)
             {
                 LakeSettings lake = settings.lakeSettings;
@@ -98,6 +100,11 @@ namespace Boreal.TerrainGeneration
                         heightBeforeRivers));
                 lakeStrength = Mathf.Clamp01(lakeMask * presence);
                 noiseValue = Mathf.Lerp(noiseValue, lake.bedLevel, lakeStrength);
+                if (lake.gentleBanks)
+                {
+                    lakeBowlNoise = lakeNoise;
+                    lakeBowlPresence = presence;
+                }
             }
 
             // Valleys come last and only cut the ground down, so rivers and lakes already carved stay as they are. Each
@@ -141,6 +148,12 @@ namespace Boreal.TerrainGeneration
 
             riverStrength = Mathf.Max(riverStrength, valleyRiverStrength);
 
+            if (lakeBowlPresence > 0f)
+            {
+                float shaped = ShapeLakeBowl(settings.lakeSettings, terrainPosition, lakeBowlNoise, noiseValue, settings, heightCurve);
+                noiseValue = Mathf.Lerp(noiseValue, shaped, lakeBowlPresence);
+            }
+
             float beforeErosion = heightCurve.Evaluate(noiseValue) * settings.heightMultiplier;
             float height = erosion == null ? beforeErosion : erosion.ApplyHeight(terrainPosition, beforeErosion);
             return new TerrainHeightEvaluation
@@ -155,6 +168,84 @@ namespace Boreal.TerrainGeneration
                 heightAfterRidges = heightAfterRidges,
                 falloff = falloffValue
             };
+        }
+
+        // A lake as a bowl animals can walk into. Cut straight down, a lake's edge is a wall from ground 7 to 50 m above
+        // the water to a bed 6 m below it, steeper than animals can walk, so the land's navigation stopped at the top
+        // and no animal that couldn't swim ever stood in a lake. Here, by the distance from the lake's edge (the outer
+        // edge of its carving, so every point the lake carves at all is under water): outside it the ground may rise
+        // from the water no steeper than the bank slope; inside it a shelf runs from 0.15 m deep at the shore to the
+        // shelf depth, then the floor drops at the bank slope to the bed. Both only ever lower the ground, and run after
+        // the valleys, whose shoulders would otherwise lift the banks back into walls. Heights are set in metres and
+        // turned back into the value before the height curve, so the slope is true whatever the curve.
+        static float ShapeLakeBowl(LakeSettings lake, Vector2 position, float lakeNoise, float ground,
+            HeightMapSettings settings, AnimationCurve heightCurve)
+        {
+            float edge = lake.threshold - 0.05f;
+            // Far from any lake the bank can't reach the ground, so the costlier distance estimate is skipped.
+            if (lakeNoise < edge - 0.25f) return ground;
+
+            float multiplier = settings.heightMultiplier;
+            float lowest = heightCurve.Evaluate(0f) * multiplier;
+            float highest = heightCurve.Evaluate(1f) * multiplier;
+            float water = Mathf.Lerp(lowest, highest, lake.waterLevelPercent);
+            float slope = Mathf.Tan(lake.bankSlopeDegrees * Mathf.Deg2Rad);
+
+            // Distance in metres from the lake's edge, positive on the land side, found as ValleyDistance finds a
+            // valley's centre line: the noise's distance from the edge over its gradient, then up to two Newton steps
+            // onto the edge. The first estimate alone bends with the noise and made banks steeper than their slope.
+            Vector2 point = position;
+            float here = lakeNoise;
+            float distance;
+            for (int step = 0; ; step++)
+            {
+                float gradientX = LakeNoise(lake, point + new Vector2(1f, 0f)) - here;
+                float gradientY = LakeNoise(lake, point + new Vector2(0f, 1f)) - here;
+                float squaredGradient = Mathf.Max(gradientX * gradientX + gradientY * gradientY, 1e-12f);
+                float remaining = Mathf.Abs(edge - here) / Mathf.Sqrt(squaredGradient);
+                float walked = (point - position).magnitude;
+                if (step == 2 || remaining < 0.5f || walked + remaining > 400f)
+                {
+                    distance = walked + remaining;
+                    break;
+                }
+
+                point += new Vector2(gradientX, gradientY) * ((edge - here) / squaredGradient);
+                here = LakeNoise(lake, point);
+            }
+            float outside = lakeNoise < edge ? distance : -distance;
+
+            float target;
+            if (outside >= 0f)
+            {
+                target = water + slope * outside;
+                if (target >= heightCurve.Evaluate(ground) * multiplier) return ground;
+            }
+            else
+            {
+                float inside = -outside;
+                float depth = inside <= lake.shelfWidth
+                    ? Mathf.Lerp(0.15f, lake.shelfDepth, lake.shelfWidth > 0f ? inside / lake.shelfWidth : 1f)
+                    : lake.shelfDepth + slope * (inside - lake.shelfWidth);
+                target = Mathf.Max(heightCurve.Evaluate(lake.bedLevel) * multiplier, water - depth);
+            }
+
+            return Mathf.Min(ground, InputForHeight(heightCurve, multiplier, target));
+        }
+
+        // The value before the height curve that gives this height in metres. The curve rises everywhere, so a
+        // bisection finds it; 20 steps resolve it to about a millionth.
+        static float InputForHeight(AnimationCurve heightCurve, float multiplier, float height)
+        {
+            float low = 0f;
+            float high = 1f;
+            for (int step = 0; step < 20; step++)
+            {
+                float middle = 0.5f * (low + high);
+                if (heightCurve.Evaluate(middle) * multiplier < height) low = middle;
+                else high = middle;
+            }
+            return 0.5f * (low + high);
         }
 
         // How far inside one of the lake noise's patches a point lies: 0 at the patch edge (the lake threshold), 1 where

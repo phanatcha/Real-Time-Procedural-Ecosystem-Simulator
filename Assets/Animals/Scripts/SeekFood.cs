@@ -937,8 +937,8 @@ namespace Boreal.Animals
             return sample.isValid && sample.isWater && (sample.riverStrength > 0.05f || sample.lakeStrength > 0.05f);
         }
 
-        // The nearest fresh water in view and a place at its edge on the NavMesh where this animal can stand or wade
-        // to drink. The spot is kept until it has been drunk from or given up on; the search itself runs at most
+        // The nearest fresh water in view and a place at its edge on the NavMesh where this animal can wade in, or
+        // failing that stand, to drink. The spot is kept until it has been drunk from or given up on; the search itself runs at most
         // every two seconds, since it samples the terrain along rays.
         bool TryFindDrinkingSpot(out Vector3 spot)
         {
@@ -951,7 +951,11 @@ namespace Boreal.Animals
                 ? DrinkingWaterLocator(transform.position, visionRadius)
                 : FindFreshWater();
             if (!water.HasValue) return false;
-            if (!NavMesh.SamplePosition(water.Value, out NavMeshHit hit, 15f, WaterAccess.AreaMask(CanSwimDeepWater))) return false;
+            // Animals wade in to drink, as real ones do: the spot is in the shallows when there are any by the water
+            // found (lakes have a wadeable shelf inside a walkable bank), otherwise anywhere the animal can stand or
+            // swim, which for a river in a gorge is the top of its bank.
+            if (!NavMesh.SamplePosition(water.Value, out NavMeshHit hit, 15f, 1 << WaterAccess.ShallowWaterArea) &&
+                !NavMesh.SamplePosition(water.Value, out hit, 15f, WaterAccess.AreaMask(CanSwimDeepWater))) return false;
             if (IsRememberedUnreachableWater(hit.position)) return false;
 
             spot = hit.position;
@@ -1285,7 +1289,8 @@ namespace Boreal.Animals
                 waterChaseTimer += deltaTime;
                 Vector3 offset = transform.position - currentDrinkingSpot;
                 offset.y = 0f;
-                float range = CurrentFoodInteractionRange;
+                // The spot itself, not the food reach, or a drinking animal stops on the bank short of the shallows.
+                float range = Mathf.Min(CurrentFoodInteractionRange, 1.5f + (agent != null ? agent.radius : 0f));
                 if (offset.sqrMagnitude <= range * range)
                 {
                     // At the water's edge: stand and drink (UpdateThirst refills).

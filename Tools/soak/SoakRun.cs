@@ -46,6 +46,9 @@ namespace Boreal.Soak.Editor
             SessionState.SetFloat(Key + "Deadline", (float)(EditorApplication.timeSinceStartup +
                 60.0 * float.Parse(Arg("soakMinutes", "40"), CultureInfo.InvariantCulture)));
             SessionState.SetInt(Key + "Stage", 0);
+            SessionState.SetFloat(Key + "WaterSeconds", 0f);
+            SessionState.SetFloat(Key + "DrinkSeconds", 0f);
+            SessionState.SetFloat(Key + "DrinkInWaterSeconds", 0f);
             SessionState.SetBool(Key + "SeasonsOn", Arg("soakSeasons", "1") == "1");
             SessionState.SetInt(Key + "LastPeak", -1);
             SessionState.SetFloat(Key + "LastStatus", -1f);
@@ -66,6 +69,22 @@ namespace Boreal.Soak.Editor
             recorder.experiment = Arg("soakExperiment", "soak " + seed);
             SessionState.SetFloat(Key + "HarmfulChance", float.Parse(Arg("soakHarmfulChance", "-1"), CultureInfo.InvariantCulture));
             SessionState.SetString(Key + "Events", Arg("soakEvents", ""));
+            SessionState.SetBool(Key + "Thirst", Arg("soakThirst", "1") == "1");
+
+            // The founders' start search (item 9) lives in AnimalTerrainIntegration, which this assembly can't
+            // reference, so it is set by its serialized name.
+            string startSearch = Arg("soakStartSearch", "");
+            if (startSearch.Length > 0)
+            {
+                foreach (MonoBehaviour behaviour in Object.FindObjectsByType<MonoBehaviour>(FindObjectsSortMode.None))
+                {
+                    if (behaviour.GetType().Name != "AnimalTerrainDemoBootstrap") continue;
+                    SerializedObject bootstrap = new SerializedObject(behaviour);
+                    bootstrap.FindProperty("startSearchRadius").floatValue = float.Parse(startSearch, CultureInfo.InvariantCulture);
+                    bootstrap.ApplyModifiedPropertiesWithoutUndo();
+                    Debug.Log($"Soak: founder start search radius set to {startSearch} m");
+                }
+            }
 
             Debug.Log($"Soak: starting {seed} for {SessionState.GetFloat(Key + "Years", 0f)} years, output {output}");
             EditorApplication.update += Tick;
@@ -104,12 +123,42 @@ namespace Boreal.Soak.Editor
             // YearProgress includes the starting season offset; experiment duration must not.
             float simulated = manager != null ? Mathf.Max(0f, Time.time - manager.WorldStartTime) : 0f;
 
+            if (stage == 0)
+            {
+                int wading = 0, drinkingNow = 0, drinkingInWater = 0;
+                foreach (SeekFood animal in animals)
+                {
+                    if (animal.IsInWater) wading++;
+                    if (animal.IsDrinking) { drinkingNow++; if (animal.IsInWater) drinkingInWater++; }
+                }
+                float step = Time.deltaTime;
+                SessionState.SetFloat(Key + "WaterSeconds", SessionState.GetFloat(Key + "WaterSeconds", 0f) + wading * step);
+                SessionState.SetFloat(Key + "DrinkSeconds", SessionState.GetFloat(Key + "DrinkSeconds", 0f) + drinkingNow * step);
+                SessionState.SetFloat(Key + "DrinkInWaterSeconds",
+                    SessionState.GetFloat(Key + "DrinkInWaterSeconds", 0f) + drinkingInWater * step);
+            }
+
             if (simulated - SessionState.GetFloat(Key + "LastStatus", -1f) >= 50f)
             {
                 SessionState.SetFloat(Key + "LastStatus", simulated);
+                int inWater = 0, swimmers = 0, drinking = 0, thirsty = 0;
+                foreach (SeekFood animal in animals)
+                {
+                    if (animal.IsInWater) inWater++;
+                    if (animal.CanSwimDeepWater) swimmers++;
+                    if (animal.IsDrinking) drinking++;
+                    if (animal.IsThirsty) thirsty++;
+                }
+                FoodSpawner food = Object.FindAnyObjectByType<FoodSpawner>();
                 Debug.Log($"Soak: t={simulated:0} s year {clock.Year} {clock.SeasonName}, animals {animals.Length}, " +
                           $"species {(manager != null ? manager.SpeciesAliveCount : -1)}, " +
-                          $"achieved speed {(manager != null ? manager.AchievedSimulationSpeed : 0f):0.0}x");
+                          $"achieved speed {(manager != null ? manager.AchievedSimulationSpeed : 0f):0.0}x, " +
+                          $"in water {inWater}, swimmers {swimmers}, thirsty {thirsty}, drinking {drinking}, " +
+                          $"sea plants shown {(food != null ? food.ShownSeaPlantCount : -1)}, " +
+                          $"sea plants eaten {(food != null ? food.SeaPlantsEaten : -1)}, " +
+                          $"animal-seconds in water {SessionState.GetFloat(Key + "WaterSeconds", 0f):0}, " +
+                          $"drinking {SessionState.GetFloat(Key + "DrinkSeconds", 0f):0} of which in water " +
+                          $"{SessionState.GetFloat(Key + "DrinkInWaterSeconds", 0f):0}");
             }
 
             if (stage == 0 && animals.Length > 0 && !SessionState.GetBool(Key + "Fast", false) && manager != null)
@@ -123,6 +172,7 @@ namespace Boreal.Soak.Editor
                 foreach (SeekFood founder in animals)
                 {
                     if (harmfulChance >= 0f) founder.harmfulMutationChance = harmfulChance;
+                    if (!SessionState.GetBool(Key + "Thirst", true)) founder.enableThirst = false;
                     Vector3 p = founder.transform.position;
                     Debug.Log($"Soak: founder {founder.name} at x {p.x:0} z {p.z:0} (height {p.y:0})");
                 }

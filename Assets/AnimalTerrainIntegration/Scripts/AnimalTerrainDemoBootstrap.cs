@@ -288,8 +288,8 @@ namespace Boreal.AnimalTerrainIntegration
         }
 
         // The best place to start within Start Search Radius of the simulation focus: the candidate centre whose
-        // spawn radius holds the most walkable land and plant food, with a small preference for staying near the
-        // focus. On FOREST-001 the focus sits in a strait, which put the founders on two islands' shore lowlands.
+        // spawn radius holds the most walkable land and food, on land and in the shallows (ScoreStart), with a small
+        // preference for staying near the focus. On FOREST-001 the focus sits in a strait, which put the founders on two islands' shore lowlands.
         Vector3 ChooseFounderStart()
         {
             Vector3 focus = simulationFocus.position;
@@ -299,6 +299,7 @@ namespace Boreal.AnimalTerrainIntegration
 
             float spacing = Mathf.Max(20f, animalSpawnRadius * 0.4f);
             int steps = Mathf.CeilToInt(search / spacing);
+            hasStartSeaBiomes = SeaBiomeMap.TryCreateClassifier(terrainWorld, out startSeaBiomes);
             float bestScore = ScoreStart(focus);
             Vector3 best = focus;
             for (int gx = -steps; gx <= steps; gx++)
@@ -320,7 +321,8 @@ namespace Boreal.AnimalTerrainIntegration
             if (best != focus)
             {
                 Debug.Log($"Founders start {Vector3.Distance(best, focus):0} m from the simulation focus, at " +
-                          $"x {best.x:0} z {best.z:0}, where the spawn radius holds more walkable land and plant food.",
+                          $"x {best.x:0} z {best.z:0}, where the spawn radius holds more walkable land and food, " +
+                          "on land and in the shallows.",
                           this);
                 // The camera keeps its offset from the focus, so the founders are in view.
                 Camera camera = Camera.main;
@@ -332,7 +334,12 @@ namespace Boreal.AnimalTerrainIntegration
 
         // Walkable land within the spawn radius of a centre, and the plant food it grows per minute by the food
         // spawner's own rules, sampled on three rings. Each walkable point counts a little even where nothing grows,
-        // so the founders can at least move.
+        // so the founders can at least move. Water shallow enough to wade in counts the sea plants it grows, since
+        // the founders eat those too. On FOREST-001 the richest start is still an island's interior, out of reach of
+        // the shallows, so no animal there goes into water in the first years: it has no food reason to.
+        SeaBiomeClassifier startSeaBiomes;
+        bool hasStartSeaBiomes;
+
         float ScoreStart(Vector3 centre)
         {
             const int Rings = 3;
@@ -345,9 +352,18 @@ namespace Boreal.AnimalTerrainIntegration
                 {
                     float angle = (index + 0.5f * ring) * Mathf.PI * 2f / PointsPerRing;
                     Vector3 point = centre + new Vector3(Mathf.Cos(angle) * radius, 0f, Mathf.Sin(angle) * radius);
-                    if (!terrainWorld.TryGetWalkableSample(point, out EnvironmentSample sample)) continue;
-                    if (!TemperatureSystem.TryGetClimateTemperatureAt(point, out float celsius)) celsius = 2f;
-                    total += 0.2f + foodSpawner.EstimateNutritionPerMinute(sample, celsius);
+                    if (terrainWorld.TryGetWalkableSample(point, out EnvironmentSample sample))
+                    {
+                        if (!TemperatureSystem.TryGetClimateTemperatureAt(point, out float celsius)) celsius = 2f;
+                        total += 0.2f + foodSpawner.EstimateNutritionPerMinute(sample, celsius);
+                    }
+                    else if (hasStartSeaBiomes && terrainWorld.TryGetSample(point, out EnvironmentSample water) &&
+                             water.isValid && water.isWater)
+                    {
+                        SeaBiome biome = startSeaBiomes.Classify(water, out float depth, out float surfaceCelsius);
+                        if (depth <= WaterAccess.WadingDepth)
+                            total += foodSpawner.EstimateSeaNutritionPerMinute(biome, surfaceCelsius);
+                    }
                 }
             }
             return total;

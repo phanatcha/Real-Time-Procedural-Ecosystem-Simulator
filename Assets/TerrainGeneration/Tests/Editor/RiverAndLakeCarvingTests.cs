@@ -42,6 +42,89 @@ namespace Boreal.TerrainGeneration.Tests
                 "a bed below the bottom of its range would raise the ground it starts on");
         }
 
+        // The lake banks are shaped against this level, so it has to be the level the water is drawn at.
+        [Test]
+        public void LakeBanksUseTheWaterLevel()
+        {
+            EnvironmentDefinitions environment = AssetDatabase.LoadAssetAtPath<EnvironmentDefinitions>(Folder + "EnvironmentDefinitions.asset");
+            Assert.AreEqual(environment.ShorelineThreshold, heights.lakeSettings.waterLevelPercent, 1e-4f);
+        }
+
+        // Lakes are bowls animals can walk into: from the water up to the natural ground no step is steeper than the
+        // 32 degrees animals can walk, and a strip of water inside the edge is shallow enough to wade. Cut straight
+        // down, their edges were walls 7 m or more high, and almost none of their water could be waded.
+        [Test]
+        public void LakeBanksCanBeWalkedAndTheirEdgesWaded()
+        {
+            const float WadingDepth = 1f;
+            const float Spacing = 2f;
+            const int Count = 1001;
+            // A bank is the ground within this far of a point the lake carves.
+            const int BankReach = 50;
+            heights.useFalloff = false;
+            float steepest = 0f;
+            Vector2 steepestAt = default;
+            int underWater = 0;
+            int wadeable = 0;
+            int bankSteps = 0;
+            var row = new TerrainHeightEvaluation[Count];
+            for (float y = -1000f; y <= 1000f; y += 40f)
+            {
+                int lastLake = -1000;
+                var nearLake = new bool[Count];
+                for (int i = 0; i < Count; i++)
+                {
+                    row[i] = TerrainHeightEvaluator.Evaluate(0.7f, 0f, new Vector2(-1000f + i * Spacing, y), heights, heights.heightCurve);
+                    if (row[i].lakeStrength > 0f) lastLake = i;
+                    nearLake[i] = i - lastLake <= BankReach;
+                }
+
+                lastLake = 1000 + Count;
+                for (int i = Count - 1; i >= 0; i--)
+                {
+                    if (row[i].lakeStrength > 0f) lastLake = i;
+                    nearLake[i] |= lastLake - i <= BankReach;
+
+                    float here = row[i].height;
+                    if (row[i].lakeStrength > 0f && here < waterLevel)
+                    {
+                        underWater++;
+                        if (waterLevel - here <= WadingDepth) wadeable++;
+                    }
+                }
+
+                for (int i = 1; i < Count; i++)
+                {
+                    float here = row[i].height;
+                    float previous = row[i - 1].height;
+                    // Only the climb out of a lake counts: between the water and 15 m above it, beside a lake, away
+                    // from the river channels and valley walls, which are cut on purpose.
+                    bool carvedOtherwise = row[i].riverStrength > 0f || row[i - 1].riverStrength > 0f ||
+                                           row[i].valleyStrength > 0f || row[i - 1].valleyStrength > 0f;
+                    if (!nearLake[i] || !nearLake[i - 1] || carvedOtherwise ||
+                        Mathf.Max(here, previous) <= waterLevel || Mathf.Min(here, previous) >= waterLevel + 15f ||
+                        Mathf.Min(here, previous) <= waterLevel - WadingDepth)
+                    {
+                        continue;
+                    }
+
+                    bankSteps++;
+                    float slope = Mathf.Atan(Mathf.Abs(here - previous) / Spacing) * Mathf.Rad2Deg;
+                    if (slope > steepest)
+                    {
+                        steepest = slope;
+                        steepestAt = new Vector2(-1000f + i * Spacing, y);
+                    }
+                }
+            }
+
+            Assert.Greater(bankSteps, 50, "too little bank to judge");
+
+            Assert.Greater(underWater, 100, "too little lake to judge");
+            Assert.Less(steepest, 32f, $"a lake bank is {steepest:0} degrees at {steepestAt}");
+            Assert.Greater(wadeable, underWater / 20, $"only {wadeable} of {underWater} lake points are shallow enough to wade in");
+        }
+
         // Ground at 0.7 before the island falloff is land in the middle of the island and sea floor towards its edge.
         // The ranges used to be tested before the falloff, so rivers picked ground the falloff then sank into the sea.
         [Test]

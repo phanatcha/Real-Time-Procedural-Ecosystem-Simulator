@@ -99,10 +99,31 @@ namespace Boreal.TerrainGeneration
                  "Keep it just below the shoreline (about 0.55) so the lake fills with water.")]
         public float bedLevel = 0.5f;
 
+        [Header("Banks")]
+        [Tooltip("Shape each lake as a bowl animals can walk into: a bank no steeper than Bank Slope down to the water and " +
+                 "a wadeable shelf inside the edge. Off, lakes are cut straight down to the bed, and their banks are walls " +
+                 "7 to 50 m high that animals can't climb down, so they can only drink from the top.")]
+        public bool gentleBanks = true;
+        [Range(5f, 40f)]
+        [Tooltip("Steepest the ground may rise from a lake's water, in degrees. Keep it under the 32 degrees animals can walk.")]
+        public float bankSlopeDegrees = 28f;
+        [Min(0f)]
+        [Tooltip("Width in metres of the wadeable shelf inside a lake's edge, before the floor drops to the bed.")]
+        public float shelfWidth = 12f;
+        [Range(0.1f, 1f)]
+        [Tooltip("Depth in metres at the inner edge of the shelf; it starts at 0.15 m at the shore. Keep it under the " +
+                 "1 m an animal can wade.")]
+        public float shelfDepth = 0.6f;
+        [Range(0, 1)]
+        [Tooltip("The water level as a share of the terrain's height range, the same as Normalized Water Level on the " +
+                 "Environment Definitions, which the banks are shaped against. RiverAndLakeCarvingTests checks they match.")]
+        public float waterLevelPercent = 0.31f;
+
         public void ValidateValues()
         {
             scale = Mathf.Max(scale, 0.01f);
             maxHeightPercent = Mathf.Max(maxHeightPercent, minHeightPercent + 0.05f);
+            shelfWidth = Mathf.Max(shelfWidth, 0f);
         }
     }
 }

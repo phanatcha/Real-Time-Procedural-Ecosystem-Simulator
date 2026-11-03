@@ -122,6 +122,8 @@ namespace Boreal.TerrainGeneration
                 key.Add(lake.enabled);
                 key.Add(lake.seed);
                 key.Add(lake.scale, lake.threshold, lake.minHeightPercent, lake.maxHeightPercent, lake.bedLevel);
+                key.Add(lake.gentleBanks);
+                key.Add(lake.bankSlopeDegrees, lake.shelfWidth, lake.shelfDepth, lake.waterLevelPercent);
             }
             key.Add(settings.useFalloff);
             key.Add(settings.worldRadius, settings.heightMultiplier);
