@@ -165,6 +165,7 @@ namespace Boreal.Animals
         // every other, it rarely splits at all. The breeding threshold and torpor genes brought the first split from
         // about 55 generations to 50 and were kept at 0.05. The mutation rate gene moved it back to about 55: lineages
         // whose rate drifts up diverge faster, but one more gene makes every other difference count a little less.
+        // The nocturnality gene (founders at 0.35) brought it from about 56 generations to 51.5 and was kept at 0.05.
         // Re-run the calibration after adding a gene, body site or perk.
         public const float DefaultSpeciationThreshold = 0.05f;
 

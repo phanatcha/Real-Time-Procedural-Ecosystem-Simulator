@@ -114,6 +114,7 @@ namespace Boreal.Animals.Tests
             founder[AnimalGene.SexualDrive] = 0.5f;
             founder[AnimalGene.BreedingThreshold] = 0.8f;
             founder[AnimalGene.MutationRate] = 1f;
+            founder[AnimalGene.Nocturnality] = 0.35f;
             return founder;
         }
     }

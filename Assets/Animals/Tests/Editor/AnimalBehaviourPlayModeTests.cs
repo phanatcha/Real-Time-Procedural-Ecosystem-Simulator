@@ -465,6 +465,40 @@ namespace Boreal.Animals.Tests
             }
         }
 
+        // Thirst overrides the hours too, and sooner than hunger: a thirsty day animal goes to water at midnight
+        // instead of resting until its water runs low.
+        [UnityTest]
+        public IEnumerator ThirstyAnimalsDrinkBeforeTheyRest()
+        {
+            EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
+            yield return new EnterPlayMode(ReloadsDomain);
+
+            BakeNavMesh(CreateGround(Vector3.zero, 60f));
+            StartSimulation();
+            SeekFood.DrinkingWaterLocator = LocateTestWater;
+            try
+            {
+                SetTimeOfDay(0f);
+                SeekFood animal = CreateAnimal(Vector3.zero, Genome(), energyFraction: 0.9f, age: 10f);
+                animal.currentHydration = 0.4f * animal.maxHydration;
+
+                bool restedFirst = false;
+                float deadline = Time.time + 30f;
+                while (!animal.IsDrinking && Time.time < deadline)
+                {
+                    restedFirst |= animal.IsResting;
+                    yield return null;
+                }
+
+                Assert.IsTrue(animal.IsDrinking, "The thirsty animal did not reach the water within 30 simulated seconds.");
+                Assert.IsFalse(restedFirst, "The thirsty animal rested before it drank.");
+            }
+            finally
+            {
+                Boreal.World.WorldDay.Reset();
+            }
+        }
+
         // An equinox day at 62° N, at this time of day (0 midnight, 0.5 noon), as the day clock would publish it.
         static void SetTimeOfDay(float timeOfDay)
         {

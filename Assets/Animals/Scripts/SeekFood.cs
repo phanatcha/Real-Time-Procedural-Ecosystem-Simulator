@@ -152,8 +152,8 @@ namespace Boreal.Animals
         [Tooltip("How far an animal goes to rest under trees, in metres, when it isn't under them already. 0 rests " +
                  "where it stands.")]
         [Min(0f)] public float shelterSearchRadius = 20f;
-        [Tooltip("Below this share of its energy or water an animal forages at any hour; from twice it, it rests fully " +
-                 "at its off hours.")]
+        [Tooltip("Below this share of its energy an animal forages at any hour; from twice it, it rests fully at its " +
+                 "off hours. A thirsty animal (under Thirst Threshold) drinks before it rests.")]
         [Range(0.01f, 0.5f)] public float wakeWhenBelow = 0.25f;
 
         [Header("Juvenile Growth")]
@@ -370,7 +370,9 @@ namespace Boreal.Animals
         }
 
         // How much the animal wants to rest now: 0 at its active hours, 1 deep in its off hours. Hunger and thirst
-        // override it: under Wake When Below of its energy or water it forages at any hour. Resting goes on a little
+        // override it: under Wake When Below of its energy it forages at any hour, and once thirsty it goes to water
+        // first. Thirst is not let run down like hunger: an animal that rests on until a third of its water is left
+        // can die on a long walk to the water, most often through the long winter nights. Resting goes on a little
         // longer than it would start, so animals don't flicker between resting and waking at the edge.
         public float RestUrgency
         {
@@ -383,7 +385,9 @@ namespace Boreal.Animals
                 float threshold = currentState == State.Resting ? 0.55f : 0.5f;
                 float offHours = Mathf.Clamp01((threshold - activity) / 0.15f);
                 float fed = Mathf.InverseLerp(wakeWhenBelow, 2f * wakeWhenBelow, currentEnergy / maxEnergy);
-                float watered = enableThirst ? Mathf.InverseLerp(wakeWhenBelow, 2f * wakeWhenBelow, HydrationFraction) : 1f;
+                float watered = enableThirst
+                    ? Mathf.InverseLerp(thirstThreshold, Mathf.Min(1f, thirstThreshold + 0.1f), HydrationFraction)
+                    : 1f;
                 return offHours * fed * watered;
             }
         }
