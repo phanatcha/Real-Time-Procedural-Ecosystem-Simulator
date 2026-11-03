@@ -142,6 +142,10 @@ namespace Boreal.Animals
         [Tooltip("Inherited (0 to 1): when the animal is active. 0 by day, 1 by night, around 0.5 at dawn and dusk and " +
                  "in bursts round the clock. At its off hours it rests (item 74). Founders 0.35: mostly by day.")]
         [Range(0f, 1f)] public float nocturnality = 0.35f;
+        [Tooltip("Inherited (0 to 1): how well the animal sees in the dark (item 75). Under a full moon ordinary eyes " +
+                 "see 40% of their range and night eyes 80%; by day night eyes are dazzled to 85%, and they cost up to " +
+                 "6% more energy. Founders 0.2: ordinary eyes.")]
+        [Range(0f, 1f)] public float nightVision = 0.2f;
         [Tooltip("Energy use while resting, as a share of the usual.")]
         [Range(0.1f, 1f)] public float restEnergyMultiplier = 0.7f;
         [Tooltip("How far a resting animal notices food, partners and danger, as a share of its vision radius, so a " +
@@ -347,7 +351,39 @@ namespace Boreal.Animals
         // The share of its usual energy use the animal spends now: less once settled into rest.
         public float RestEnergyMultiplier => currentState == State.Resting && restSettled ? restEnergyMultiplier : 1f;
         // How far the animal notices food, partners and danger: its vision, or part of it while resting.
-        float PerceptionRadius => visionRadius * (currentState == State.Resting ? restPerception : 1f);
+        float PerceptionRadius => visionRadius * SightShareNow *
+                                  (currentState == State.Resting ? restPerception : 1f);
+
+        // Extra energy use of the best night eyes (night vision 1): eyes and the brain behind them are costly.
+        public const float NightVisionEnergyCost = 0.06f;
+
+        // Light levels where SightShare's targets are set, as log10 of light for seeing: starlight, a full moon,
+        // sunrise and day.
+        static readonly float[] SightLevels = { -2f, Mathf.Log10(DayCycle.FullMoonLight), Mathf.Log10(0.3f), 0f };
+        static readonly float[] OrdinarySight = { 0.15f, 0.4f, 0.8f, 1f };
+        static readonly float[] NightSight = { 0.55f, 0.8f, 0.95f, 0.85f };
+
+        // Share of its vision radius an animal sees by this light (item 75), for ordinary eyes (night vision 0) and
+        // night eyes (1): by starlight 15% and 55%, under a full moon 40% and 80%, at sunrise 80% and 95%, and by day
+        // 100% and 85%, since night eyes are dazzled. Between them it follows the logarithm of the light, as eyes
+        // do. With day and night off it is always day.
+        public static float SightShare(float light, float nightVision)
+        {
+            float level = Mathf.Log10(Mathf.Clamp(light, DayCycle.StarLight, 1f));
+            int upper = 1;
+            while (upper < SightLevels.Length - 1 && level > SightLevels[upper]) upper++;
+            float t = Mathf.InverseLerp(SightLevels[upper - 1], SightLevels[upper], level);
+            float ordinary = Mathf.Lerp(OrdinarySight[upper - 1], OrdinarySight[upper], t);
+            float night = Mathf.Lerp(NightSight[upper - 1], NightSight[upper], t);
+            return Mathf.Lerp(ordinary, night, Mathf.Clamp01(nightVision));
+        }
+
+        // Share of its vision radius the animal sees by the light now.
+        public float SightShareNow => SightShare(WorldDay.Current.light, nightVision);
+
+        // "ordinary", "fair" or "night eyes", for the inspector and panel.
+        public static string DescribeNightVision(float nightVision) =>
+            nightVision < 0.35f ? "ordinary eyes" : nightVision < 0.65f ? "fair night eyes" : "night eyes";
 
         // "by day", "mostly by day", "at dawn and dusk", "mostly by night", "by night".
         public static string DescribeChronotype(float nocturnality) =>
@@ -404,7 +440,11 @@ namespace Boreal.Animals
         public bool CanEatSpoiledFood => perkEffects.canEatSpoiledFood;
         // How far other animals can spot this one, as a fraction of their vision: camouflage hides it, except while
         // it flees.
-        public float Visibility => currentState == State.Fleeing ? 1f : perkEffects.visibility;
+        // Camouflage (the only perk that lowers visibility) hides better in the dark (item 75).
+        public float Visibility => currentState == State.Fleeing ? 1f
+            : perkEffects.visibility < 1f
+                ? perkEffects.visibility * Mathf.Lerp(AnimalPerks.CamouflageNightVisibility, 1f, WorldDay.Current.daylight)
+                : perkEffects.visibility;
         public float RemainingLifespan => Mathf.Max(0f, maxLifespan - currentAge);
         public float AgeFraction => maxLifespan <= Mathf.Epsilon
             ? 1f
@@ -1092,7 +1132,7 @@ namespace Boreal.Animals
         {
             float speed = Mathf.Max(0.1f, GetCurrentMovementSpeed());
             if (waterChaseTimer >= Mathf.Max(maximumFoodChaseDuration, 3f * visionRadius / speed)) return true;
-            if (agent == null || !agent.enabled || !agent.isOnNavMesh || agent.pathPending) return false;
+            if (agent == null || !agent.enabled || !agent.isOnNavMesh || agent.pathPending || RouteJustSet) return false;
 
             if (agent.hasPath && agent.pathStatus != NavMeshPathStatus.PathComplete)
             {
@@ -2160,7 +2200,7 @@ namespace Boreal.Animals
                 return true;
             }
 
-            if (agent == null || !agent.enabled || !agent.isOnNavMesh || agent.pathPending)
+            if (agent == null || !agent.enabled || !agent.isOnNavMesh || agent.pathPending || RouteJustSet)
             {
                 return false;
             }
@@ -2724,6 +2764,7 @@ namespace Boreal.Animals
             captured[AnimalGene.MutationRate] = mutationRate;
             captured[AnimalGene.LitterSize] = litterSize;
             captured[AnimalGene.Nocturnality] = nocturnality;
+            captured[AnimalGene.NightVision] = nightVision;
             // Founders start the markers in the middle, so chance can move them either way.
             captured[AnimalGene.MarkerA] = 0.5f;
             captured[AnimalGene.MarkerB] = 0.5f;
@@ -2753,6 +2794,7 @@ namespace Boreal.Animals
             mutationRate = genome[AnimalGene.MutationRate];
             litterSize = genome[AnimalGene.LitterSize];
             nocturnality = genome[AnimalGene.Nocturnality];
+            nightVision = genome[AnimalGene.NightVision];
             harmfulMutations = genome.HarmfulMutations;
         }
 
@@ -2846,6 +2888,7 @@ namespace Boreal.Animals
             InitializeMetabolicReference();
 
             float inheritedCost = perkEffects.energyUseMultiplier *
+                                  (1f + NightVisionEnergyCost * Mathf.Clamp01(nightVision)) *
                                   (genome != null && genome.IsValid
                                       ? genome.EnergyUseMultiplier(harmfulMutationEnergyCost)
                                       : 1f);
@@ -2939,8 +2982,15 @@ namespace Boreal.Animals
             }
 
             agent.stoppingDistance = Mathf.Max(0f, referenceAgentStoppingDistance);
+            destinationSetFrame = Time.frameCount;
             return agent.SetDestination(destination);
         }
+
+        // The frame a route was last asked for. In that frame and the next the agent can report no path even when
+        // SetDestination found one, so a chase judged then would be given up at once and the food or water shunned
+        // for half a minute.
+        int destinationSetFrame = -10;
+        bool RouteJustSet => Time.frameCount - destinationSetFrame <= 1;
 
         bool TrySetPreyDestination(Vector3 destination)
         {

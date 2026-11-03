@@ -159,7 +159,9 @@ namespace Boreal.Animals
                             $"prefers {genome[AnimalGene.PreferredTemperature]:0.#} °C, −{genome[AnimalGene.ColdTolerance]:0} / " +
                             $"+{genome[AnimalGene.HeatTolerance]:0}   torpor {genome[AnimalGene.Torpor]:0.00}   " +
                             $"active {SeekFood.DescribeChronotype(genome[AnimalGene.Nocturnality])} " +
-                            $"({genome[AnimalGene.Nocturnality]:0.00})\n");
+                            $"({genome[AnimalGene.Nocturnality]:0.00})   " +
+                            $"{SeekFood.DescribeNightVision(genome[AnimalGene.NightVision])} " +
+                            $"({genome[AnimalGene.NightVision]:0.00}, sees {100f * animal.SightShareNow:0}% now)\n");
                 text.Append($"sexual drive {genome[AnimalGene.SexualDrive]:0.00}   breeds at {100f * genome[AnimalGene.BreedingThreshold]:0}% energy   " +
                             $"litter {genome[AnimalGene.LitterSize]:0.00}   mutation rate {genome[AnimalGene.MutationRate]:0.00}×   " +
                             $"harmful mutations {genome.HarmfulMutations}\n");

@@ -406,10 +406,12 @@ namespace Boreal.Animals
             text.Append($"\n   swimming ability: {swimmingSummary}");
         }
 
-        // The species' chronotype (item 74): its average and range, and how many of its animals are resting now.
+        // The species' chronotype (item 74): its average and range, how many of its animals are resting now, and
+        // its night vision (item 75).
         static string DescribeChronotypes(SpeciesManager manager, string species)
         {
             float total = 0f, lowest = 1f, highest = 0f;
+            float eyesTotal = 0f, eyesLowest = 1f, eyesHighest = 0f;
             int counted = 0, resting = 0;
             foreach (SeekFood animal in manager.ActiveAgents)
             {
@@ -420,12 +422,16 @@ namespace Boreal.Animals
                 highest = Mathf.Max(highest, nocturnality);
                 counted++;
                 if (animal.IsResting) resting++;
+                eyesTotal += animal.nightVision;
+                eyesLowest = Mathf.Min(eyesLowest, animal.nightVision);
+                eyesHighest = Mathf.Max(eyesHighest, animal.nightVision);
             }
 
             if (counted == 0) return "no animals in view";
             float average = total / counted;
             return $"{SeekFood.DescribeChronotype(average)} ({average:0.00}, {lowest:0.00}-{highest:0.00}), " +
-                   $"{100f * resting / counted:0}% resting now";
+                   $"{100f * resting / counted:0}% resting now, night vision {eyesTotal / counted:0.00} " +
+                   $"({eyesLowest:0.00}-{eyesHighest:0.00})";
         }
 
         // How many of the species' animals hunt their own kind (item 66), and how many it has lost to hunters.

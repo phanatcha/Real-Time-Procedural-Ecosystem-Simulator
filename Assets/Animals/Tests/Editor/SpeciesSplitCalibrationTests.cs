@@ -115,6 +115,7 @@ namespace Boreal.Animals.Tests
             founder[AnimalGene.BreedingThreshold] = 0.8f;
             founder[AnimalGene.MutationRate] = 1f;
             founder[AnimalGene.Nocturnality] = 0.35f;
+            founder[AnimalGene.NightVision] = 0.2f;
             return founder;
         }
     }

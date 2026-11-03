@@ -41,8 +41,8 @@ namespace Boreal.Animals
         {
             // 4: population.csv gained the time of day, light, moon and deaths at night (item 70); traits.csv the
             // marker genes and perk (item 56). 5: population.csv gained the share of live animals resting, traits.csv the
-            // Nocturnality gene (item 74).
-            public int schemaVersion = 5;
+            // Nocturnality gene (item 74). 6: traits.csv gained the NightVision gene (item 75).
+            public int schemaVersion = 6;
             public string startedUtc, sourceRevision, experiment, unityVersion, worldSeed;
             public float sampleInterval;
             public bool offscreenEnabled;

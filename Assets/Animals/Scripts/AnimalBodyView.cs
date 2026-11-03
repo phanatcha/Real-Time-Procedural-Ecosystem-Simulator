@@ -11,6 +11,9 @@ namespace Boreal.Animals
     public class AnimalBodyView : MonoBehaviour
     {
         const string PartsObjectName = "Body Parts";
+        const string EyeshineObjectName = "Eyeshine";
+        // The yellow-green of a deer's or cat's eyes in torchlight.
+        static readonly Color EyeshineColor = new Color(0.75f, 0.95f, 0.45f);
         const float PartShade = 0.7f;
         const int FramesToCheckLift = 30;
 
@@ -18,6 +21,7 @@ namespace Boreal.Animals
         static readonly int ColorId = Shader.PropertyToID("_Color");
         static readonly Dictionary<Color32, Material> materialsByColor = new Dictionary<Color32, Material>();
         static readonly Dictionary<PrimitiveType, Mesh> primitiveMeshes = new Dictionary<PrimitiveType, Mesh>();
+        static Material eyeshineMaterial;
 
         readonly List<CombineInstance> pieces = new List<CombineInstance>();
         AnimalGenome genome;
@@ -25,6 +29,7 @@ namespace Boreal.Animals
         float? measuredGround;
         int liftCheckFrames;
         Mesh partsMesh;
+        Mesh eyeshineMesh;
         MeshFilter partsFilter;
         MeshRenderer partsRenderer;
 
@@ -37,6 +42,7 @@ namespace Boreal.Animals
         {
             materialsByColor.Clear();
             primitiveMeshes.Clear();
+            eyeshineMaterial = null;
         }
 
         // fullLegReach: how far below the body a full-size leg reaches, in world units.
@@ -100,6 +106,11 @@ namespace Boreal.Animals
             {
                 Destroy(partsMesh);
             }
+
+            if (eyeshineMesh != null)
+            {
+                Destroy(eyeshineMesh);
+            }
         }
 
         void PreparePartsObject()
@@ -144,6 +155,8 @@ namespace Boreal.Animals
                         AddPart(frame, site, genome.GetPartType(site), size);
                     }
                 }
+
+                BuildEyeshine(frame);
             }
 
             if (partsFilter == null)
@@ -169,6 +182,78 @@ namespace Boreal.Animals
 
             partsMesh.CombineMeshes(pieces.ToArray(), true, true);
             partsFilter.sharedMesh = partsMesh;
+        }
+
+        // How strongly an animal's eyes shine in the dark (item 75): not at all with ordinary eyes, fully from night
+        // vision 0.8.
+        public static float EyeshineStrength(float nightVision) =>
+            Mathf.SmoothStep(0f, 1f, Mathf.InverseLerp(0.3f, 0.8f, nightVision));
+
+        // Two small dots high on the front of the body that glow in the dark for animals with night eyes, so the
+        // trait shows at a glance. Their brightness is in the vertex colour; the dark is a shader global DayClock
+        // sets, so nothing here runs per frame. An offspring starts with its parent's object; it gets its own mesh.
+        void BuildEyeshine(BodyFrame frame)
+        {
+            Transform parts = partsFilter != null ? partsFilter.transform : null;
+            Transform eyes = parts != null ? parts.Find(EyeshineObjectName) : null;
+            float strength = EyeshineStrength(genome[AnimalGene.NightVision]);
+            if (strength <= 0f || parts == null || EyeshineMaterial() == null)
+            {
+                if (eyes != null) eyes.gameObject.SetActive(false);
+                return;
+            }
+
+            if (eyes == null)
+            {
+                eyes = new GameObject(EyeshineObjectName).transform;
+                eyes.SetParent(parts, false);
+                eyes.gameObject.layer = gameObject.layer;
+                eyes.gameObject.AddComponent<MeshFilter>();
+                MeshRenderer renderer = eyes.gameObject.AddComponent<MeshRenderer>();
+                renderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+                renderer.receiveShadows = false;
+                renderer.lightProbeUsage = UnityEngine.Rendering.LightProbeUsage.Off;
+                renderer.reflectionProbeUsage = UnityEngine.Rendering.ReflectionProbeUsage.Off;
+            }
+
+            eyes.gameObject.SetActive(true);
+            eyes.GetComponent<MeshRenderer>().sharedMaterial = EyeshineMaterial();
+
+            // On the front of the body's straight part, a little apart, sunk a little into the round surface.
+            float radius = 0.06f * frame.Unit;
+            float apart = 0.22f;
+            float forward = 0.5f * frame.Length * Mathf.Sqrt(1f - 4f * apart * apart) - 0.3f * radius;
+            CombineInstance[] dots = new CombineInstance[2];
+            for (int side = 0; side < 2; side++)
+            {
+                Vector3 position = new Vector3(frame.CentreX + (side == 0 ? -apart : apart) * frame.Width,
+                                               frame.Bottom + 0.68f * frame.Height, frame.CentreZ + forward);
+                dots[side] = new CombineInstance
+                {
+                    mesh = PrimitiveMesh(PrimitiveType.Sphere),
+                    transform = Matrix4x4.TRS(position, Quaternion.identity, Vector3.one * 2f * radius)
+                };
+            }
+
+            if (eyeshineMesh == null) eyeshineMesh = new Mesh { name = "Animal Eyeshine" };
+            else eyeshineMesh.Clear();
+            eyeshineMesh.CombineMeshes(dots, true, true);
+            Color32[] colours = new Color32[eyeshineMesh.vertexCount];
+            Color32 colour = EyeshineColor * strength;
+            for (int index = 0; index < colours.Length; index++) colours[index] = colour;
+            eyeshineMesh.colors32 = colours;
+            eyes.GetComponent<MeshFilter>().sharedMesh = eyeshineMesh;
+        }
+
+        static Material EyeshineMaterial()
+        {
+            if (eyeshineMaterial == null)
+            {
+                Shader shader = Shader.Find("Hidden/Boreal/Eyeshine");
+                if (shader != null) eyeshineMaterial = new Material(shader) { name = "Eyeshine" };
+            }
+
+            return eyeshineMaterial;
         }
 
         float EstimatedGround()

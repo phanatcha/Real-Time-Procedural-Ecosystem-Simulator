@@ -334,6 +334,8 @@ namespace Boreal.Animals.Tests
             AnimalGenome genome = Genome(sexualDrive: 0f, maturityTime: 5f);
             genome[AnimalGene.LitterSize] = 3f;
             SeekFood parent = CreateAnimal(Vector3.zero, genome, energyFraction: 1f, age: 10f);
+            // No mutations, so the young's genes are exactly the parent's.
+            parent.mutationChance = 0f;
 
             float deadline = Time.time + 20f;
             while (AnimalCount() < 2 && Time.time < deadline) yield return null;
@@ -439,7 +441,8 @@ namespace Boreal.Animals.Tests
             }
         }
 
-        // Hunger overrides the hours: a starving day animal still walks to food at midnight.
+        // Hunger overrides the hours: a starving day animal still walks to food at midnight. The food is within the
+        // 15% of its vision that ordinary eyes see on a moonless night (item 75).
         [UnityTest]
         public IEnumerator HungryAnimalsForageAtTheirOffHours()
         {
@@ -451,8 +454,8 @@ namespace Boreal.Animals.Tests
             try
             {
                 SetTimeOfDay(0f);
-                SeekFood animal = CreateAnimal(new Vector3(-10f, 0f, 0f), Genome(), energyFraction: 0.15f, age: 10f);
-                FoodItem plant = CreatePlant(new Vector3(10f, 0f, 0f));
+                SeekFood animal = CreateAnimal(new Vector3(-5f, 0f, 0f), Genome(), energyFraction: 0.15f, age: 10f);
+                FoodItem plant = CreatePlant(new Vector3(5f, 0f, 0f));
 
                 float deadline = Time.time + 30f;
                 while (plant != null && Time.time < deadline) yield return null;
@@ -563,6 +566,63 @@ namespace Boreal.Animals.Tests
             while (record.fleeResponses + record.fightResponses == 0 && Time.time < deadline) yield return null;
             Assert.Greater(record.fleeResponses + record.fightResponses, 0,
                            "The plant-eater never fled from or fought the hunter of its own kind.");
+        }
+
+        // Item 75: on a moonless night a hungry night animal with ordinary eyes (15% of its vision) misses food that
+        // one with night eyes (55%) sees and eats.
+        [UnityTest]
+        public IEnumerator NightEyesFindFoodOnAMoonlessNight()
+        {
+            EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
+            yield return new EnterPlayMode(ReloadsDomain);
+
+            BakeNavMesh(CreateGround(Vector3.zero, 80f));
+            StartSimulation();
+            try
+            {
+                SetTimeOfDay(0f);
+                Assert.AreEqual(Boreal.TerrainGeneration.DayCycle.StarLight, Boreal.World.WorldDay.Current.light, 1e-3f,
+                                "The test night should be moonless.");
+                AnimalGenome ordinaryEyed = Genome();
+                ordinaryEyed[AnimalGene.Nocturnality] = 1f;
+                SeekFood ordinary = CreateAnimal(new Vector3(-35f, 0f, 35f), ordinaryEyed, energyFraction: 0.5f, age: 10f);
+                AnimalGenome nightEyed = Genome();
+                nightEyed[AnimalGene.Nocturnality] = 1f;
+                nightEyed[AnimalGene.NightVision] = 1f;
+                SeekFood seer = CreateAnimal(new Vector3(-35f, 0f, -35f), nightEyed, energyFraction: 0.5f, age: 10f);
+                // Each plant 25 m from its animal: beyond 15% of 110 m, within 55%. The other animal's plant is 74 m
+                // away, out of sight for both.
+                FoodItem unseen = CreatePlant(new Vector3(-10f, 0f, 35f));
+                FoodItem seen = CreatePlant(new Vector3(-10f, 0f, -35f));
+
+                float deadline = Time.time + 20f;
+                while (seen != null && Time.time < deadline) yield return null;
+                Assert.IsTrue(seen == null, "The night-eyed animal did not find the food within 20 s.");
+                Assert.IsTrue(unseen != null, "The animal with ordinary eyes found food it should not see.");
+            }
+            finally
+            {
+                Boreal.World.WorldDay.Reset();
+            }
+        }
+
+        // Night eyes cost energy: the best ones 6% more than ordinary eyes.
+        [UnityTest]
+        public IEnumerator NightEyesCostEnergy()
+        {
+            EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
+            yield return new EnterPlayMode(ReloadsDomain);
+
+            BakeNavMesh(CreateGround(Vector3.zero, 60f));
+            StartSimulation();
+            AnimalGenome nightEyed = Genome();
+            nightEyed[AnimalGene.NightVision] = 1f;
+            SeekFood ordinary = CreateAnimal(new Vector3(-10f, 0f, 0f), Genome(), energyFraction: 1f, age: 10f);
+            SeekFood seer = CreateAnimal(new Vector3(10f, 0f, 0f), nightEyed, energyFraction: 1f, age: 10f);
+            yield return null;
+
+            Assert.AreEqual(1f + SeekFood.NightVisionEnergyCost,
+                            seer.CurrentEnergyDrainPerSecond / ordinary.CurrentEnergyDrainPerSecond, 1e-3f);
         }
 
         // A founder-like animal that walks at a third of the usual speed, so a hunter can catch it.

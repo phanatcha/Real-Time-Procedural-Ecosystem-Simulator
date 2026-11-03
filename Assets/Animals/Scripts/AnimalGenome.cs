@@ -36,6 +36,9 @@ namespace Boreal.Animals
         // 0 to 1: when the animal is active (item 74). 0 by day, 1 by night, around 0.5 at dawn and dusk and in bursts
         // round the clock. It rests at its off hours (see SeekFood.ActivityAt).
         Nocturnality,
+        // 0 to 1: how well the animal sees in the dark (item 75). Night eyes see much further by moonlight and
+        // starlight, but are dazzled by day and cost energy (see SeekFood.SightShare).
+        NightVision,
         // 0 to 1, starting at 0.5 in founders: three markers that are inherited and mutate like any gene but do
         // nothing and don't count towards genetic distance (item 56). They wander by chance alone, so how far they
         // move in a run is how far any gene could move by luck; a real gene has been selected only when it moves well
@@ -291,6 +294,7 @@ namespace Boreal.Animals
             AnimalGene.LitterSize => new AnimalGeneDefinition(1f, 4f, GeneMutationStyle.Additive, 1f),
             // Steps like sexual drive: a tenth of its range at the default magnitude.
             AnimalGene.Nocturnality => new AnimalGeneDefinition(0f, 1f, GeneMutationStyle.Additive, 1f),
+            AnimalGene.NightVision => new AnimalGeneDefinition(0f, 1f, GeneMutationStyle.Additive, 1f),
             // Markers step like the other 0-1 additive genes and weigh nothing towards genetic distance.
             AnimalGene.MarkerA or AnimalGene.MarkerB or AnimalGene.MarkerC =>
                 new AnimalGeneDefinition(0f, 1f, GeneMutationStyle.Additive, 1f, 0f),

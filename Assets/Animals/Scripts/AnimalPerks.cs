@@ -55,6 +55,7 @@ namespace Boreal.Animals
         public const float VenomEnergyCost = 0.08f;        // +8% energy use
         public const float CamouflageVisibility = 0.6f;    // spotted within 60% of the other animal's vision radius
         public const float CamouflageEnergyCost = 0.05f;   // +5% energy use
+        public const float CamouflageNightVisibility = 0.8f; // and a further 80% of that in the dark (item 75)
         public const float RegenerationPerSecond = 0.01f;  // 1% of maximum health per simulated second
         public const float RegenerationEnergyCost = 0.1f;  // +10% energy use
         public const float ScavengerPlantDigestion = 0.7f; // digests 30% less of a plant's energy

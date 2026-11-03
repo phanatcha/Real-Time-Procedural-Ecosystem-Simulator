@@ -111,6 +111,7 @@ namespace Boreal.Animals
                 Active = null;
                 WorldDay.Reset();
                 DayNightLighting.Publish(DayCycle.Neutral, false, latitude);
+                Shader.SetGlobalFloat(EyeshineId, 0f);
             }
         }
 
@@ -126,6 +127,8 @@ namespace Boreal.Animals
 
             Refresh();
         }
+
+        static readonly int EyeshineId = Shader.PropertyToID("_BorealEyeshine");
 
         // Days since the world began as the light shows them, easing after the clock's exact time.
         float shownDays = -1f;
@@ -143,7 +146,10 @@ namespace Boreal.Animals
             WorldDay.IsRunning = IsRunning;
 
             shownDays = ShownDays(shownDays, days, Time.unscaledDeltaTime, lightCatchUp);
-            DayNightLighting.Publish(IsRunning ? Evaluate(shownDays, yearProgress) : DayCycle.Neutral, IsRunning, latitude);
+            DayState shown = IsRunning ? Evaluate(shownDays, yearProgress) : DayCycle.Neutral;
+            DayNightLighting.Publish(shown, IsRunning, latitude);
+            // Night eyes shine in the dark (item 75), and not in the held day view.
+            Shader.SetGlobalFloat(EyeshineId, IsRunning && !DayNightLighting.HoldDayView ? 1f - shown.daylight : 0f);
         }
 
         DayState Evaluate(float days, float yearProgress) =>
