@@ -109,7 +109,7 @@ namespace Boreal.AnimalTerrainIntegration
 
         public float EnergyUse(OffscreenSample sample, float celsius)
         {
-            return Mathf.Max(0.001f, sample.baseEnergyUse *
+            return Mathf.Max(0.001f, sample.baseEnergyUse * sample.RestEnergyMultiplierOverADay() *
                                      ThermalEnergyMultiplier(sample.comfortMinimum, sample.comfortMaximum, celsius,
                                                              sample.torpor));
         }
@@ -142,14 +142,17 @@ namespace Boreal.AnimalTerrainIntegration
         // Below 1 for a scavenger gut, which digests plants worse.
         public readonly float plantDigestionMultiplier;
         public readonly float torpor;
+        // Energy use while resting, as a share of the usual, from the live animal (SeekFood's Rest Energy Multiplier).
+        public readonly float restEnergyMultiplier;
 
         public float DietAffinity => genome[AnimalGene.DietAffinity];
 
-        public OffscreenSample(AnimalGenome genome, float baseEnergyUse, int generation)
+        public OffscreenSample(AnimalGenome genome, float baseEnergyUse, int generation, float restEnergyMultiplier = 1f)
         {
             this.genome = genome ?? throw new ArgumentNullException(nameof(genome));
             this.baseEnergyUse = Mathf.Max(0.001f, baseEnergyUse);
             this.generation = Mathf.Max(0, generation);
+            this.restEnergyMultiplier = Mathf.Clamp01(restEnergyMultiplier);
 
             BodyPlanEffects effects = AnimalBodyPlan.Evaluate(genome);
             PerkEffects perks = AnimalPerks.Evaluate(genome);
@@ -160,6 +163,15 @@ namespace Boreal.AnimalTerrainIntegration
                                                        perks.heatToleranceChange);
             plantDigestionMultiplier = perks.plantDigestionMultiplier;
             torpor = genome[AnimalGene.Torpor];
+        }
+
+        // Numbers have no hours, so they rest for their chronotype's share of today and save energy for that share
+        // (item 74). 1 without day and night.
+        public float RestEnergyMultiplierOverADay()
+        {
+            if (!WorldDay.IsRunning) return 1f;
+            float resting = SeekFood.RestShareOfDay(genome[AnimalGene.Nocturnality], WorldDay.Current.dayLength);
+            return Mathf.Lerp(1f, restEnergyMultiplier, resting);
         }
     }
 

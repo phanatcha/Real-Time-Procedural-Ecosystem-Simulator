@@ -400,8 +400,31 @@ namespace Boreal.Animals
                         $"torpor {now.torpor:0.00} {Signed(now.torpor - first.torpor, "0.00")}   " +
                         $"litter {now.litter:0.00} {Signed(now.litter - first.litter, "0.00")}");
             text.Append($"\n   perks: {AnimalPerks.DescribeShares(record.perkShares)}");
+            text.Append($"\n   active: {DescribeChronotypes(manager, largest)}");
             text.Append($"\n   body parts: {DescribeBodyParts(manager, largest)}");
             text.Append($"\n   swimming ability: {swimmingSummary}");
+        }
+
+        // The species' chronotype (item 74): its average and range, and how many of its animals are resting now.
+        static string DescribeChronotypes(SpeciesManager manager, string species)
+        {
+            float total = 0f, lowest = 1f, highest = 0f;
+            int counted = 0, resting = 0;
+            foreach (SeekFood animal in manager.ActiveAgents)
+            {
+                if (animal == null || animal.speciesName != species) continue;
+                float nocturnality = animal.nocturnality;
+                total += nocturnality;
+                lowest = Mathf.Min(lowest, nocturnality);
+                highest = Mathf.Max(highest, nocturnality);
+                counted++;
+                if (animal.IsResting) resting++;
+            }
+
+            if (counted == 0) return "no animals in view";
+            float average = total / counted;
+            return $"{SeekFood.DescribeChronotype(average)} ({average:0.00}, {lowest:0.00}-{highest:0.00}), " +
+                   $"{100f * resting / counted:0}% resting now";
         }
 
         // The time of year and what it does compared with the terrain's base climate.

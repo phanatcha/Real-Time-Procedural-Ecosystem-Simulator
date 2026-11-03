@@ -36,6 +36,11 @@ namespace Boreal.Animals
                  "daylight.")]
         [Range(0f, 1f)] public float startOfDay = 0.3f;
 
+        [Tooltip("Real seconds over which the light catches up when the clock jumps: after a long frame (terrain " +
+                 "loading, high speed) the sun glides to its place instead of jumping. Only the look waits; the animals " +
+                 "always have the exact time. 0 shows the exact time.")]
+        [Range(0f, 1f)] public float lightCatchUp = 0.15f;
+
         [Header("Runtime")]
         [SerializeField] private string clockTime;
         [SerializeField] private string moon;
@@ -122,18 +127,34 @@ namespace Boreal.Animals
             Refresh();
         }
 
+        // Days since the world began as the light shows them, easing after the clock's exact time.
+        float shownDays = -1f;
+
         void Refresh()
         {
             SpeciesManager manager = SpeciesManager.Instance;
             float elapsed = Mathf.Max(0f, Time.time - (manager != null ? manager.WorldStartTime : 0f));
             float yearProgress = SeasonClock.IsRunning ? SeasonClock.Active.YearProgress : float.NaN;
-            state = DayCycle.Evaluate(startOfDay + elapsed / Mathf.Max(1f, dayLength), latitude, yearProgress,
-                                      monthLength, moonPhaseAtStart);
+            float days = startOfDay + elapsed / Mathf.Max(1f, dayLength);
+            state = Evaluate(days, yearProgress);
             clockTime = ClockTime(state.timeOfDay);
             moon = MoonName(state.moonPhase);
             WorldDay.Current = Current;
             WorldDay.IsRunning = IsRunning;
-            DayNightLighting.Publish(Current, IsRunning, latitude);
+
+            shownDays = ShownDays(shownDays, days, Time.unscaledDeltaTime, lightCatchUp);
+            DayNightLighting.Publish(IsRunning ? Evaluate(shownDays, yearProgress) : DayCycle.Neutral, IsRunning, latitude);
+        }
+
+        DayState Evaluate(float days, float yearProgress) =>
+            DayCycle.Evaluate(days, latitude, yearProgress, monthLength, moonPhaseAtStart);
+
+        // The time the light shows: it closes on the exact time over about catchUp real seconds, so a long frame's
+        // jump becomes a quick glide. A new world, or a gap of more than a quarter of a day, is taken at once.
+        public static float ShownDays(float shown, float exact, float realSeconds, float catchUp)
+        {
+            if (shown < 0f || catchUp <= 0f || Mathf.Abs(exact - shown) > 0.25f) return exact;
+            return Mathf.Lerp(shown, exact, 1f - Mathf.Exp(-Mathf.Max(0f, realSeconds) / catchUp));
         }
 
         // "07:12" for 0.3.

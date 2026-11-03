@@ -40,8 +40,9 @@ namespace Boreal.Animals
         sealed class RunMetadata
         {
             // 4: population.csv gained the time of day, light, moon and deaths at night (item 70); traits.csv the
-            // marker genes and perk (item 56).
-            public int schemaVersion = 4;
+            // marker genes and perk (item 56). 5: population.csv gained the share of live animals resting, traits.csv the
+            // Nocturnality gene (item 74).
+            public int schemaVersion = 5;
             public string startedUtc, sourceRevision, experiment, unityVersion, worldSeed;
             public float sampleInterval;
             public bool offscreenEnabled;
@@ -102,7 +103,7 @@ namespace Boreal.Animals
                 representativeAnimalSettings = representative != null ? JsonUtility.ToJson(representative) : ""
             };
             File.WriteAllText(Path.Combine(OutputDirectory, "metadata.json"), JsonUtility.ToJson(metadata, true));
-            population = Open("population.csv", "time,live,offscreen,species_alive,births,cloned_births,sexual_births,deaths,starvation,predation,old_age,cold,heat,venom,thirst,other,land_ceiling,sea_ceiling,requested_speed,achieved_speed,season,season_strength,offscreen_enabled,breeding_wait_episodes,breeding_wait_seconds,day,time_of_day,daylight,light,moon_phase,deaths_at_night");
+            population = Open("population.csv", "time,live,offscreen,species_alive,births,cloned_births,sexual_births,deaths,starvation,predation,old_age,cold,heat,venom,thirst,other,land_ceiling,sea_ceiling,requested_speed,achieved_speed,season,season_strength,offscreen_enabled,breeding_wait_episodes,breeding_wait_seconds,day,time_of_day,daylight,light,moon_phase,deaths_at_night,resting");
             species = Open("species.csv", "time,species,parent,origin,extinction,live,offscreen,births,sexual_births,deaths,breeding_wait_episodes,breeding_wait_seconds");
             traits = Open("traits.csv", "time,species,trait,live_sample_count,mean,standard_deviation,minimum,maximum");
             events = Open("events.csv", "time,event,detail");
@@ -130,7 +131,7 @@ namespace Boreal.Animals
                 SeasonClock.Active != null ? SeasonClock.Active.SeasonName : "None",
                 SeasonClock.IsRunning ? SeasonClock.Active.EffectiveStrength : 0f, manager.OffscreenPopulation != null,
                 manager.BreedingWaitEpisodes, manager.BreedingWaitSeconds, day.day, day.timeOfDay, day.daylight,
-                day.light, day.moonPhase, manager.DeathsAtNight);
+                day.light, day.moonPhase, manager.DeathsAtNight, RestingShare());
 
             var groups = new Dictionary<string, List<AnimalGenome>>();
             foreach (SeekFood animal in manager.ActiveAgents)
@@ -170,6 +171,19 @@ namespace Boreal.Animals
             }
             population.Flush(); species.Flush(); traits.Flush(); events.Flush();
             lastSample = time;
+        }
+
+        // Share of the live animals resting now (item 74).
+        double RestingShare()
+        {
+            int live = 0, resting = 0;
+            foreach (SeekFood animal in manager.ActiveAgents)
+            {
+                if (animal == null) continue;
+                live++;
+                if (animal.IsResting) resting++;
+            }
+            return live > 0 ? (double)resting / live : 0.0;
         }
 
         void WriteTrait(double time, string name, string trait, List<AnimalGenome> genomes, Func<AnimalGenome, double> value)

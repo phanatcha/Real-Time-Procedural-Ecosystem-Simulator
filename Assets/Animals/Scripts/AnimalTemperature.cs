@@ -1,4 +1,5 @@
 using Boreal.Temperature;
+using Boreal.World;
 using UnityEngine;
 
 namespace Boreal.Animals
@@ -6,6 +7,10 @@ namespace Boreal.Animals
     [DisallowMultipleComponent]
     public class AnimalTemperature : MonoBehaviour
     {
+        // Share of the day's temperature swing the animal feels: 1 out in the open, less while it rests sheltered (set by
+        // SeekFood each frame, item 74). It feels the day's average plus this share of the swing.
+        [System.NonSerialized] public float swingFelt = 1f;
+
         [Header("Heritable Thermal Traits (Celsius)")]
         public float preferredTemperature = 20f;
         [Min(0f)] public float coldTolerance = 10f;
@@ -141,6 +146,14 @@ namespace Boreal.Animals
             {
                 ApplyNeutralResponse();
                 return;
+            }
+
+            // Sheltered, it feels only part of the day's swing around the day's average.
+            if (swingFelt < 1f && WorldDay.IsRunning && TemperatureSystem.Active != null &&
+                TemperatureSystem.Active.provider is ProceduralTerrainTemperatureProvider terrain &&
+                terrain.TryGetTemperature(transform.position, WorldSeason.Current, out float average))
+            {
+                celsius = Mathf.Lerp(average, celsius, Mathf.Clamp01(swingFelt));
             }
 
             hasTemperatureSample = true;

@@ -138,6 +138,34 @@ namespace Boreal.TerrainGeneration.Tests
             Assert.AreEqual(0.5f * swing, DailyTemperature.Offset(swing, sunrise + 1f / 3f, 0.5f, 1f), 0.01f, "snow leaves the afternoon");
         }
 
+        // The scene's one light hands over from the sun to the moon as the sun sinks. With the moon already up it used to
+        // switch straight to full moonlight 4° below the horizon, a jump in the light and the sky; now the light dims to
+        // nothing and the moon fades in, so no step of a tenth of a degree changes it by more than a little.
+        [Test]
+        public void TheLightCrossesFromSunToMoonWithoutAJump()
+        {
+            const float Sun = 2.3f;
+            const float Moon = 0.45f;
+            float previous = float.NaN;
+            float largestStep = 0f;
+            bool sawMoon = false;
+            for (float elevation = 20f; elevation >= -30f; elevation -= 0.1f)
+            {
+                DayState moment = new DayState
+                {
+                    sunElevation = elevation, sunDirection = Vector3.up, moonDirection = Vector3.up, moonlight = 1f
+                };
+                DayNightLighting.MainLight light = DayNightLighting.MainLightAt(moment, Sun, Moon);
+                sawMoon |= light.isMoon;
+                if (!float.IsNaN(previous)) largestStep = Mathf.Max(largestStep, Mathf.Abs(light.intensity - previous));
+                previous = light.intensity;
+            }
+
+            Assert.IsTrue(sawMoon);
+            Assert.AreEqual(Moon, previous, 1e-4f, "a full moon high up shines at its full light deep in the night");
+            Assert.Less(largestStep, 0.04f);
+        }
+
         [Test]
         public void WithoutSeasonsEveryDayIsAnEquinox()
         {

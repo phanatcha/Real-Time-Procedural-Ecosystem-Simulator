@@ -407,6 +407,71 @@ namespace Boreal.Animals.Tests
             Assert.AreEqual(0, record.starvationDeaths);
         }
 
+        // A day animal (chronotype 0) settles down at night and uses less energy, then wakes once it is day (item 74).
+        // The test scene has no day clock, so the moment is set by hand.
+        [UnityTest]
+        public IEnumerator DayAnimalsRestAtNightOnLessEnergyAndWakeByDay()
+        {
+            EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
+            yield return new EnterPlayMode(ReloadsDomain);
+
+            BakeNavMesh(CreateGround(Vector3.zero, 60f));
+            StartSimulation();
+            SeekFood animal = CreateAnimal(Vector3.zero, Genome(), energyFraction: 0.9f, age: 10f);
+            yield return null;
+            float awakeUse = animal.CurrentEnergyDrainPerSecond;
+            try
+            {
+                SetTimeOfDay(0f);
+                float deadline = Time.time + 10f;
+                while (!(animal.IsResting && animal.RestEnergyMultiplier < 1f) && Time.time < deadline) yield return null;
+                Assert.IsTrue(animal.IsResting, "The day animal did not rest at midnight within 10 simulated seconds.");
+                Assert.Less(animal.CurrentEnergyDrainPerSecond, 0.75f * awakeUse, "Resting should save about 30% of energy.");
+
+                SetTimeOfDay(0.5f);
+                deadline = Time.time + 10f;
+                while (animal.IsResting && Time.time < deadline) yield return null;
+                Assert.IsFalse(animal.IsResting, "The day animal did not wake at noon within 10 simulated seconds.");
+            }
+            finally
+            {
+                Boreal.World.WorldDay.Reset();
+            }
+        }
+
+        // Hunger overrides the hours: a starving day animal still walks to food at midnight.
+        [UnityTest]
+        public IEnumerator HungryAnimalsForageAtTheirOffHours()
+        {
+            EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
+            yield return new EnterPlayMode(ReloadsDomain);
+
+            BakeNavMesh(CreateGround(Vector3.zero, 60f));
+            StartSimulation();
+            try
+            {
+                SetTimeOfDay(0f);
+                SeekFood animal = CreateAnimal(new Vector3(-10f, 0f, 0f), Genome(), energyFraction: 0.15f, age: 10f);
+                FoodItem plant = CreatePlant(new Vector3(10f, 0f, 0f));
+
+                float deadline = Time.time + 30f;
+                while (plant != null && Time.time < deadline) yield return null;
+                Assert.IsTrue(plant == null, "The starving animal did not eat at night within 30 simulated seconds.");
+                Assert.IsFalse(animal.IsResting);
+            }
+            finally
+            {
+                Boreal.World.WorldDay.Reset();
+            }
+        }
+
+        // An equinox day at 62° N, at this time of day (0 midnight, 0.5 noon), as the day clock would publish it.
+        static void SetTimeOfDay(float timeOfDay)
+        {
+            Boreal.World.WorldDay.Current = Boreal.TerrainGeneration.DayCycle.Evaluate(timeOfDay, 62f, 0f, 4f, 0f);
+            Boreal.World.WorldDay.IsRunning = true;
+        }
+
         static readonly Vector3 TestWater = new Vector3(20f, 0f, 0f);
 
         static Vector3? LocateTestWater(Vector3 position, float radius) => TestWater;

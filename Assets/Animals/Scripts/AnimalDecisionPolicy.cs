@@ -13,7 +13,9 @@ namespace Boreal.Animals
         Flee,
         SeekMate,
         // Walk to fresh water and drink (item 27).
-        Drink
+        Drink,
+        // Settle down at the animal's off hours (item 74).
+        Rest
     }
 
     public struct AnimalThreat

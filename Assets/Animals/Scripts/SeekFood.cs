@@ -138,6 +138,24 @@ namespace Boreal.Animals
         [InspectorName("Maximum Lifespan (Simulated Seconds)")]
         [Min(0.01f)] public float maxLifespan = 200f;
 
+        [Header("Day and Night")]
+        [Tooltip("Inherited (0 to 1): when the animal is active. 0 by day, 1 by night, around 0.5 at dawn and dusk and " +
+                 "in bursts round the clock. At its off hours it rests (item 74). Founders 0.35: mostly by day.")]
+        [Range(0f, 1f)] public float nocturnality = 0.35f;
+        [Tooltip("Energy use while resting, as a share of the usual.")]
+        [Range(0.1f, 1f)] public float restEnergyMultiplier = 0.7f;
+        [Tooltip("How far a resting animal notices food, partners and danger, as a share of its vision radius, so a " +
+                 "sleeper is easier to surprise.")]
+        [Range(0.05f, 1f)] public float restPerception = 0.33f;
+        [Tooltip("Share of the day's temperature swing a resting animal feels, curled up out of the wind.")]
+        [Range(0f, 1f)] public float restSwingFelt = 0.5f;
+        [Tooltip("How far an animal goes to rest under trees, in metres, when it isn't under them already. 0 rests " +
+                 "where it stands.")]
+        [Min(0f)] public float shelterSearchRadius = 20f;
+        [Tooltip("Below this share of its energy or water an animal forages at any hour; from twice it, it rests fully " +
+                 "at its off hours.")]
+        [Range(0.01f, 0.5f)] public float wakeWhenBelow = 0.25f;
+
         [Header("Juvenile Growth")]
         [Tooltip("Share of its adult size, speed, vision and feeding reach a newborn starts with. It grows to full " +
                  "size by its maturity time. Founders placed by a scene and animals back from off-screen numbers are " +
@@ -284,7 +302,7 @@ namespace Boreal.Animals
 
         public AnimalTemperature ThermalResponse => thermalResponse;
         public AnimalGenome Genome => genome;
-        public float CurrentEnergyDrainPerSecond => currentEnergyDrainPerSecond *
+        public float CurrentEnergyDrainPerSecond => currentEnergyDrainPerSecond * RestEnergyMultiplier *
             (thermalResponse != null ? thermalResponse.EnergyDrainMultiplier : 1f) *
             (inWater ? waterMovement.EnergyMultiplier(bodyEffects.swimmingAbility) : 1f) *
             (inDeadZone ? SeaBiomeMap.CurrentRules.deadZoneEnergyCost : 1f);
@@ -319,6 +337,56 @@ namespace Boreal.Animals
         public SeekFood SecondParent => secondParent;
         // What the animal is doing now, for the inspector.
         public string Activity => currentState.ToString();
+        public bool IsResting => currentState == State.Resting;
+        // The share of its usual energy use the animal spends now: less once settled into rest.
+        public float RestEnergyMultiplier => currentState == State.Resting && restSettled ? restEnergyMultiplier : 1f;
+        // How far the animal notices food, partners and danger: its vision, or part of it while resting.
+        float PerceptionRadius => visionRadius * (currentState == State.Resting ? restPerception : 1f);
+
+        // "by day", "mostly by day", "at dawn and dusk", "mostly by night", "by night".
+        public static string DescribeChronotype(float nocturnality) =>
+            nocturnality < 0.15f ? "by day" : nocturnality < 0.4f ? "mostly by day"
+            : nocturnality <= 0.6f ? "at dawn and dusk" : nocturnality <= 0.85f ? "mostly by night" : "by night";
+
+        // How much an animal of this chronotype wants to be active, from the light (item 74): 0 by day and 1 by night
+        // swap over as nocturnality goes from 0 to 1, and around 0.5 a bump at twilight makes dawn and dusk the busiest
+        // hours. It rests while this is under one half.
+        public static float ActivityAt(float nocturnality, float daylight, float twilight)
+        {
+            float n = Mathf.Clamp01(nocturnality);
+            return (1f - n) * daylight + n * (1f - daylight) + 4f * n * (1f - n) * twilight;
+        }
+
+        // Share of a day an animal of this chronotype spends at its off hours, for animals kept as numbers, which have
+        // no hours: night for day animals, day for night animals, little for those in between. dayLength is the share
+        // of the day the sun is up.
+        public static float RestShareOfDay(float nocturnality, float dayLength)
+        {
+            float n = Mathf.Clamp01(nocturnality);
+            float light = Mathf.Clamp01(dayLength);
+            float dayActivity = 1f - n;
+            float nightActivity = n;
+            return (dayActivity < 0.5f ? light : 0f) + (nightActivity < 0.5f ? 1f - light : 0f);
+        }
+
+        // How much the animal wants to rest now: 0 at its active hours, 1 deep in its off hours. Hunger and thirst
+        // override it: under Wake When Below of its energy or water it forages at any hour. Resting goes on a little
+        // longer than it would start, so animals don't flicker between resting and waking at the edge.
+        public float RestUrgency
+        {
+            get
+            {
+                if (!WorldDay.IsRunning || maxEnergy <= 0f) return 0f;
+
+                DayState day = WorldDay.Current;
+                float activity = ActivityAt(nocturnality, day.daylight, day.twilight);
+                float threshold = currentState == State.Resting ? 0.55f : 0.5f;
+                float offHours = Mathf.Clamp01((threshold - activity) / 0.15f);
+                float fed = Mathf.InverseLerp(wakeWhenBelow, 2f * wakeWhenBelow, currentEnergy / maxEnergy);
+                float watered = enableThirst ? Mathf.InverseLerp(wakeWhenBelow, 2f * wakeWhenBelow, HydrationFraction) : 1f;
+                return offHours * fed * watered;
+            }
+        }
         public string BodyPlanDescription => bodyPlan;
         public string PerkDescription => perks;
         public int HarmfulMutations => harmfulMutations;
@@ -474,7 +542,11 @@ namespace Boreal.Animals
             public float retryTime;
         }
 
-        private enum State { Idling, Wandering, Chasing, Hunting, Fighting, Fleeing, Escaping, SeekingMate, Courting, SeekingWater, Drinking }
+        private enum State { Idling, Wandering, Chasing, Hunting, Fighting, Fleeing, Escaping, SeekingMate, Courting, SeekingWater, Drinking, Resting }
+
+        // Resting (item 74): false while still walking to shelter, true once settled.
+        private bool restSettled;
+        private float restWalkTimer;
 
         struct UnreachableWater
         {
@@ -609,6 +681,7 @@ namespace Boreal.Animals
             reproductionCooldownTimer = Mathf.Max(0f, reproductionCooldownTimer - deltaTime);
             UpdateThreatMemory(deltaTime);
             UpdateFailedHuntMemory(deltaTime);
+            thermalResponse.swingFelt = currentState == State.Resting && restSettled ? restSwingFelt : 1f;
             thermalResponse.Tick(deltaTime);
             if (thermalResponse.ThermalDamagePerSecond > 0f)
             {
@@ -687,7 +760,8 @@ namespace Boreal.Animals
 
             if (currentState == State.Chasing || currentState == State.Hunting ||
                 currentState == State.Fighting || currentState == State.SeekingMate ||
-                currentState == State.SeekingWater || currentState == State.Drinking)
+                currentState == State.SeekingWater || currentState == State.Drinking ||
+                currentState == State.Resting)
             {
                 return;
             }
@@ -818,8 +892,9 @@ namespace Boreal.Animals
                 threats = new List<AnimalThreat>()
             };
 
-            float visionRadiusSquared = visionRadius * visionRadius;
-            FoodItem.FindNearby(transform.position, visionRadius, nearbyFood);
+            float perceptionRadius = PerceptionRadius;
+            float visionRadiusSquared = perceptionRadius * perceptionRadius;
+            FoodItem.FindNearby(transform.position, perceptionRadius, nearbyFood);
             foreach (FoodItem food in nearbyFood)
             {
                 if (food == null || !food.IsAvailable)
@@ -855,7 +930,7 @@ namespace Boreal.Animals
             if (manager != null)
             {
                 // Only animals in the grid cells this animal's vision covers can be seen, so the rest aren't checked.
-                manager.FindAgentsNear(transform.position, visionRadius, nearbyAnimals);
+                manager.FindAgentsNear(transform.position, perceptionRadius, nearbyAnimals);
                 float bestMateScore = 0f;
                 foreach (SeekFood other in nearbyAnimals)
                 {
@@ -1234,6 +1309,11 @@ namespace Boreal.Animals
                     }
                     break;
 
+                case AgentIntent.Rest:
+                    if (previousState != State.Resting) BeginRest();
+                    currentState = State.Resting;
+                    break;
+
                 case AgentIntent.SeekMate:
                     if (seekingMate && MateFertility(decision.mateTarget) > 0f)
                     {
@@ -1319,6 +1399,20 @@ namespace Boreal.Animals
                     currentState = State.Idling;
                     timer = actionTimer;
                     decisionTimer = 0f;
+                }
+            }
+            else if (currentState == State.Resting)
+            {
+                // Walking to shelter until it gets there, the route ends, or it has walked for 15 s; then it settles.
+                if (!restSettled)
+                {
+                    restWalkTimer += deltaTime;
+                    if (restWalkTimer >= 15f || !agent.pathPending &&
+                        (!agent.hasPath || agent.remainingDistance <= agent.stoppingDistance + 0.5f))
+                    {
+                        restSettled = true;
+                        TryResetPath();
+                    }
                 }
             }
             else if (currentState == State.Hunting || currentState == State.Fighting)
@@ -1908,6 +2002,49 @@ namespace Boreal.Animals
                 (!agent.hasPath || agent.remainingDistance <= agent.stoppingDistance + 0.1f))
             {
                 PickNextAction();
+            }
+        }
+
+        // Starts resting: under the trees nearby if it isn't under them already (they shelter it from the night's cold,
+        // see DailyTemperature), otherwise where it stands.
+        void BeginRest()
+        {
+            restSettled = true;
+            restWalkTimer = 0f;
+            TryResetPath();
+
+            AnimalTerrainWorld terrainWorld = AnimalTerrainWorld.Active;
+            if (shelterSearchRadius <= 0f || inWater || terrainWorld == null ||
+                !terrainWorld.TryGetCachedSample(transform.position, out EnvironmentSample here))
+            {
+                return;
+            }
+
+            const int Directions = 8;
+            float bestCover = here.treeCover + 0.2f;
+            Vector3 best = transform.position;
+            float firstAngle = Random.value * Mathf.PI * 2f;
+            for (int ring = 1; ring <= 2; ring++)
+            {
+                for (int direction = 0; direction < Directions; direction++)
+                {
+                    float angle = firstAngle + direction * Mathf.PI * 2f / Directions;
+                    Vector3 point = transform.position +
+                                    new Vector3(Mathf.Cos(angle), 0f, Mathf.Sin(angle)) * (shelterSearchRadius * ring * 0.5f);
+                    if (terrainWorld.TryGetCachedSample(point, out EnvironmentSample there) && there.isLand &&
+                        there.treeCover > bestCover)
+                    {
+                        bestCover = there.treeCover;
+                        best = point;
+                    }
+                }
+            }
+
+            if (best != transform.position &&
+                NavMesh.SamplePosition(best, out NavMeshHit hit, 5f, WaterAccess.WalkableAreas) &&
+                TrySetDestination(hit.position))
+            {
+                restSettled = false;
             }
         }
 
@@ -2563,6 +2700,7 @@ namespace Boreal.Animals
             captured[AnimalGene.Torpor] = thermalResponse.torpor;
             captured[AnimalGene.MutationRate] = mutationRate;
             captured[AnimalGene.LitterSize] = litterSize;
+            captured[AnimalGene.Nocturnality] = nocturnality;
             // Founders start the markers in the middle, so chance can move them either way.
             captured[AnimalGene.MarkerA] = 0.5f;
             captured[AnimalGene.MarkerB] = 0.5f;
@@ -2591,6 +2729,7 @@ namespace Boreal.Animals
             thermalResponse.torpor = genome[AnimalGene.Torpor];
             mutationRate = genome[AnimalGene.MutationRate];
             litterSize = genome[AnimalGene.LitterSize];
+            nocturnality = genome[AnimalGene.Nocturnality];
             harmfulMutations = genome.HarmfulMutations;
         }
 

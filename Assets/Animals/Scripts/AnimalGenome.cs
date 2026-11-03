@@ -33,6 +33,9 @@ namespace Boreal.Animals
         // 1 to 4: how many young a birth has on average. The energy a birth hands over is split between them, so a
         // bigger litter means weaker young (see SeekFood.TryGiveBirth).
         LitterSize,
+        // 0 to 1: when the animal is active (item 74). 0 by day, 1 by night, around 0.5 at dawn and dusk and in bursts
+        // round the clock. It rests at its off hours (see SeekFood.ActivityAt).
+        Nocturnality,
         // 0 to 1, starting at 0.5 in founders: three markers that are inherited and mutate like any gene but do
         // nothing and don't count towards genetic distance (item 56). They wander by chance alone, so how far they
         // move in a run is how far any gene could move by luck; a real gene has been selected only when it moves well
@@ -286,6 +289,8 @@ namespace Boreal.Animals
             AnimalGene.MutationRate => new AnimalGeneDefinition(0.25f, 4f, GeneMutationStyle.Proportional, 0.01f),
             // Additive, so a mutation moves it by a tenth of a child at the default magnitude.
             AnimalGene.LitterSize => new AnimalGeneDefinition(1f, 4f, GeneMutationStyle.Additive, 1f),
+            // Steps like sexual drive: a tenth of its range at the default magnitude.
+            AnimalGene.Nocturnality => new AnimalGeneDefinition(0f, 1f, GeneMutationStyle.Additive, 1f),
             // Markers step like the other 0-1 additive genes and weigh nothing towards genetic distance.
             AnimalGene.MarkerA or AnimalGene.MarkerB or AnimalGene.MarkerC =>
                 new AnimalGeneDefinition(0f, 1f, GeneMutationStyle.Additive, 1f, 0f),

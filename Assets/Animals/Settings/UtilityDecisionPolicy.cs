@@ -17,6 +17,10 @@ namespace Boreal.Animals
         [Tooltip("How much of its maximum energy a drink is worth to an animal with no water left, scaled down " +
                  "towards the thirst threshold, where it is worth nothing.")]
         [Min(0f)] public float thirstValue = 1f;
+        [Tooltip("What resting is worth deep in an animal's off hours, as a fraction of its maximum energy, weighed " +
+                 "against food, water and mates; less towards its active hours, and nothing once it is hungry or " +
+                 "thirsty (SeekFood.RestUrgency). A partner or rich food close by can still wake it.")]
+        [Min(0f)] public float restValue = 0.5f;
 
         [Header("Threat Response")]
         [FormerlySerializedAs("fleeAfterBeingAttacked")]
@@ -87,6 +91,13 @@ namespace Boreal.Animals
             {
                 bestUtility = drinkUtility;
                 bestDecision = new AnimalDecision(AgentIntent.Drink, drinkingSpot: perception.drinkingSpot);
+            }
+
+            float restUtility = restValue * self.maxEnergy * self.RestUrgency;
+            if (restUtility > bestUtility)
+            {
+                bestUtility = restUtility;
+                bestDecision = new AnimalDecision(AgentIntent.Rest);
             }
 
             float mateUtility = ScoreMate(self, perception.mate, perception.mateDistance, perception.mateFertility);

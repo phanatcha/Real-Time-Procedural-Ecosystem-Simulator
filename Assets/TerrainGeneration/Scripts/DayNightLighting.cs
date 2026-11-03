@@ -176,26 +176,14 @@ namespace Boreal.TerrainGeneration
             showingNight = true;
             float elevation = moment.sunElevation;
 
-            // One light: the sun while it is near or above the horizon, the moon once the sun is well down. At the
-            // hand-over both are too dim to see the jump.
+            // One light: the sun while it is near or above the horizon, the moon once the sun is well down.
+            MainLight light = MainLightAt(moment, dayIntensity, moonIntensity * Mathf.Lerp(0.4f, 1f, nightBrightness));
             sun.useColorTemperature = true;
             sun.color = Color.white;
-            if (elevation > -4f || moment.moonlight <= 0.001f)
-            {
-                float sunlight = Mathf.SmoothStep(0f, 1f, Mathf.InverseLerp(-1f, 12f, elevation));
-                sun.transform.rotation = Quaternion.LookRotation(-moment.sunDirection);
-                sun.intensity = dayIntensity * sunlight;
-                // About 2,200 K at sunrise, 5,300 K at the scene's afternoon height of 32°, a little bluer at noon.
-                sun.colorTemperature = Mathf.Lerp(2200f, 5600f, Mathf.SmoothStep(0f, 1f, Mathf.InverseLerp(0f, 40f, elevation)));
-                sun.shadows = sunlight > 0.01f ? dayShadows : LightShadows.None;
-            }
-            else
-            {
-                sun.transform.rotation = Quaternion.LookRotation(-moment.moonDirection);
-                sun.intensity = moonIntensity * moment.moonlight * Mathf.Lerp(0.4f, 1f, nightBrightness);
-                sun.colorTemperature = 8500f;
-                sun.shadows = LightShadows.None;
-            }
+            sun.transform.rotation = Quaternion.LookRotation(-light.direction);
+            sun.intensity = light.intensity;
+            sun.colorTemperature = light.colorTemperature;
+            sun.shadows = light.isMoon || light.intensity < 0.01f ? LightShadows.None : dayShadows;
 
             // How bright the sky is: full by day, warm near the horizon, gone an hour or so after sunset.
             float sky = Mathf.SmoothStep(0f, 1f, Mathf.InverseLerp(-10f, 12f, elevation));
@@ -220,6 +208,44 @@ namespace Boreal.TerrainGeneration
                 nightColour.postExposure.value = 0.25f + 0.6f * nightBrightness;
             }
             PlaceStars(moment);
+        }
+
+        // What the scene's one light does at a moment: where it shines from, how bright and what colour.
+        public struct MainLight
+        {
+            public Vector3 direction;
+            public float intensity;
+            public float colorTemperature;
+            public bool isMoon;
+        }
+
+        // The sun fades out by 1° below the horizon; the light then turns to the moon, which fades in as the sun sinks
+        // from 4° to 12° below and out again before dawn. The procedural sky is lit by the same light, so both cross
+        // over in the dark between the two, without a jump. sunIntensity is the light at full sun, moonIntensity at a
+        // full moon high up.
+        public static MainLight MainLightAt(DayState moment, float sunIntensity, float moonIntensity)
+        {
+            float elevation = moment.sunElevation;
+            if (elevation > -4f || moment.moonlight <= 0.001f)
+            {
+                float sunlight = Mathf.SmoothStep(0f, 1f, Mathf.InverseLerp(-1f, 12f, elevation));
+                return new MainLight
+                {
+                    direction = moment.sunDirection,
+                    intensity = sunIntensity * sunlight,
+                    // About 2,200 K at sunrise, 5,300 K at the scene's afternoon height of 32°, a little bluer at noon.
+                    colorTemperature = Mathf.Lerp(2200f, 5600f, Mathf.SmoothStep(0f, 1f, Mathf.InverseLerp(0f, 40f, elevation)))
+                };
+            }
+
+            float dark = Mathf.SmoothStep(0f, 1f, Mathf.InverseLerp(-4f, -12f, elevation));
+            return new MainLight
+            {
+                direction = moment.moonDirection,
+                intensity = moonIntensity * moment.moonlight * dark,
+                colorTemperature = 8500f,
+                isMoon = true
+            };
         }
 
         static SphericalHarmonicsL2 Scaled(SphericalHarmonicsL2 probe, Color scale)

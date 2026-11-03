@@ -176,9 +176,12 @@ namespace Boreal.AnimalTerrainIntegration
                 CaptureTemplate(animal);
                 AnimalTemperature thermal = animal.GetComponent<AnimalTemperature>();
                 float thermalMultiplier = thermal != null ? Mathf.Max(0.01f, thermal.EnergyDrainMultiplier) : 1f;
+                // Measured awake and comfortable: resting is charged over the day by the sample itself.
+                float awakeEnergyUse = animal.CurrentEnergyDrainPerSecond / thermalMultiplier /
+                                       Mathf.Max(0.01f, animal.RestEnergyMultiplier);
                 store.AddAnimal(cell, animal.speciesName, animal.speciesColor,
-                    new OffscreenSample(animal.Genome.Clone(), animal.CurrentEnergyDrainPerSecond / thermalMultiplier,
-                                        animal.Generation));
+                    new OffscreenSample(animal.Genome.Clone(), awakeEnergyUse, animal.Generation,
+                                        animal.restEnergyMultiplier));
 
                 // Leaves without being recorded as a death; the population now counts it.
                 animal.PrepareForAbstraction();
