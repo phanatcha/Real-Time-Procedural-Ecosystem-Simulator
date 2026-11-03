@@ -475,8 +475,11 @@ namespace Boreal.Animals.Editor
                 List<Renderer> hidden = new List<Renderer>();
                 List<AtmosphericFog> atmospheres = new List<AtmosphericFog>();
                 RenderTexture previousActive = RenderTexture.active;
+                bool dayView = DayNightLighting.HoldDayView;
                 try
                 {
+                    // Maps are drawn in the scene's day light whatever the hour (item 72).
+                    DayNightLighting.HoldDayView = true;
                     RenderSettings.fog = false;
                     // The atmosphere hides everything more than 790 m from the camera, which is all of it from up here.
                     foreach (AtmosphericFog atmosphere in Object.FindObjectsByType<AtmosphericFog>(FindObjectsSortMode.None))
@@ -556,6 +559,7 @@ namespace Boreal.Animals.Editor
                         if (atmosphere != null)
                             atmosphere.enabled = true;
                     RenderSettings.fog = fog;
+                    DayNightLighting.HoldDayView = dayView;
                     if (pipeline != null)
                     {
                         pipeline.shadowDistance = shadowDistance;

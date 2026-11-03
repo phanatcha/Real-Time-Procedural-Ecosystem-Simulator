@@ -293,7 +293,7 @@ namespace Boreal.Animals
             string speed = manager.IsSafetyPaused ? "<color=#ff7070>SAFETY PAUSED</color> (press 1-5 to resume)"
                 : manager.simulationSpeed <= 0f ? "<color=#ffd060>PAUSED</color>"
                 : $"{manager.simulationSpeed:0.#}x (achieved {manager.AchievedSimulationSpeed:0.#}x)";
-            text.Append($"<b>Speed</b> {speed}    1-5: 1x 5x 10x 20x 50x   P: pause   H: hide   G: chart   T: species tree   K: god tools   click an animal to inspect it, F follows it\n");
+            text.Append($"<b>Speed</b> {speed}    1-5: 1x 5x 10x 20x 50x   P: pause   H: hide   G: chart   T: species tree   K: god tools   N: day view   click an animal to inspect it, F follows it\n");
             if (manager.IsSafetyPaused)
             {
                 text.Append($"   <color=#ff9090>{manager.LastSafetyPauseReason}</color>\n");

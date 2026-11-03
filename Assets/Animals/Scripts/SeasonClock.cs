@@ -281,8 +281,29 @@ namespace Boreal.Animals
                            foodSpawner != null ? foodSpawner.BuriedPlantCount : -1,
                            season.state.growthMultiplier * season.growthBalance, season.state.snowAmount,
                            TemperatureShiftCelsius(season.state));
+            SampleFeltTemperature(manager);
             if (animals == 0) WriteSummary(manager, "ended early: no animals left");
         }
+
+        // Twice a simulated second, the temperature the live animals feel on average, so the summary can give the
+        // season's coldest and warmest, which the day's swing (item 73) pulls apart.
+        void SampleFeltTemperature(SpeciesManager manager)
+        {
+            if (Time.time < nextFeltSample) return;
+            nextFeltSample = Time.time + 0.5f;
+
+            float total = 0f;
+            int counted = 0;
+            foreach (SeekFood animal in manager.ActiveAgents)
+            {
+                if (animal == null || animal.ThermalResponse == null) continue;
+                total += animal.ThermalResponse.AmbientTemperature;
+                counted++;
+            }
+            if (counted > 0) summary.SampleFelt(total / counted);
+        }
+
+        float nextFeltSample;
 
         void WriteSummary(SpeciesManager manager, string ending)
         {

@@ -208,6 +208,12 @@ namespace Boreal.AnimalTerrainIntegration
         // The same two now, after the season.
         public float PlantEnergyPerSecond { get; private set; }
         public float Celsius { get; private set; }
+        // How far the temperature swings from the coldest hour to the warmest, in °C, averaged over the cell's ground
+        // (DailyTemperature); 0 without day and night. Numbers have no hours, so the cell's costs are taken at both ends
+        // of the swing, its coldest and warmest hours.
+        public float DailySwing { get; private set; }
+        public float ColdestCelsius => Celsius - 0.5f * DailySwing;
+        public float WarmestCelsius => Celsius + 0.5f * DailySwing;
 
         public Vector2 Centre => bounds.center;
 
@@ -234,15 +240,19 @@ namespace Boreal.AnimalTerrainIntegration
 
             float plantEnergy = 0f;
             float celsiusTotal = 0f;
+            float swingTotal = 0f;
+            float dayLength = WorldDay.Current.dayLength;
             foreach (OffscreenGround spot in ground)
             {
                 SeasonalGround effect = SeasonalGround.At(spot.environment, season);
                 plantEnergy += spot.plantEnergyPerSecond * effect.growth * effect.uncovered;
                 celsiusTotal += rules.ToCelsius(effect.temperature);
+                if (WorldDay.IsRunning) swingTotal += DailyTemperature.Swing(spot.environment, dayLength);
             }
 
             PlantEnergyPerSecond = plantEnergy;
             Celsius = celsiusTotal / ground.Count;
+            DailySwing = swingTotal / ground.Count;
         }
 
         public OffscreenPopulation Find(string speciesName)
@@ -408,7 +418,11 @@ namespace Boreal.AnimalTerrainIntegration
             float total = 0f;
             for (int i = 0; i < population.samples.Count; i++)
             {
-                total += rules.CarryingCapacity(population.samples[i], cell.PlantEnergyPerSecond, cell.Celsius);
+                // Over a day: the average at the coldest and the warmest hour, so the numbers pay for cold nights and hot
+                // afternoons as the live animals do.
+                OffscreenSample sample = population.samples[i];
+                total += 0.5f * (rules.CarryingCapacity(sample, cell.PlantEnergyPerSecond, cell.ColdestCelsius) +
+                                 rules.CarryingCapacity(sample, cell.PlantEnergyPerSecond, cell.WarmestCelsius));
             }
 
             return total / population.samples.Count;
@@ -498,7 +512,9 @@ namespace Boreal.AnimalTerrainIntegration
                 float ownShare = capacity > 0f ? population.count / capacity : 0f;
                 float room = capacity * Mathf.Max(0f, 1f - (usedShare - ownShare));
                 population.count = EcosystemPopulationSimulation.GrowLogistic(
-                    population.count, room, AverageGrowthRate(population), AverageDeathRate(population, cell.Celsius), elapsed);
+                    population.count, room, AverageGrowthRate(population),
+                    0.5f * (AverageDeathRate(population, cell.ColdestCelsius) + AverageDeathRate(population, cell.WarmestCelsius)),
+                    elapsed);
             }
         }
 

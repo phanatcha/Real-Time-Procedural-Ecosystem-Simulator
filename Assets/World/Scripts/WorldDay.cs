@@ -9,7 +9,15 @@ namespace Boreal.World
     {
         public static DayState Current { get; set; } = DayCycle.Neutral;
 
+        // Whether day and night are running. Without them nothing swings through the day: it is always midday, at the
+        // day's average temperature.
+        public static bool IsRunning { get; set; }
+
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
-        public static void Reset() => Current = DayCycle.Neutral;
+        public static void Reset()
+        {
+            Current = DayCycle.Neutral;
+            IsRunning = false;
+        }
     }
 }

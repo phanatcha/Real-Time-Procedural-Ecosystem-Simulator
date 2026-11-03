@@ -3,6 +3,7 @@ using Boreal.Temperature;
 using Boreal.TerrainGeneration;
 using System.Collections.Generic;
 using System.Text;
+using UnityEngine;
 
 namespace Boreal.Animals
 {
@@ -112,6 +113,8 @@ namespace Boreal.Animals
         double celsiusShiftSeconds;
         bool hasPlants = true;
         bool hasCelsiusShift = true;
+        float coldestFelt = float.PositiveInfinity;
+        float warmestFelt = float.NegativeInfinity;
 
         public SeasonSummary(int year, BorealSeason season, float startTime, int animals, EcosystemTally tally)
         {
@@ -143,6 +146,14 @@ namespace Boreal.Animals
             snowSeconds += seconds * snow;
             if (float.IsNaN(celsiusShift)) hasCelsiusShift = false;
             else celsiusShiftSeconds += seconds * celsiusShift;
+        }
+
+        // The temperature the live animals feel now, on average, in °C.
+        public void SampleFelt(float averageCelsius)
+        {
+            if (float.IsNaN(averageCelsius) || float.IsInfinity(averageCelsius)) return;
+            coldestFelt = Mathf.Min(coldestFelt, averageCelsius);
+            warmestFelt = Mathf.Max(warmestFelt, averageCelsius);
         }
 
         // averageEnergy is the live animals' average share of their maximum energy, or NaN with none alive. setting
@@ -197,6 +208,11 @@ namespace Boreal.Animals
                     line.Append(shift <= -0.5 ? $", {-shift:0} °C colder"
                         : shift >= 0.5 ? $", {shift:0} °C warmer"
                         : ", usual temperature");
+                }
+                // Averaged over the live animals: the cold of night and the warmth of the afternoon.
+                if (coldestFelt <= warmestFelt)
+                {
+                    line.Append($", animals felt {coldestFelt:0} to {warmestFelt:0} °C");
                 }
             }
 

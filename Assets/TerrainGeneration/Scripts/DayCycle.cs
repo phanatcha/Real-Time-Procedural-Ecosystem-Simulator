@@ -133,3 +133,58 @@ namespace Boreal.TerrainGeneration
         }
     }
 }
+
+namespace Boreal.TerrainGeneration
+{
+    // How much warmer or colder than the day's average it is at an hour of the day (item 73). The swing is coldest just
+    // before sunrise and warmest two thirds of the way from sunrise to sunset, a few hours after noon, as the ground
+    // warms through the day; it averages to nothing over the day, so the seasons' balance stays as it was. How large it
+    // is depends on the place: largest on dry, high, open ground, much smaller under trees, on the shore and over
+    // water, larger when days are long, and colder still on snowy nights, when snow radiates the heat away.
+    public static class DailyTemperature
+    {
+        // Peak to trough, in °C, on open ground of middling moisture and height on a day of equal light and dark.
+        public const float BaseSwing = 8f;
+        // Over open water the swing is about this much in all.
+        public const float WaterSwing = 1f;
+
+        // Peak-to-trough swing in °C for this place on a day this long (DayState.dayLength). snowCover 0-1 is the snow
+        // lying there (SeasonalEnvironment); it deepens the night half only, so it is applied in Offset.
+        public static float Swing(in EnvironmentSample place, float dayLength)
+        {
+            if (!place.isValid) return 0f;
+            if (place.isWater) return WaterSwing;
+
+            float swing = BaseSwing;
+            swing *= Mathf.Lerp(1.3f, 0.6f, Mathf.Clamp01(place.moisture));
+            swing *= Mathf.Lerp(1f, 0.6f, Mathf.Clamp01(place.treeCover));
+            swing *= Mathf.Lerp(1f, 1.3f, Mathf.InverseLerp(0.35f, 0.9f, place.normalizedHeight));
+            if (place.isShore) swing *= 0.5f;
+            swing *= Mathf.Lerp(0.8f, 1.2f, Mathf.InverseLerp(0.2f, 0.8f, dayLength));
+            return swing;
+        }
+
+        // °C above (or below) the day's average at this time of day, for a place whose swing is swing.
+        public static float Offset(float swing, float timeOfDay, float dayLength, float snowCover = 0f)
+        {
+            float offset = swing * Shape(timeOfDay, dayLength);
+            if (offset < 0f) offset *= 1f + 0.3f * Mathf.Clamp01(snowCover);
+            return offset;
+        }
+
+        // From -0.5 just before sunrise to 0.5 in mid-afternoon: a half cosine up from sunrise to the warmest hour and
+        // another down from there to the next sunrise. Each half averages to nothing, so the day does too. Under the
+        // midnight sun or in polar night the shape keeps a short dark or light spell, so the swing never vanishes.
+        public static float Shape(float timeOfDay, float dayLength)
+        {
+            float light = Mathf.Clamp(dayLength, 0.1f, 0.9f);
+            float sunrise = 0.5f - light * 0.5f;
+            float warmest = sunrise + light * 2f / 3f;
+            float rising = warmest - sunrise;
+            float since = Mathf.Repeat(timeOfDay - sunrise, 1f);
+            return since < rising
+                ? -0.5f * Mathf.Cos(Mathf.PI * since / rising)
+                : 0.5f * Mathf.Cos(Mathf.PI * (since - rising) / (1f - rising));
+        }
+    }
+}

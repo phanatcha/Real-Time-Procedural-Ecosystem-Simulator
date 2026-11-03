@@ -149,6 +149,20 @@ namespace Boreal.Animals.Tests
             Assert.AreEqual(raw.movementCost, adjusted.movementCost, Tolerance);
         }
 
+        // The season summary gives the coldest and warmest the animals felt on average (item 73).
+        [Test]
+        public void SummariesGiveTheRangeTheAnimalsFelt()
+        {
+            SeasonSummary summary = new SeasonSummary(1, BorealSeason.Winter, 0f, 5, default);
+            summary.Sample(10f, 5, 100, 20, 0, 1f, 0f, -10f);
+            summary.SampleFelt(-14.2f);
+            summary.SampleFelt(-3.6f);
+            summary.SampleFelt(-8f);
+
+            StringAssert.Contains("animals felt -14 to -4 °C",
+                summary.Describe(10f, 5, 0, 0.5f, 1, default, default, "seasons on", ""));
+        }
+
         // Ice forms once the season is 6 °C colder than the base climate and bears animals at 10 °C colder: in a
         // full-strength winter (0.6 of the range colder), never in summer.
         [Test]

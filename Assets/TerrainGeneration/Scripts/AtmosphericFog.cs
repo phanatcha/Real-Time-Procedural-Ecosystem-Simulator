@@ -41,6 +41,13 @@ namespace Boreal.TerrainGeneration
 
         [Range(0f, 1f)] public float strength = 1f;
 
+        // How bright the sky is that lights the haze and mist, as a colour: white by day, warm at sunset and a dim blue
+        // at night. Set by DayNightLighting; white without day and night, so the colours above are used as they are.
+        public static Color SkyLight = Color.white;
+
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+        static void ResetSkyLight() => SkyLight = Color.white;
+
         static readonly int StrengthId = Shader.PropertyToID("_BorealFogStrength");
         static readonly int HazeColourId = Shader.PropertyToID("_BorealFogHazeColour");
         static readonly int MistColourId = Shader.PropertyToID("_BorealFogMistColour");
@@ -76,8 +83,8 @@ namespace Boreal.TerrainGeneration
             }
 
             Shader.SetGlobalFloat(StrengthId, strength);
-            Shader.SetGlobalColor(HazeColourId, hazeColour);
-            Shader.SetGlobalColor(MistColourId, mistColour);
+            Shader.SetGlobalColor(HazeColourId, hazeColour * SkyLight);
+            Shader.SetGlobalColor(MistColourId, mistColour * SkyLight);
             Shader.SetGlobalVector(SunColourId, new Vector4(glow.r, glow.g, glow.b, 0f));
             Shader.SetGlobalVector(SunDirectionId, towardsSun);
             Shader.SetGlobalVector(DensityId, new Vector4(hazeDensity, mistDensity, mistFalloff, mistBaseHeight));

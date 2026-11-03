@@ -12,10 +12,23 @@ namespace Boreal.World
         public float coldestTemperatureCelsius = -28f;
         public float warmestTemperatureCelsius = 18f;
 
-        // Shifted by the season on SeasonClock, as the terrain's seasonal query shifts its temperature index.
+        // Shifted by the season on SeasonClock, as the terrain's seasonal query shifts its temperature index, and swinging
+        // through the day while the day clock runs (DailyTemperature).
         public override bool TryGetTemperature(Vector3 worldPosition, out float temperatureCelsius)
         {
-            return TryGetTemperature(worldPosition, WorldSeason.Current, out temperatureCelsius);
+            if (!TryGetTemperature(worldPosition, WorldSeason.Current, out temperatureCelsius, out EnvironmentSample place,
+                                   out float snowCover))
+            {
+                return false;
+            }
+
+            if (WorldDay.IsRunning)
+            {
+                DayState day = WorldDay.Current;
+                temperatureCelsius += DailyTemperature.Offset(DailyTemperature.Swing(place, day.dayLength), day.timeOfDay,
+                                                              day.dayLength, snowCover);
+            }
+            return true;
         }
 
         public override bool TryGetClimateTemperature(Vector3 worldPosition, out float temperatureCelsius)
@@ -23,9 +36,18 @@ namespace Boreal.World
             return TryGetTemperature(worldPosition, WorldSeason.Neutral, out temperatureCelsius);
         }
 
+        // The day's average temperature in this season.
         public bool TryGetTemperature(Vector3 worldPosition, SeasonState season, out float temperatureCelsius)
         {
+            return TryGetTemperature(worldPosition, season, out temperatureCelsius, out _, out _);
+        }
+
+        bool TryGetTemperature(Vector3 worldPosition, SeasonState season, out float temperatureCelsius,
+                               out EnvironmentSample place, out float snowCover)
+        {
             temperatureCelsius = 0f;
+            place = default;
+            snowCover = 0f;
             ResolveTerrainWorld();
             if (terrainWorld == null || !IsFinite(worldPosition)) return false;
 
@@ -48,10 +70,13 @@ namespace Boreal.World
             }
 
             environment.temperature = normalizedTemperature;
+            SeasonalEnvironmentSample seasonal = SeasonalEnvironment.Evaluate(environment, season);
             temperatureCelsius = NormalizedToCelsius(
-                SeasonalEnvironment.Evaluate(environment, season).temperature,
+                seasonal.temperature,
                 coldestTemperatureCelsius,
                 warmestTemperatureCelsius);
+            place = environment;
+            snowCover = seasonal.snowCover;
             return IsFinite(temperatureCelsius);
         }
 

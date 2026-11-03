@@ -83,6 +83,61 @@ namespace Boreal.TerrainGeneration.Tests
             Assert.AreEqual(new[] { 0f, 0.25f, 0.5f, 0.75f }, phases);
         }
 
+        // The swing (item 73) averages to nothing, so the seasons keep their balance; it is coldest at sunrise and
+        // warmest in the afternoon, on long days and short ones.
+        [Test]
+        public void TheDaysSwingAveragesToNothingColdestAtDawnWarmestInTheAfternoon()
+        {
+            foreach (float dayLength in new[] { 0.2f, 0.5f, 0.8f })
+            {
+                float total = 0f;
+                float coldest = float.MaxValue, warmest = float.MinValue, coldestAt = 0f, warmestAt = 0f;
+                const int Steps = 2000;
+                for (int step = 0; step < Steps; step++)
+                {
+                    float time = (step + 0.5f) / Steps;
+                    float shape = DailyTemperature.Shape(time, dayLength);
+                    total += shape;
+                    if (shape < coldest) { coldest = shape; coldestAt = time; }
+                    if (shape > warmest) { warmest = shape; warmestAt = time; }
+                }
+
+                Assert.AreEqual(0f, total / Steps, 0.002f, $"day length {dayLength}");
+                Assert.AreEqual(0.5f - dayLength * 0.5f, coldestAt, 0.002f, "coldest at sunrise");
+                Assert.Greater(warmestAt, 0.5f, "warmest after noon");
+                Assert.Less(warmestAt, 0.5f + dayLength * 0.5f, "and before sunset");
+                Assert.AreEqual(-0.5f, coldest, 0.001f);
+                Assert.AreEqual(0.5f, warmest, 0.001f);
+            }
+        }
+
+        // Largest on dry, high, open ground; much smaller under trees, on the shore and over water; deeper on snowy nights.
+        [Test]
+        public void TheSwingDependsOnThePlace()
+        {
+            EnvironmentSample open = new EnvironmentSample { isValid = true, isLand = true, moisture = 0.5f, normalizedHeight = 0.5f };
+            EnvironmentSample dryHigh = open;
+            dryHigh.moisture = 0f;
+            dryHigh.normalizedHeight = 0.9f;
+            EnvironmentSample forest = open;
+            forest.treeCover = 1f;
+            EnvironmentSample shore = open;
+            shore.isShore = true;
+            EnvironmentSample water = new EnvironmentSample { isValid = true, isWater = true };
+
+            float swing = DailyTemperature.Swing(open, 0.5f);
+            Assert.AreEqual(DailyTemperature.BaseSwing * 0.95f * 1.0846f, swing, 0.2f);
+            Assert.Greater(DailyTemperature.Swing(dryHigh, 0.8f), 12f, "a dry high meadow in summer");
+            Assert.Less(DailyTemperature.Swing(forest, 0.5f), swing * 0.7f);
+            Assert.AreEqual(swing * 0.5f, DailyTemperature.Swing(shore, 0.5f), 0.001f);
+            Assert.AreEqual(DailyTemperature.WaterSwing, DailyTemperature.Swing(water, 0.5f), 0.001f);
+            Assert.Greater(DailyTemperature.Swing(open, 0.8f), DailyTemperature.Swing(open, 0.2f), "longer days swing more");
+
+            float sunrise = 0.25f;
+            Assert.AreEqual(-0.5f * swing * 1.3f, DailyTemperature.Offset(swing, sunrise, 0.5f, 1f), 0.01f, "snowy nights are colder");
+            Assert.AreEqual(0.5f * swing, DailyTemperature.Offset(swing, sunrise + 1f / 3f, 0.5f, 1f), 0.01f, "snow leaves the afternoon");
+        }
+
         [Test]
         public void WithoutSeasonsEveryDayIsAnEquinox()
         {

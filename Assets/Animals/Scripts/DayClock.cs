@@ -1,14 +1,17 @@
+using Boreal.Core;
 using Boreal.TerrainGeneration;
 using Boreal.World;
 using UnityEngine;
+using UnityEngine.InputSystem;
 
 namespace Boreal.Animals
 {
     // One clock for the time of day across the whole island, beside the season clock (item 71). The day runs on simulated
     // time from the start of the current world: the sun's path follows the latitude and the season clock's time of year,
     // so summer days are long and winter nights long, and a moon goes through its phases over a few days. It publishes
-    // the moment as WorldDay for every system to read. Nothing acts on it yet: the night look, the day's temperature
-    // swing and the animals' hours come with items 72 to 77 (the Day and Night Plan). Adds itself to scenes with a
+    // the moment as WorldDay for every system to read: the temperature swings through the day (item 73) and the island
+    // is lit by the turning sun and the moon (item 72); the animals' hours come with items 74 to 77 (the Day and Night
+    // Plan). Adds itself to scenes with a
     // SpeciesManager, on or off as Tools > Boreal Ecosystem > Day And Night On was last set.
     [DefaultExecutionOrder(-790)]
     [DisallowMultipleComponent]
@@ -92,6 +95,7 @@ namespace Boreal.Animals
         void OnEnable()
         {
             Active = this;
+            if (!TryGetComponent(out DayNightLighting _)) gameObject.AddComponent<DayNightLighting>();
             Refresh();
         }
 
@@ -101,10 +105,22 @@ namespace Boreal.Animals
             {
                 Active = null;
                 WorldDay.Reset();
+                DayNightLighting.Publish(DayCycle.Neutral, false, latitude);
             }
         }
 
-        void Update() => Refresh();
+        void Update()
+        {
+            // N holds the day view (the scene's own afternoon light) for looking and screenshots; the simulation's
+            // time of day carries on.
+            Keyboard keyboard = Keyboard.current;
+            if (keyboard != null && keyboard.nKey.wasPressedThisFrame && !GodCamera.IsTypingInUI())
+            {
+                DayNightLighting.HoldDayView = !DayNightLighting.HoldDayView;
+            }
+
+            Refresh();
+        }
 
         void Refresh()
         {
@@ -116,6 +132,8 @@ namespace Boreal.Animals
             clockTime = ClockTime(state.timeOfDay);
             moon = MoonName(state.moonPhase);
             WorldDay.Current = Current;
+            WorldDay.IsRunning = IsRunning;
+            DayNightLighting.Publish(Current, IsRunning, latitude);
         }
 
         // "07:12" for 0.3.

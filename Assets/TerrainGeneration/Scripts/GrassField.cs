@@ -74,6 +74,7 @@ namespace Boreal.TerrainGeneration
         GraphicsBuffer[] arguments;
         Mesh[] meshes;
         MaterialPropertyBlock[] properties;
+        readonly SphericalHarmonicsL2[] ambient = new SphericalHarmonicsL2[1];
         int[] bufferIds;
         int capacity;
         readonly Plane[] planes = new Plane[6];
@@ -187,6 +188,9 @@ namespace Boreal.TerrainGeneration
             // Out of season (or under snow) every flower is shrunk away in the shader, so they aren't drawn at all.
             SeasonalLookState season = SeasonalLook.Current;
             bool flowersOut = season.flowersGone < 0.999f && season.snow < 0.5f;
+            // Instanced draws don't take the scene's ambient light by themselves; hand it over, so the grass darkens
+            // with the sky at night (DayNightLighting) like everything else.
+            ambient[0] = RenderSettings.ambientProbe;
             for (int i = 0; i < plants.Length; i++)
             {
                 if (i > 0 && !flowersOut) continue;
@@ -200,6 +204,7 @@ namespace Boreal.TerrainGeneration
                 block.SetFloat(FlowerGlowId, flowerGlow);
                 block.SetColor(RootColourId, rootColour);
                 block.SetColor(TipColourId, tipColour);
+                block.CopySHCoefficientArraysFrom(ambient);
 
                 Draw(meshes[i], arguments[i], block, bounds);
             }
@@ -214,6 +219,7 @@ namespace Boreal.TerrainGeneration
                 // Thousands of small plants: they take shadows from trees and hills but cast none of their own.
                 shadowCastingMode = ShadowCastingMode.Off,
                 receiveShadows = true,
+                lightProbeUsage = LightProbeUsage.CustomProvided,
                 layer = gameObject.layer
             };
             Graphics.RenderMeshIndirect(parameters, mesh, drawArguments);
