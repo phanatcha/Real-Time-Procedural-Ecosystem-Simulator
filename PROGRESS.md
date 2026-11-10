@@ -78,7 +78,9 @@ Built on the 29 October follow-up above, which was still uncommitted.
   | Load off (0%) | 84 (66–102) | 17% (10–20) | 0.49 | 0 |
   | Load on (10%) | 90 (79–106) | 18% (16–20) | 0.49 | 1.0 (0.7–1.4) |
 
-  No extinctions, no species splits, every run at about 85 animals after year 2. Mutation load did not make mating pay in five years: one harmful mutation costs 2% of energy, too little for selection to see. Raise the cost per mutation or run longer. In every run the largest species' average maturity time rose from 30 s to 44–49 s (a longer youth spreads the growth cost thinner) and litter size drifted only to 1.01–1.06. Populations are lower than the earlier MOSSY-FJORD soak's 100–227 because growth now costs.
+  No extinctions, no species splits, every run at about 85 animals after year 2. Mutation load did not make mating pay in five years: one harmful mutation cost 2% of energy in these runs (5% since the second round), too little for selection to see. Raise the cost per mutation or run longer. Litter size drifted only to 1.01–1.06. Populations are lower than the earlier MOSSY-FJORD soak's 100–227 because growth now costs.
+
+  **Correction, 10 November (item 55):** this note first said the largest species' average maturity time "rose from 30 s to 44–49 s". It did not. Founders start at 45 s (`AnimalTerrainDemoBootstrap` overrides `SeekFood`'s 30 s default), and the twelve runs' `traits.csv` files end at 44.1 to 48.6 s, some below the start and some above. The second experiment's twelve runs (`comparison-20261101T155009Z`) end at 42.7 to 45.7 s. Maturity time has not measurably moved, so juvenile growth is not shown to select for a longer youth.
 - **9, FOREST-001's small population:** the scene's Simulation Start at (0, 0) is in a strait. The three founders landed about 350 m apart on two islands: two on the sandy lowland tip of the western island, 100 to 150 m from its forest (green on the heatmap), and one on the western limb of the island to the south-east, which the heatmap scores poorly. The camera's 300 m plant radius sits mostly over water, which is why so few plants show. Nothing was changed: either move the Simulation Start for this seed, have the bootstrap choose a start among candidates by walkable land and plant sites within the spawn radius, or demo on MOSSY-FJORD. Founder positions are now in the soak log.
 ## Backlog item 27, thirst — 1 November 2026, third round
 
@@ -100,3 +102,19 @@ Built on the 29 October follow-up above, which was still uncommitted.
 - The panel's key hint lists T, K, click and F. Tests: `GodToolsTests` covers the schedule parser; the off-screen tests expect the new cold cost. Full Unity suite: **277 passed, 0 failed, 0 skipped** (`Logs/TestResults/20261101T160428677684Z/results.xml`). This round went to `main` on 1 November as six commits (`4bff837` to `e4ed518`).
 
 - Two Play Mode tests cover growth and litters. The soak harness logs founder positions and can set the harmful mutation chance on every animal. Full Unity suite: **268 passed, 0 failed, 0 skipped** (`Logs/TestResults/20261101T151541325480Z/results.xml`), including `SpeciesSplitCalibrationTests` with the new gene. All of it, with the 29 October follow-up, went to `main` on 1 November as six commits (`408fc55` to `7b3b1a5`). Nothing has been checked by eye in the Editor.
+
+## Backlog items 54 and 55, generations and stale numbers — 10 November 2026
+
+- **54, generations recorded:** `population.csv` and `species.csv` end with `average_generation` and `highest_generation` of the live animals at each sample, and `traits.csv` with `at_minimum` and `at_maximum`, the animals sitting exactly at a gene's limit (recording schema 7, described in `RUN_RECORDING.md`). The panel's largest-species line shows the species' generation, and `Tools/summarise_runs.py` prints a `gen` column.
+- **55, stale numbers:** the maturity claim in the 1 November section above is corrected in place, and the `AnimalGenome` comments give the gene weights as 23.
+- First soaks with the new columns, one five-year run per seed at 50× with seasons, day and night, thirst and own-kind hunting on, off-screen mode off, 3 founders, revision `7e7f04b5+dirty` (items 54 and 55 uncommitted):
+
+  | Seed | Final animals | Average while running | Births | From two parents | Average generation at the end | Newest generation |
+  |---|---:|---:|---:|---:|---:|---:|
+  | MOSSY-FJORD | 114 | 86 | 911 | 8% | 14.9 | 18 |
+  | FOREST-001 | 30 | 33 | 359 | 13% | 17.5 | 23 |
+
+  The average generation rose steadily, about 3 a year on MOSSY-FJORD (2.1, 5.9, 9.3, 12.0, 14.9 at the end of each year) and about 3.5 on FOREST-001 (3.5, 7.7, 10.3, 13.7, 17.5). That confirms the earlier rough count of 10 to 20 generations in five years, against the 50 to 60 the species threshold is tuned for; neither run split a species. At this pace a first split would need roughly 15 to 20 simulated years.
+- Genes at a limit at the end of both runs: **Torpor** (110 of 114 animals at its minimum on MOSSY-FJORD, 7 of 30 on FOREST-001) and **LitterSize** (98 of 114, and 29 of 30). Founders start both at the minimum, so mutation can only push them up and their averages cannot show selection against them; read "torpor stays at 0.01" and "litter size drifted only to 1.01–1.06" above with that in mind. No other gene had any animal at a limit.
+- One run per seed, so these are single observations, not a spread. Recordings: `Logs/SoakRuns/MOSSY-FJORD-20261110T091119Z` and `Logs/SoakRuns/FOREST-001-20261110T091230Z`.
+- Full Unity suite with item 54 in: **321 passed, 1 failed** of 322 (`Logs/TestResults/20261110T085806513443Z/results.xml`); see `TEST_RESULTS.md` for the one failure, which passed twice when run alone.

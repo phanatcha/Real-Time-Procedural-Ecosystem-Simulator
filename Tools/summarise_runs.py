@@ -47,6 +47,8 @@ def summarise(run):
         'sexual_share': int(last['sexual_births']) / births if births else float('nan'),
         'starvation': int(last['starvation']),
         'species_alive': int(last['species_alive']),
+        # Recordings before schema 7 (item 54) have no generation columns.
+        'generation': float(last['average_generation']) if last.get('average_generation') else float('nan'),
         'sexual_drive': last_trait(traits, largest, 'SexualDrive') if largest else float('nan'),
         'harmful': last_trait(traits, largest, 'HarmfulMutations') if largest else float('nan'),
         'extinct': live[-1] == 0,
@@ -58,11 +60,11 @@ def main():
     rows = [summarise(run) for path in paths for run in runs_under(path)]
     if not rows:
         sys.exit('no recorded runs found')
-    header = f'{"run":<22}{"experiment":<24}{"yrs":>5}{"final":>6}{"mean":>7}{"min":>5}{"births":>7}{"2par":>6}{"drive":>7}{"harm":>6}{"spp":>4}'
+    header = f'{"run":<22}{"experiment":<24}{"yrs":>5}{"final":>6}{"mean":>7}{"min":>5}{"births":>7}{"2par":>6}{"drive":>7}{"harm":>6}{"spp":>4}{"gen":>6}'
     print(header)
     for r in rows:
         print(f'{r["run"]:<22}{r["experiment"][:23]:<24}{r["years"]:>5.1f}{r["final"]:>6}{r["mean_live"]:>7.1f}{r["min_live"]:>5}'
-              f'{r["births"]:>7}{r["sexual_share"]:>6.0%}{r["sexual_drive"]:>7.3f}{r["harmful"]:>6.2f}{r["species_alive"]:>4}'
+              f'{r["births"]:>7}{r["sexual_share"]:>6.0%}{r["sexual_drive"]:>7.3f}{r["harmful"]:>6.2f}{r["species_alive"]:>4}{r["generation"]:>6.1f}'
               + ('  extinct' if r['extinct'] else ''))
     by_label = {}
     for r in rows:
@@ -78,7 +80,7 @@ def main():
                 return f'{statistics.mean(values):.3f} ({spread:.3f})'
             print(f'{label}: {len(group)} runs, {sum(g["extinct"] for g in group)} extinct; final animals {stat("final")}, '
                   f'births from two parents {stat("sexual_share")}, sexual drive {stat("sexual_drive")}, '
-                  f'harmful mutations {stat("harmful")}')
+                  f'harmful mutations {stat("harmful")}, average generation {stat("generation")}')
 
 
 if __name__ == '__main__':

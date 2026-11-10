@@ -33,6 +33,26 @@ namespace Boreal.Animals.Tests
         }
 
         [Test]
+        public void GeneLimitsCountAnimalsAtEitherEndOfAGenesRange()
+        {
+            AnimalGeneDefinition range = AnimalGenome.GetDefinition(AnimalGene.MaturityTime);
+            var genomes = new System.Collections.Generic.List<AnimalGenome>();
+            // Two at the minimum, one at the maximum (a value past it clamps to it), two in between.
+            foreach (float value in new[] { range.minimum, range.minimum, range.maximum + 50f, 45f, range.minimum + 0.5f })
+            {
+                AnimalGenome genome = AnimalGenome.Create();
+                genome[AnimalGene.MaturityTime] = value;
+                genomes.Add(genome);
+            }
+            GeneLimits.Count(genomes, AnimalGene.MaturityTime, out int atMinimum, out int atMaximum);
+            Assert.AreEqual(2, atMinimum);
+            Assert.AreEqual(1, atMaximum);
+            GeneLimits.Count(null, AnimalGene.MaturityTime, out atMinimum, out atMaximum);
+            Assert.AreEqual(0, atMinimum);
+            Assert.AreEqual(0, atMaximum);
+        }
+
+        [Test]
         public void SamplingPausesSkipsMissedFramesAndResetsWithoutFabricatingHistory()
         {
             var schedule = new SimulationSampleSchedule();

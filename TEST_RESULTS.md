@@ -1,4 +1,8 @@
-# Latest verification — 1 November 2026, third round
+# Latest verification — 10 November 2026
+
+**321 passed, 1 failed, 0 skipped** of 322 in Unity 6000.4.1f1 with generations recorded (item 54) ([NUnit XML](Logs/TestResults/20261110T085806513443Z/results.xml)). Two tests cover the item: `GeneLimitsCountAnimalsAtEitherEndOfAGenesRange`, and the recorder's live-animal test now checks the generation and gene-limit columns. The failure was `NewbornsStartSmallAndGrowToFullSizeByMaturity`: a child's vision read 110.55 against 110 ± 0.5. It passed twice when run alone afterwards, so it looks like an occasional failure, possibly a vision mutation in the child; the cause is not confirmed.
+
+# 1 November 2026, third round
 
 **279 passed, 0 failed, 0 skipped** in Unity 6000.4.1f1 after thirst (item 27) ([NUnit XML](Logs/TestResults/20261101T165334883659Z/results.xml)). Two new Play Mode tests: a thirsty animal walks to water and drinks until nearly full; an animal with no water dies of thirst. The first run caught animals stopping their drink at the thirst threshold, now fixed.
 

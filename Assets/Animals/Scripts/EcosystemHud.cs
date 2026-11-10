@@ -385,7 +385,8 @@ namespace Boreal.Animals
                 traitsWhenFirstSeen.Add(largest, now);
             }
 
-            text.Append($"<b>Largest species</b> {largest} ({largestPopulation}), {record.dietClassification}: " +
+            text.Append($"<b>Largest species</b> {largest} ({largestPopulation}), {record.dietClassification}, " +
+                        $"generation {record.averageGeneration:0.0} (newest {record.highestGeneration}): " +
                         "average (lowest-highest), change in average since it appeared\n");
             text.Append($"   diet {Describe(now.diet, record.dietRange, now.diet - first.diet)}   " +
                         $"bulk {Describe(now.bulk, record.bodyBulkRange, now.bulk - first.bulk)}   " +

@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Globalization;
 
 namespace Boreal.Animals
@@ -31,6 +32,25 @@ namespace Boreal.Animals
             double delta = value - Mean;
             Mean += delta / Count;
             squaredDeviation += delta * (value - Mean);
+        }
+    }
+
+    // Counts the genomes sitting at a gene's lowest or highest allowed value (item 54). A gene with many animals at
+    // a limit can't move further that way, so its average understates the pressure on it.
+    public static class GeneLimits
+    {
+        public static void Count(IEnumerable<AnimalGenome> genomes, AnimalGene gene, out int atMinimum, out int atMaximum)
+        {
+            atMinimum = atMaximum = 0;
+            if (genomes == null) return;
+            AnimalGeneDefinition definition = AnimalGenome.GetDefinition(gene);
+            foreach (AnimalGenome genome in genomes)
+            {
+                // Mutation clamps to the limits exactly, so no tolerance is needed.
+                float value = genome[gene];
+                if (value <= definition.minimum) atMinimum++;
+                else if (value >= definition.maximum) atMaximum++;
+            }
         }
     }
 

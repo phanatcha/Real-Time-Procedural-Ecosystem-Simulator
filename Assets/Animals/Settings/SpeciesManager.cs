@@ -68,6 +68,10 @@ namespace Boreal.Animals
         public float litterSize;
         [Tooltip("Average number of harmful mutations carried, each adding to energy use.")]
         public float harmfulMutations;
+        [Tooltip("Average generation of the living members at the last census. Founders are generation 0.")]
+        public float averageGeneration;
+        [Tooltip("Highest generation among the living members at the last census.")]
+        public int highestGeneration;
         [Tooltip("Share of the living members with each perk (0-1), indexed by AnimalPerk.")]
         public float[] perkShares = new float[AnimalGenome.PerkCount];
         public int births;
@@ -629,6 +633,8 @@ namespace Boreal.Animals
             {
                 BlendTraits(telemetryRecord, agent, 1f);
                 WidenTraitRanges(telemetryRecord, agent, true);
+                telemetryRecord.averageGeneration = agent.Generation;
+                telemetryRecord.highestGeneration = agent.Generation;
             }
             if (countAsBirth) telemetryRecord.births++;
         }
@@ -896,6 +902,9 @@ namespace Boreal.Animals
                 SpeciesTelemetryRecord record = GetOrCreateTelemetry(agent.speciesName);
                 BlendTraits(record, agent, 1f / count);
                 WidenTraitRanges(record, agent, count == 1);
+                record.averageGeneration = Mathf.Lerp(record.averageGeneration, agent.Generation, 1f / count);
+                record.highestGeneration = count == 1
+                    ? agent.Generation : Mathf.Max(record.highestGeneration, agent.Generation);
 
                 generationTotal += agent.Generation;
                 livingCount++;

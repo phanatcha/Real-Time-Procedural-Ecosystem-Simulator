@@ -41,8 +41,10 @@ namespace Boreal.Animals
         {
             // 4: population.csv gained the time of day, light, moon and deaths at night (item 70); traits.csv the
             // marker genes and perk (item 56). 5: population.csv gained the share of live animals resting, traits.csv the
-            // Nocturnality gene (item 74). 6: traits.csv gained the NightVision gene (item 75).
-            public int schemaVersion = 6;
+            // Nocturnality gene (item 74). 6: traits.csv gained the NightVision gene (item 75). 7: population.csv and
+            // species.csv gained the live animals' average and highest generation, traits.csv how many animals sit at
+            // each gene's limits (item 54).
+            public int schemaVersion = 7;
             public string startedUtc, sourceRevision, experiment, unityVersion, worldSeed;
             public float sampleInterval;
             public bool offscreenEnabled;
@@ -103,9 +105,9 @@ namespace Boreal.Animals
                 representativeAnimalSettings = representative != null ? JsonUtility.ToJson(representative) : ""
             };
             File.WriteAllText(Path.Combine(OutputDirectory, "metadata.json"), JsonUtility.ToJson(metadata, true));
-            population = Open("population.csv", "time,live,offscreen,species_alive,births,cloned_births,sexual_births,deaths,starvation,predation,old_age,cold,heat,venom,thirst,other,land_ceiling,sea_ceiling,requested_speed,achieved_speed,season,season_strength,offscreen_enabled,breeding_wait_episodes,breeding_wait_seconds,day,time_of_day,daylight,light,moon_phase,deaths_at_night,resting");
-            species = Open("species.csv", "time,species,parent,origin,extinction,live,offscreen,births,sexual_births,deaths,breeding_wait_episodes,breeding_wait_seconds");
-            traits = Open("traits.csv", "time,species,trait,live_sample_count,mean,standard_deviation,minimum,maximum");
+            population = Open("population.csv", "time,live,offscreen,species_alive,births,cloned_births,sexual_births,deaths,starvation,predation,old_age,cold,heat,venom,thirst,other,land_ceiling,sea_ceiling,requested_speed,achieved_speed,season,season_strength,offscreen_enabled,breeding_wait_episodes,breeding_wait_seconds,day,time_of_day,daylight,light,moon_phase,deaths_at_night,resting,average_generation,highest_generation");
+            species = Open("species.csv", "time,species,parent,origin,extinction,live,offscreen,births,sexual_births,deaths,breeding_wait_episodes,breeding_wait_seconds,average_generation,highest_generation");
+            traits = Open("traits.csv", "time,species,trait,live_sample_count,mean,standard_deviation,minimum,maximum,at_minimum,at_maximum");
             events = Open("events.csv", "time,event,detail");
             eventsWritten = 0;
             Debug.Log("Recording simulation to " + OutputDirectory, this);
@@ -123,6 +125,27 @@ namespace Boreal.Animals
         {
             EcosystemTally total = EcosystemTally.Of(manager.Telemetry.Values);
             DayState day = DayClock.Current;
+            // Generations are read from the live animals at this sample, not from the manager's last census, so they
+            // match the rest of the row (item 54). Founders are generation 0.
+            var groups = new Dictionary<string, List<AnimalGenome>>();
+            var generations = new Dictionary<string, RunningStatistics>();
+            var allGenerations = new RunningStatistics();
+            foreach (SeekFood animal in manager.ActiveAgents)
+            {
+                if (animal == null) continue;
+                // The same animals the manager's census counts.
+                if (animal.IsAlive)
+                {
+                    generations.TryGetValue(animal.speciesName, out RunningStatistics ofSpecies);
+                    ofSpecies.Add(animal.Generation);
+                    generations[animal.speciesName] = ofSpecies;
+                    allGenerations.Add(animal.Generation);
+                }
+                if (animal.Genome == null || !animal.Genome.IsValid) continue;
+                if (!groups.TryGetValue(animal.speciesName, out var genomes))
+                    groups[animal.speciesName] = genomes = new List<AnimalGenome>();
+                genomes.Add(animal.Genome);
+            }
             Row(population, time, manager.TotalPopulation, manager.OffscreenTotal, manager.SpeciesAliveCount,
                 total.births, total.births - total.sexualBirths, total.sexualBirths, total.deaths,
                 total.starvationDeaths, total.predationDeaths, total.oldAgeDeaths, total.coldDeaths,
@@ -131,29 +154,25 @@ namespace Boreal.Animals
                 SeasonClock.Active != null ? SeasonClock.Active.SeasonName : "None",
                 SeasonClock.IsRunning ? SeasonClock.Active.EffectiveStrength : 0f, manager.OffscreenPopulation != null,
                 manager.BreedingWaitEpisodes, manager.BreedingWaitSeconds, day.day, day.timeOfDay, day.daylight,
-                day.light, day.moonPhase, manager.DeathsAtNight, RestingShare());
+                day.light, day.moonPhase, manager.DeathsAtNight, RestingShare(),
+                AverageGeneration(allGenerations), HighestGeneration(allGenerations));
 
-            var groups = new Dictionary<string, List<AnimalGenome>>();
-            foreach (SeekFood animal in manager.ActiveAgents)
-            {
-                if (animal == null || animal.Genome == null || !animal.Genome.IsValid) continue;
-                if (!groups.TryGetValue(animal.speciesName, out var genomes))
-                    groups[animal.speciesName] = genomes = new List<AnimalGenome>();
-                genomes.Add(animal.Genome);
-            }
             foreach (SpeciesTelemetryRecord record in manager.Telemetry.Values)
             {
                 manager.SpeciesPopulation.TryGetValue(record.speciesName, out int live);
+                generations.TryGetValue(record.speciesName, out RunningStatistics ofRecord);
                 Row(species, time, record.speciesName, record.parentSpeciesName, record.originTime,
                     record.extinctionTime, live, manager.OffscreenPopulation?.CountOffscreen(record.speciesName) ?? 0,
                     record.reproductionEvents, record.sexualOffspring, record.deaths,
-                    record.breedingWaitEpisodes, record.breedingWaitSeconds);
+                    record.breedingWaitEpisodes, record.breedingWaitSeconds,
+                    AverageGeneration(ofRecord), HighestGeneration(ofRecord));
                 groups.TryGetValue(record.speciesName, out var genomes);
                 // Empty populations have blank trait values, not misleading zero-valued genes. Their history remains.
                 for (int gene = 0; gene < AnimalGenome.GeneCount; gene++)
                 {
-                    int index = gene;
-                    WriteTrait(time, record.speciesName, ((AnimalGene)gene).ToString(), genomes, g => g[(AnimalGene)index]);
+                    AnimalGene which = (AnimalGene)gene;
+                    GeneLimits.Count(genomes, which, out int atMinimum, out int atMaximum);
+                    WriteTrait(time, record.speciesName, which.ToString(), genomes, genome => genome[which], atMinimum, atMaximum);
                 }
                 WriteTrait(time, record.speciesName, "HarmfulMutations", genomes, g => g.HarmfulMutations);
                 for (int perk = 0; perk < AnimalGenome.PerkCount; perk++)
@@ -186,12 +205,22 @@ namespace Boreal.Animals
             return live > 0 ? (double)resting / live : 0.0;
         }
 
-        void WriteTrait(double time, string name, string trait, List<AnimalGenome> genomes, Func<AnimalGenome, double> value)
+        // No live animals leaves the generation cells blank, as empty populations' traits are.
+        static object AverageGeneration(RunningStatistics generations) =>
+            generations.Count > 0 ? (object)generations.Mean : "";
+        static object HighestGeneration(RunningStatistics generations) =>
+            generations.Count > 0 ? (object)(int)generations.Maximum : "";
+
+        // atMinimum and atMaximum are the animals at the gene's limits; harmful mutations and perks have none, so
+        // theirs stay blank.
+        void WriteTrait(double time, string name, string trait, List<AnimalGenome> genomes, Func<AnimalGenome, double> value,
+                        int atMinimum = -1, int atMaximum = -1)
         {
             var summary = new RunningStatistics();
             if (genomes != null) foreach (var genome in genomes) summary.Add(value(genome));
-            if (summary.Count == 0) Row(traits, time, name, trait, 0, "", "", "", "");
-            else Row(traits, time, name, trait, summary.Count, summary.Mean, summary.StandardDeviation, summary.Minimum, summary.Maximum);
+            if (summary.Count == 0) Row(traits, time, name, trait, 0, "", "", "", "", "", "");
+            else Row(traits, time, name, trait, summary.Count, summary.Mean, summary.StandardDeviation, summary.Minimum,
+                     summary.Maximum, atMinimum < 0 ? (object)"" : atMinimum, atMaximum < 0 ? (object)"" : atMaximum);
         }
 
         static void Row(TextWriter writer, params object[] values)

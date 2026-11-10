@@ -266,6 +266,29 @@ namespace Boreal.Animals.Tests
                 Assert.AreEqual(manager.BreedingWaitEpisodes.ToString(), final[System.Array.IndexOf(columns, "breeding_wait_episodes")]);
                 Assert.AreEqual(manager.BreedingWaitSeconds, double.Parse(final[System.Array.IndexOf(columns, "breeding_wait_seconds")],
                     System.Globalization.CultureInfo.InvariantCulture), 0.0001);
+                // Item 54: the lone founder is generation 0, and its sexual drive and maturity time sit at their minimum.
+                Assert.AreEqual("0", final[System.Array.IndexOf(columns, "average_generation")]);
+                Assert.AreEqual("0", final[System.Array.IndexOf(columns, "highest_generation")]);
+                string[] speciesRows = System.IO.File.ReadAllLines(System.IO.Path.Combine(directory, "species.csv"));
+                string[] speciesColumns = speciesRows[0].Split(',');
+                string[] speciesFinal = speciesRows[speciesRows.Length - 1].Split(',');
+                Assert.AreEqual(speciesColumns.Length, speciesFinal.Length);
+                Assert.AreEqual("0", speciesFinal[System.Array.IndexOf(speciesColumns, "highest_generation")]);
+                string[] traitRows = System.IO.File.ReadAllLines(System.IO.Path.Combine(directory, "traits.csv"));
+                string[] traitColumns = traitRows[0].Split(',');
+                int traitName = System.Array.IndexOf(traitColumns, "trait");
+                int atMinimum = System.Array.IndexOf(traitColumns, "at_minimum");
+                int atMaximum = System.Array.IndexOf(traitColumns, "at_maximum");
+                string[] Last(string trait) =>
+                    System.Array.FindLast(traitRows, row => row.Split(',')[traitName] == trait).Split(',');
+                foreach (string trait in new[] { "SexualDrive", "MaturityTime" })
+                {
+                    Assert.AreEqual(traitColumns.Length, Last(trait).Length);
+                    Assert.AreEqual("1", Last(trait)[atMinimum], trait);
+                    Assert.AreEqual("0", Last(trait)[atMaximum], trait);
+                }
+                Assert.AreEqual("0", Last("MoveSpeed")[atMinimum]);
+                Assert.AreEqual("", Last("HarmfulMutations")[atMinimum], "Only genes have limits.");
                 manager.ResetSimulation();
                 Assert.AreEqual(0, manager.BreedingWaitEpisodes);
                 Assert.AreEqual(0, manager.BreedingWaitSeconds);

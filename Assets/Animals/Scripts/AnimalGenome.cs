@@ -173,13 +173,13 @@ namespace Boreal.Animals
         public static readonly int SiteCount = System.Enum.GetValues(typeof(BodySite)).Length;
         public static readonly int PerkCount = System.Enum.GetValues(typeof(AnimalPerk)).Length;
 
-        // How much one body site counts towards genetic distance, next to the numeric genes' weights (20 in
-        // total). At 0.5 a whole full-size part of difference is about 0.021, under half the default species
-        // threshold (0.05). SpeciesManager.DefaultSpeciationThreshold describes how the weights and threshold were
+        // How much one body site counts towards genetic distance, next to the numeric genes' weights (23 in
+        // total: twenty genes at 1, diet at 3, the markers at 0). At 0.5 a whole full-size part of difference is about
+        // 0.018, under half the default species threshold (0.05). SpeciesManager.DefaultSpeciationThreshold describes how the weights and threshold were
         // calibrated.
         public const float BodySiteDistanceWeight = 0.5f;
 
-        // How much one perk of difference counts towards genetic distance. At 0.25 it is about 0.010, a fifth of the
+        // How much one perk of difference counts towards genetic distance. At 0.25 it is about 0.009, under a fifth of the
         // default species threshold, so a single perk neither splits a species nor lowers fertility on its own.
         public const float PerkDistanceWeight = 0.25f;
 
