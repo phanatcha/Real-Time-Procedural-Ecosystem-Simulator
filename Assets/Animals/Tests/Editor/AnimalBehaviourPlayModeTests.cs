@@ -103,6 +103,87 @@ namespace Boreal.Animals.Tests
             Assert.AreEqual(0, record.sexualOffspring);
         }
 
+        // The energy ledger (item 61): through eating, growing, a litter and a death, every change to the animals' stores
+        // is accounted for, and no rule makes energy from nothing.
+        [UnityTest]
+        public IEnumerator TheEnergyLedgerBalancesThroughEatingALitterGrowthAndADeath()
+        {
+            EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
+            yield return new EnterPlayMode(ReloadsDomain);
+
+            BakeNavMesh(CreateGround(Vector3.zero, 60f));
+            SpeciesManager manager = StartSimulation();
+            // No births until the ledger is counting.
+            manager.populationCeiling = 2;
+            AnimalGenome litterOfThree = Genome(sexualDrive: 0f, maturityTime: 5f);
+            litterOfThree[AnimalGene.LitterSize] = 3f;
+            SeekFood parent = CreateAnimal(Vector3.zero, litterOfThree, energyFraction: 1f, age: 10f);
+            SeekFood eater = CreateAnimal(new Vector3(20f, 0f, 0f), Genome(maturityTime: 200f), energyFraction: 0.3f, age: 10f);
+            CreatePlant(new Vector3(26f, 0f, 0f));
+            yield return null;
+            yield return null;
+            try
+            {
+                EnergyLedger.Begin(Object.FindObjectsByType<SeekFood>(FindObjectsSortMode.None));
+                manager.populationCeiling = 400;
+
+                float deadline = Time.time + 20f;
+                while ((AnimalCount() < 4 || EnergyLedger.Total(EnergyFlow.Plants) <= 0) && Time.time < deadline) yield return null;
+                Assert.GreaterOrEqual(AnimalCount(), 4, "No litter was born within 20 simulated seconds.");
+                Assert.Greater(EnergyLedger.Total(EnergyFlow.Plants), 0, "The hungry animal did not eat its plant.");
+                // Let the young grow for a while, then one of them dies.
+                float grownBy = Time.time + 3f;
+                while (Time.time < grownBy) yield return null;
+                Child(parent).Kill(AgentDeathCause.Predation);
+                yield return null;
+                yield return null;
+
+                SeekFood[] living = Object.FindObjectsByType<SeekFood>(FindObjectsSortMode.None);
+                string report = EnergyLedger.Report(living);
+                Assert.AreEqual(0, EnergyLedger.Violations, report);
+                Assert.AreEqual(0.0, EnergyLedger.Gap(living), 0.01, report);
+                // Each kind of change was seen, so the balance above covers them.
+                Assert.Less(EnergyLedger.Total(EnergyFlow.GivenToYoung), 0, report);
+                Assert.Greater(EnergyLedger.Total(EnergyFlow.BornWith), 0, report);
+                Assert.Less(EnergyLedger.Total(EnergyFlow.Upkeep), 0, report);
+                Assert.Less(EnergyLedger.Total(EnergyFlow.Growth), 0, report);
+                Assert.Less(EnergyLedger.Total(EnergyFlow.LostAtDeath), 0, report);
+                // The litter got no more than the parent handed over.
+                Assert.LessOrEqual(EnergyLedger.Total(EnergyFlow.BornWith), -EnergyLedger.Total(EnergyFlow.GivenToYoung) + 0.01, report);
+
+                // A change made behind the ledger's back is caught and named.
+                eater.currentEnergy += 5f;
+                yield return null;
+                yield return null;
+                Assert.AreEqual(1, EnergyLedger.Violations);
+                Assert.AreEqual(5.0, EnergyLedger.Total(EnergyFlow.Untracked), 0.001);
+            }
+            finally
+            {
+                EnergyLedger.End();
+            }
+        }
+
+        // Harmful mutations are paid for in full (items 12 and 61): ten of them at 5% each cost half as much again.
+        [UnityTest]
+        public IEnumerator HarmfulMutationsRaiseUpkeepByTheirFullCost()
+        {
+            EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
+            yield return new EnterPlayMode(ReloadsDomain);
+
+            BakeNavMesh(CreateGround(Vector3.zero, 60f));
+            StartSimulation();
+            AnimalGenome loaded = Genome(maturityTime: 200f);
+            for (int count = 0; count < 10; count++) loaded.TryAddHarmfulMutation(100f);
+            SeekFood clean = CreateAnimal(new Vector3(-20f, 0f, 0f), Genome(maturityTime: 200f), energyFraction: 0.9f, age: 250f);
+            SeekFood burdened = CreateAnimal(new Vector3(20f, 0f, 0f), loaded, energyFraction: 0.9f, age: 250f);
+            yield return null;
+            yield return null;
+            Assert.AreEqual(10, burdened.Genome.HarmfulMutations);
+            Assert.That(burdened.CurrentEnergyDrainPerSecond,
+                        Is.EqualTo(clean.CurrentEnergyDrainPerSecond * (1f + 10 * burdened.harmfulMutationEnergyCost)).Within(1e-4f));
+        }
+
         // The experiment lock (item 60): a locked sexual drive holds through the generations whatever the gene mutates to.
         [UnityTest]
         public IEnumerator ALockedSexualDriveHoldsInTheChildrenWhateverTheyInherit()

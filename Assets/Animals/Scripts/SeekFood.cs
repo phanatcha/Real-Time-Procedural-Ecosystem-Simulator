@@ -363,6 +363,19 @@ namespace Boreal.Animals
         public int YoungBorn { get; private set; }
         public string Origin => fromOffscreenPopulation ? "offscreen" : bornInSimulation ? "born" : "founder";
 
+        // The energy ledger (item 61): the store as the ledger last saw it. Every change the simulation makes goes
+        // through SetEnergy, so a difference at the start of a frame is a change nothing accounted for.
+        private float ledgerEnergy;
+        private bool leftTheLedger;
+        public void SyncEnergyLedger() => ledgerEnergy = currentEnergy;
+
+        void SetEnergy(float value, EnergyFlow flow)
+        {
+            if (EnergyLedger.Enabled) EnergyLedger.Record(flow, (double)value - currentEnergy);
+            currentEnergy = value;
+            ledgerEnergy = value;
+        }
+
         public void BeginLifeRecord(int id, float worldTime)
         {
             AnimalId = id;
@@ -665,7 +678,15 @@ namespace Boreal.Animals
             timer = actionTimer;
             decisionTimer = Random.Range(0f, Mathf.Max(0.05f, decisionInterval));
             decisionRealTimeCooldown = Random.Range(0f, Mathf.Max(0f, minimumDecisionIntervalRealSeconds));
+            float energyGiven = currentEnergy;
             currentEnergy = Mathf.Clamp(currentEnergy, 0f, maxEnergy);
+            if (EnergyLedger.Enabled)
+            {
+                // A child's share was entered when it was born (Bear); founders and arrivals bring theirs.
+                if (!bornInSimulation) EnergyLedger.Record(EnergyFlow.Start, energyGiven);
+                EnergyLedger.Record(EnergyFlow.OverCapacity, (double)currentEnergy - energyGiven);
+            }
+            ledgerEnergy = currentEnergy;
             if (currentHydration < 0f) currentHydration = maxHydration;
             currentHydration = Mathf.Min(currentHydration, maxHydration);
             currentHealth = maxHealth;
@@ -719,6 +740,9 @@ namespace Boreal.Animals
 
         void OnDestroy()
         {
+            // An animal removed without dying (a scene unloading, a test) takes its store out of the ledger.
+            if (EnergyLedger.Enabled && !isDying && !leftTheLedger)
+                EnergyLedger.Record(EnergyFlow.LostAtDeath, -(double)currentEnergy);
             if (registeredWithSpeciesManager && SpeciesManager.Instance != null)
             {
                 SpeciesManager.Instance.DeregisterAgent(this, deathCause);
@@ -729,6 +753,9 @@ namespace Boreal.Animals
         public void PrepareForAbstraction()
         {
             if (!registeredWithSpeciesManager || SpeciesManager.Instance == null) return;
+            // Its store leaves the live animals' books with it.
+            if (EnergyLedger.Enabled) EnergyLedger.Record(EnergyFlow.LostAtDeath, -(double)currentEnergy);
+            leftTheLedger = true;
             SpeciesManager.Instance.UnregisterAgentWithoutDeath(this);
             registeredWithSpeciesManager = false;
         }
@@ -737,6 +764,12 @@ namespace Boreal.Animals
         {
             float deltaTime = Time.deltaTime;
             if (isDying || deltaTime <= 0f) return;
+            if (EnergyLedger.Enabled && currentEnergy != ledgerEnergy)
+            {
+                EnergyLedger.Record(EnergyFlow.Untracked, (double)currentEnergy - ledgerEnergy);
+                EnergyLedger.Violation($"{name}'s energy changed by {currentEnergy - ledgerEnergy:0.###} outside the ledger");
+                ledgerEnergy = currentEnergy;
+            }
             float unscaledDeltaTime = Time.unscaledDeltaTime;
             currentAge += deltaTime;
             if (growth < 1f) UpdateGrowth();
@@ -774,7 +807,7 @@ namespace Boreal.Animals
 
             if (currentEnergy > 0f)
             {
-                currentEnergy = Mathf.Max(0f, currentEnergy - CurrentEnergyDrainPerSecond * deltaTime);
+                SetEnergy(Mathf.Max(0f, currentEnergy - CurrentEnergyDrainPerSecond * deltaTime), EnergyFlow.Upkeep);
             }
             else
             {
@@ -1718,7 +1751,7 @@ namespace Boreal.Animals
                    CanAttack(prey) && currentEnergy >= attackEnergyCost &&
                    currentStamina >= attackStaminaCost)
             {
-                currentEnergy = Mathf.Max(0f, currentEnergy - attackEnergyCost);
+                SetEnergy(Mathf.Max(0f, currentEnergy - attackEnergyCost), EnergyFlow.Attacks);
                 currentStamina = Mathf.Max(0f, currentStamina - attackStaminaCost);
                 attackCooldownTimer += cooldown;
                 prey.TakeDamage(strength, this);
@@ -2407,7 +2440,8 @@ namespace Boreal.Animals
 
             float digestibleEnergy = rawNutrition * GetDigestionEfficiency(foodType);
             float acceptedEnergy = Mathf.Min(maxEnergy - currentEnergy, digestibleEnergy);
-            currentEnergy += acceptedEnergy;
+            SetEnergy(currentEnergy + acceptedEnergy, foodType == FoodType.Plant ? EnergyFlow.Plants : EnergyFlow.Meat);
+            EnergyLedger.CheckMeal(rawNutrition, acceptedEnergy, name);
 
             if (SpeciesManager.Instance != null)
             {
@@ -2557,7 +2591,8 @@ namespace Boreal.Animals
             isDying = true;
             deathCause = cause;
             float carcassEnergy = EstimatedCarcassRawEnergy;
-            currentEnergy = 0f;
+            EnergyLedger.CheckCarcass(carcassEnergy, Mathf.Max(0f, carcassBodyEnergy) * BodyMassFactor, currentEnergy, name);
+            SetEnergy(0f, EnergyFlow.LostAtDeath);
 
             if (carcassEnergy > 0f)
             {
@@ -2630,7 +2665,7 @@ namespace Boreal.Animals
             if (partner == null)
             {
                 handedOver = currentEnergy * 0.5f;
-                currentEnergy -= handedOver;
+                SetEnergy(currentEnergy - handedOver, EnergyFlow.GivenToYoung);
             }
             else
             {
@@ -2639,6 +2674,7 @@ namespace Boreal.Animals
             reproductionCooldownTimer = reproductionCooldown;
 
             float energyEach = handedOver / young;
+            float givenToYoung = energyEach;
             Bear(firstGenome, firstMutated, partner, firstPosition, energyEach);
             for (int index = 1; index < young; index++)
             {
@@ -2646,11 +2682,13 @@ namespace Boreal.Animals
                 if (!TryFindBirthPosition(ChildCanSwimDeepWater(childGenome), out Vector3 position))
                 {
                     // A later child with nowhere to be born isn't born, and its share stays with this parent.
-                    currentEnergy += energyEach;
+                    SetEnergy(currentEnergy + energyEach, EnergyFlow.GivenToYoung);
                     continue;
                 }
+                givenToYoung += energyEach;
                 Bear(childGenome, mutated, partner, position, energyEach);
             }
+            EnergyLedger.CheckBirth(handedOver, givenToYoung, name);
             return true;
         }
 
@@ -2669,6 +2707,7 @@ namespace Boreal.Animals
             }
 
             childScript.currentEnergy = childEnergy;
+            EnergyLedger.Record(EnergyFlow.BornWith, childEnergy);
             childScript.currentHydration = maxHydration;
             childScript.currentAge = 0f;
             childScript.bornInSimulation = true;
@@ -2699,7 +2738,7 @@ namespace Boreal.Animals
         float PayForChild()
         {
             float share = currentEnergy * Mathf.Clamp01(matingEnergyShare);
-            currentEnergy -= share;
+            SetEnergy(currentEnergy - share, EnergyFlow.GivenToYoung);
             reproductionCooldownTimer = reproductionCooldown;
             return share;
         }
@@ -2887,8 +2926,8 @@ namespace Boreal.Animals
             // Mass goes with the cube of size, so the cost falls as the body fills out: a share of the adult body's own
             // meat, spread over the youth. An animal that can't pay starves like any other.
             float massGained = growth * growth * growth - previous * previous * previous;
-            currentEnergy = Mathf.Max(0f, currentEnergy - growthEnergyCost * Mathf.Max(0f, carcassBodyEnergy) *
-                                                           AdultBodyMassFactor * massGained);
+            SetEnergy(Mathf.Max(0f, currentEnergy - growthEnergyCost * Mathf.Max(0f, carcassBodyEnergy) *
+                                                    AdultBodyMassFactor * massGained), EnergyFlow.Growth);
             visionRadius = adultVisionRadius * growth;
 
             // The body, its parts and its upkeep follow in steps of 5%, so a growing animal doesn't rebuild its mesh

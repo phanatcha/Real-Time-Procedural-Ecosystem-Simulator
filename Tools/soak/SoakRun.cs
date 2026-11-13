@@ -76,6 +76,7 @@ namespace Boreal.Soak.Editor
             SessionState.SetFloat(Key + "SexualDrive", float.Parse(Arg("soakSexualDrive", "-1"), CultureInfo.InvariantCulture));
             SessionState.SetFloat(Key + "SexualDriveAt", float.Parse(Arg("soakSexualDriveAt", "0"), CultureInfo.InvariantCulture));
             SessionState.SetBool(Key + "DriveLocked", false);
+            SessionState.SetBool(Key + "Ledger", Arg("soakLedger", "0") == "1");
 
             // The founders' start search (item 9) lives in AnimalTerrainIntegration, which this assembly can't
             // reference, so it is set by its serialized name.
@@ -196,6 +197,7 @@ namespace Boreal.Soak.Editor
                           $"{SessionState.GetFloat(Key + "DrinkInWaterSeconds", 0f):0}, " +
                           $"ice {WaterAccess.IceCover:0.00}{(WaterAccess.FreshWaterFrozen ? " frozen" : "")}, " +
                           $"animal-seconds on ice {SessionState.GetFloat(Key + "IceSeconds", 0f):0}");
+                if (EnergyLedger.Enabled) Debug.Log("Soak: " + EnergyLedger.Report(animals));
             }
 
             if (stage == 0 && animals.Length > 0 && !SessionState.GetBool(Key + "Fast", false) && manager != null)
@@ -204,6 +206,12 @@ namespace Boreal.Soak.Editor
                 SessionState.SetBool(Key + "Fast", true);
                 manager.enableSafetyPause = false;
                 manager.simulationSpeed = SessionState.GetFloat(Key + "Speed", 50f);
+                // Item 61: count every change to the animals' energy from here on, and report it with the status lines.
+                if (SessionState.GetBool(Key + "Ledger", false))
+                {
+                    EnergyLedger.Begin(animals);
+                    Debug.Log("Soak: energy ledger on");
+                }
                 // Children are copies of their parents, so a setting changed on the founders reaches every descendant.
                 float harmfulChance = SessionState.GetFloat(Key + "HarmfulChance", -1f);
                 foreach (SeekFood founder in animals)
@@ -264,6 +272,7 @@ namespace Boreal.Soak.Editor
                 if (simulated >= SessionState.GetFloat(Key + "Years", 5f) * clock.yearLength || animals.Length == 0 && SessionState.GetBool(Key + "Fast", false))
                 {
                     Debug.Log(animals.Length == 0 ? "Soak: every animal has died." : "Soak: reached the target years.");
+                    if (EnergyLedger.Enabled) Debug.Log("Soak: final " + EnergyLedger.Report(animals));
                     SimulationRunRecorder recorder = Object.FindAnyObjectByType<SimulationRunRecorder>();
                     if (recorder != null)
                     {

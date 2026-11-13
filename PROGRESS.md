@@ -157,3 +157,22 @@ Built on the 29 October follow-up above, which was still uncommitted.
 - Life records: every run's `lives.csv` adds up to `population.csv` (7,396 rows in `clones-r1`). Young are shared less evenly over 25 years than over 5: in `clones-r1` half the animals left none and the rough effective size was 0.63 of the head count.
 - Three replicates per treatment and one seed, so the direction is clear but the sizes are rough.
 
+## Backlog item 61, energy ledger check — 13 November 2026
+
+- **The ledger:** `EnergyLedger` (new, in `Assets/Animals/Scripts`) is a test mode that adds up every change to the animals' stored energy by kind: what they started with, plants, meat, energy handed to young and what the young were born with, anything a newborn couldn't store, upkeep, growth, attacks, and the store an animal died or left with. It is off unless `EnergyLedger.Begin` is called, and it only counts; it changes nothing in the simulation. Every change in `SeekFood` now goes through one `SetEnergy` call, and at the start of each frame an animal whose store differs from what the ledger last saw is logged as an untracked change.
+- **Three rules are checked where they happen:** a litter never gets more than its parents handed over, a meal never gives more than the food held, and a carcass never holds more than the body's own meat and the store the animal died with.
+- **Soaks with the ledger on** (`run_soak.py --ledger 1`, three years per seed; the status lines carry the running totals): no gap and no violations on either seed.
+
+  | Seed | Plants | Meat | Upkeep | Growth | Given to young = born with | Died or left with | Attacks | Gap | Violations |
+  |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+  | MOSSY-FJORD | +100,210 | +5,780 | −80,172 | −10,923 | 32,851 | −7,310 | −14 | 0 | 0 |
+  | FOREST-001 | +46,574 | +2,563 | −38,591 | −4,994 | 15,194 | −2,474 | 0 | 0 | 0 |
+
+  So in these runs nothing makes energy from nothing: plants are 95% of what comes in, upkeep takes 76 to 79% of it, growth about 10%, and 5 to 7% is lost with the dead. Swimming and wading cost through upkeep, and drinking moves no energy.
+- **Mutation load is paid in full.** A Play Mode test shows ten harmful mutations at 5% raise upkeep by exactly half. That answers the question left by item 60: the clones' numbers held up although they carried about 20, but not because the cost went unpaid. In those runs starvation deaths per year roughly doubled as the load grew (171 to 331 in `clones-r1`) while births rose with them (227 to 370) and old-age deaths fell: the animals lived shorter lives and turned over faster. Why the head count doesn't fall is still not explained.
+- **Two rules that can hand back more energy than went in.** Neither showed in the soaks, where animals stay near the founders' size and most carcasses spoil uneaten (meat brought in half of what growth cost), but both are there for selection to find, more so now that animals hunt their own kind (item 66):
+  1. A carcass holds (body meat + store) × 0.75 × body mass, so the store the animal died with is multiplied by its mass. For a founder-sized body (mass 1) that is a 25% loss, as meant. For the largest body the genes allow (bulk 1.8, height 2.2, mass about 4.6) it is 3.45 times the store: an animal that dies holding 100 leaves 345. The ledger's carcass check flags it whenever the store is above about 24 on such a body.
+  2. A body's meat is worth more than it cost to grow. Growing to full size costs Growth Energy Cost (0.5) × 50 × mass = 25 × mass, less the newborn's share; the carcass gives 50 × 0.75 × mass = 37.5 × mass, and a full meat-eater digests all of it. Founders' bodies were never paid for at all.
+  Nothing was changed: both are balance decisions. Suggested: scale only the body's meat by mass and take the store at its own value times the transfer efficiency, and bring the meat a body yields down to what it cost to grow (or the growth cost up).
+- Tests: `TheEnergyLedgerBalancesThroughEatingALitterGrowthAndADeath` (no gap and no violations through a meal, a litter of three, growth and a death, and a change made behind the ledger's back is caught) and `HarmfulMutationsRaiseUpkeepByTheirFullCost`.
+
