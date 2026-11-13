@@ -103,6 +103,34 @@ namespace Boreal.Animals.Tests
             Assert.AreEqual(0, record.sexualOffspring);
         }
 
+        // The experiment lock (item 60): a locked sexual drive holds through the generations whatever the gene mutates to.
+        [UnityTest]
+        public IEnumerator ALockedSexualDriveHoldsInTheChildrenWhateverTheyInherit()
+        {
+            EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
+            yield return new EnterPlayMode(ReloadsDomain);
+
+            BakeNavMesh(CreateGround(Vector3.zero, 60f));
+            StartSimulation();
+            // The gene says mate-or-clone (0.5) and every gene mutates at every birth; the lock says clone only.
+            SeekFood parent = CreateAnimal(Vector3.zero, Genome(sexualDrive: 0.5f, maturityTime: 5f), energyFraction: 1f, age: 10f);
+            parent.lockedSexualDrive = 0f;
+            parent.mutationChance = 100f;
+
+            float deadline = Time.time + 20f;
+            while (AnimalCount() < 2 && Time.time < deadline) yield return null;
+            yield return null;
+            SeekFood child = Child(parent);
+            Assert.IsNotNull(child, "No clone was born within 20 simulated seconds.");
+            Assert.AreEqual(0f, parent.sexualDrive, "The lock applies to the animal it is set on.");
+            Assert.AreEqual(0f, child.lockedSexualDrive, "Children copy the lock.");
+            Assert.AreEqual(0f, child.sexualDrive);
+            Assert.AreEqual(0f, child.Genome[AnimalGene.SexualDrive], "The recorded gene agrees with the behaviour.");
+            Assert.AreNotEqual(parent.Genome[AnimalGene.VisionRadius], child.Genome[AnimalGene.VisionRadius],
+                               "The other genes still mutate.");
+            Assert.AreEqual(0, Telemetry().sexualOffspring);
+        }
+
         // Life records (item 57): every animal gets one row in lives.csv, as it dies or when the recording closes, and a
         // child's row names its parent.
         [UnityTest]

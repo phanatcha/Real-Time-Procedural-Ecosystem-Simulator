@@ -23,6 +23,9 @@ parser.add_argument('--maps', default='1', help='0 skips the top-down maps at th
 parser.add_argument('--minutes', default='40', help='Wall-clock limit for the run')
 parser.add_argument('--experiment', help='Recorder experiment label; defaults to "soak <seed>"')
 parser.add_argument('--harmful-chance', help='Harmful mutation chance in per cent set on every animal, for item 46 comparisons')
+parser.add_argument('--sexual-drive', help='Lock sexual drive at this value (0 only clones, 1 only mates) on every animal, for item 60')
+parser.add_argument('--sexual-drive-at', default='800',
+                    help='Simulated seconds before the lock starts (default 800, two years: three founders that can only mate die out)')
 parser.add_argument('--thirst', default='1', help='0 switches thirst off on every animal')
 parser.add_argument('--own-kind', default='1', help='0 stops animals hunting their own species (item 66), for control runs')
 parser.add_argument('--daynight', default='1', help='0 switches day and night off (always midday), for control runs')
@@ -75,6 +78,8 @@ if args.experiment:
     command += ['-soakExperiment', args.experiment]
 if args.harmful_chance is not None:
     command += ['-soakHarmfulChance', args.harmful_chance]
+if args.sexual_drive is not None:
+    command += ['-soakSexualDrive', args.sexual_drive, '-soakSexualDriveAt', args.sexual_drive_at]
 if args.events:
     command += ['-soakEvents', args.events]
 command += ['-soakThirst', args.thirst, '-soakDayNight', args.daynight, '-soakOwnKind', args.own_kind]

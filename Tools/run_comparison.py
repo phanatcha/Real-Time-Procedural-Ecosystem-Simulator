@@ -17,7 +17,9 @@ parser.add_argument('--seed', default='MOSSY-FJORD')
 parser.add_argument('--years', default='5')
 parser.add_argument('--replicates', type=int, default=6)
 parser.add_argument('--treatments', default='load-on=10,load-off=0',
-                    help='label=harmful mutation chance pairs, comma separated')
+                    help='label=harmful mutation chance pairs, comma separated; add :drive to lock sexual drive too, '
+                         'e.g. clones=30:0,maters=30:1 (item 60)')
+parser.add_argument('--minutes', default='25', help='Wall-clock limit for each run')
 parser.add_argument('--output', type=Path, help='Defaults to Logs/SoakRuns/comparison-<UTC timestamp>')
 args = parser.parse_args()
 
@@ -31,10 +33,13 @@ for replicate in range(1, args.replicates + 1):
     for label, chance in treatments:
         run = output / f'{label}-r{replicate}'
         print(f'== {run.name}', flush=True)
-        result = subprocess.run([sys.executable, str(root / 'Tools/run_soak.py'), '--project-copy', str(args.project_copy),
-                                 '--seed', args.seed, '--years', args.years, '--maps', '0', '--minutes', '25',
-                                 '--experiment', f'{label} {args.seed}', '--harmful-chance', chance, '--output', str(run)],
-                                stdout=subprocess.DEVNULL)
+        chance, _, drive = chance.partition(':')
+        command = [sys.executable, str(root / 'Tools/run_soak.py'), '--project-copy', str(args.project_copy),
+                   '--seed', args.seed, '--years', args.years, '--maps', '0', '--minutes', args.minutes,
+                   '--experiment', f'{label} {args.seed}', '--harmful-chance', chance, '--output', str(run)]
+        if drive:
+            command += ['--sexual-drive', drive]
+        result = subprocess.run(command, stdout=subprocess.DEVNULL)
         if result.returncode != 0:
             failures += 1
             print(f'   failed (exit {result.returncode}); see {run / "editor.log"}', flush=True)

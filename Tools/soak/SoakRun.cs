@@ -73,6 +73,9 @@ namespace Boreal.Soak.Editor
             SessionState.SetBool(Key + "Thirst", Arg("soakThirst", "1") == "1");
             SessionState.SetBool(Key + "DayNight", Arg("soakDayNight", "1") == "1");
             SessionState.SetBool(Key + "OwnKind", Arg("soakOwnKind", "1") == "1");
+            SessionState.SetFloat(Key + "SexualDrive", float.Parse(Arg("soakSexualDrive", "-1"), CultureInfo.InvariantCulture));
+            SessionState.SetFloat(Key + "SexualDriveAt", float.Parse(Arg("soakSexualDriveAt", "0"), CultureInfo.InvariantCulture));
+            SessionState.SetBool(Key + "DriveLocked", false);
 
             // The founders' start search (item 9) lives in AnimalTerrainIntegration, which this assembly can't
             // reference, so it is set by its serialized name.
@@ -147,6 +150,24 @@ namespace Boreal.Soak.Editor
                 SessionState.SetFloat(Key + "IceSeconds", SessionState.GetFloat(Key + "IceSeconds", 0f) + onIce * step);
                 SessionState.SetFloat(Key + "DrinkInWaterSeconds",
                     SessionState.GetFloat(Key + "DrinkInWaterSeconds", 0f) + drinkingInWater * step);
+            }
+
+            // Item 60: from a set time on, the whole population only clones (0) or only mates (1). Children copy the lock.
+            // It starts late by default because three founders that can only mate die out before they find each other.
+            float lockedDrive = SessionState.GetFloat(Key + "SexualDrive", -1f);
+            if (stage == 0 && lockedDrive >= 0f && manager != null && SessionState.GetBool(Key + "Fast", false) &&
+                !SessionState.GetBool(Key + "DriveLocked", false) &&
+                simulated >= SessionState.GetFloat(Key + "SexualDriveAt", 0f))
+            {
+                SessionState.SetBool(Key + "DriveLocked", true);
+                foreach (SeekFood animal in animals)
+                {
+                    animal.lockedSexualDrive = lockedDrive;
+                    animal.sexualDrive = Mathf.Clamp01(lockedDrive);
+                    if (animal.Genome != null && animal.Genome.IsValid) animal.Genome[AnimalGene.SexualDrive] = lockedDrive;
+                }
+                manager.RecordEvent("sexual drive locked", lockedDrive.ToString("0.##", CultureInfo.InvariantCulture));
+                Debug.Log($"Soak: sexual drive locked at {lockedDrive} on {animals.Length} animals and their descendants at {simulated:0} s");
             }
 
             if (simulated - SessionState.GetFloat(Key + "LastStatus", -1f) >= 50f)

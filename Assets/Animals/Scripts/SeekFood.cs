@@ -278,6 +278,10 @@ namespace Boreal.Animals
         [Tooltip("Inherited. Below 0.15 the animal only clones itself; above 0.85 it only mates; in between it looks " +
                  "for a mate for up to this many times Mate Search Seconds Per Drive, then clones if it finds nobody.")]
         [Range(0f, 1f)] public float sexualDrive = 0.5f;
+        [Tooltip("For experiments (item 60): 0 to 1 holds this animal's and all its descendants' sexual drive at that " +
+                 "value whatever they inherit, so a whole population only clones (0) or only mates (1). Below 0 the " +
+                 "gene decides, as usual.")]
+        public float lockedSexualDrive = -1f;
         [Tooltip("Simulated seconds of looking for a mate per unit of sexual drive, before cloning instead.")]
         [Min(0f)] public float mateSearchSecondsPerDrive = 20f;
         [Tooltip("A partner must have at least this fraction of its maximum energy, and an animal looking for a mate " +
@@ -2813,6 +2817,8 @@ namespace Boreal.Animals
             thermalResponse.preferredTemperature = genome[AnimalGene.PreferredTemperature];
             thermalResponse.coldTolerance = genome[AnimalGene.ColdTolerance];
             thermalResponse.heatTolerance = genome[AnimalGene.HeatTolerance];
+            // A locked drive overwrites the inherited gene, so the genome, the recordings and the behaviour agree.
+            if (lockedSexualDrive >= 0f) genome[AnimalGene.SexualDrive] = Mathf.Clamp01(lockedSexualDrive);
             sexualDrive = genome[AnimalGene.SexualDrive];
             reproductionThreshold = genome[AnimalGene.BreedingThreshold];
             thermalResponse.torpor = genome[AnimalGene.Torpor];

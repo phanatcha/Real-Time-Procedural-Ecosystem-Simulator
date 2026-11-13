@@ -1,4 +1,8 @@
-# Latest verification — 13 November 2026, after the test fixes
+# Latest verification — 13 November 2026, with the sexual-drive lock (item 60)
+
+**324 passed, 1 failed, 0 skipped** of 325 in Unity 6000.4.1f1 ([NUnit XML](Logs/TestResults/20261113T074614389119Z/results.xml)). The new `ALockedSexualDriveHoldsInTheChildrenWhateverTheyInherit` passed, and three times on its own. The failure was `MeatLeaningAnimalsHuntTheirOwnKind` ("did not kill its own kind within 30 s"), which the lock does not touch (it is off by default). Run alone six times afterwards, it passed five times and one run reported no result, so it looks like a third test that depends on chance: the chase has to succeed inside 30 s. Not fixed.
+
+# 13 November 2026, after the test fixes
 
 **324 passed, 0 failed, 0 skipped** in Unity 6000.4.1f1 ([NUnit XML](Logs/TestResults/20261113T070910670535Z/results.xml)), with two tests that failed now and then made independent of chance. Each then passed eight times in a row on its own. Only test code changed.
 
