@@ -22,7 +22,8 @@ namespace Boreal.Animals.Tests
         // SeekFood's defaults.
         const float MutationChance = 5f;
         const float MutationMagnitude = 0.1f;
-        const float PerkFlipChance = 1f;
+        const float PerkGainChance = 0.2f;
+        const float PerkLossChance = 2f;
         const float HarmfulMutationChance = 10f;
         // SpeciesManager's default minimumNewSpeciesSize.
         const int MinimumNewSpeciesSize = 3;
@@ -57,7 +58,8 @@ namespace Boreal.Animals.Tests
             string summary = $"median {median} generations (runs: {string.Join(", ", firstSplits)})";
             Debug.Log($"Neutral drift at species threshold {threshold}: first split after a {summary}.");
             // Single runs vary from about 20 to 100 generations, so the band is wide: with the target met, the median
-            // of 20 runs stays between about 45 and 60.
+            // of 20 runs stays between about 45 and 60. Since perks became rarer to gain than to lose (item 62) it is
+            // 66.5, still inside the band.
             Assert.That(median, Is.InRange(40f, 75f), summary);
         }
 
@@ -79,7 +81,7 @@ namespace Boreal.Animals.Tests
                 {
                     AnimalGenome parent = population[Random.Range(0, Population)];
                     children.Add(parent.CreateChild(MutationChance, MutationMagnitude, BodyPlanMutation.Default,
-                                                    PerkFlipChance, HarmfulMutationChance, out _));
+                                                    PerkGainChance, PerkLossChance, HarmfulMutationChance, out _));
                 }
 
                 (population, children) = (children, population);

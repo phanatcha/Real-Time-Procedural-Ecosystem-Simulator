@@ -195,3 +195,22 @@ Built on the 29 October follow-up above, which was still uncommitted.
 - Still unpaid: the three founders' bodies, a one-off at the start of each world.
 - Tests: `ACarcassHoldsNoMoreThanTheBodyCostAndTheStore` (the largest body with a large store) and two more checks in the newborn growth test. Full Unity suite: **328 passed, 0 failed** (`Logs/TestResults/20261113T082017918454Z/results.xml`).
 
+## Backlog item 62, perks easier to lose than to gain — 13 November 2026
+
+- **The rule:** a child gains each perk its parent lacked with **Perk Gain Chance** (0.2% per birth) and loses each perk its parent had with **Perk Loss Chance** (2%), both times the mutation rate gene and the god tools' mutation boost. Until now both ways were the same 1% (**Perk Flip Chance**, now gone). The marker perk follows the same rule, so it stays the yardstick: under chance alone it reaches about 2% of animals after 10 generations, 4% after 30, and levels out near 9%. `AnimalGenome.MutatePerks(gain, loss)` does it; `CreateChild` takes both chances.
+- **Calibration (item 14):** the neutral-drift test's median first split moved from about 51.5 generations to 66.5 (runs 53 to 89). Perks now reach only a few per cent of the animals under drift, so they add much less to the distance between two animals. The test still passes (band 40 to 75), so the threshold stays at 0.05, which the Terrain scene also sets; a lower threshold would bring the first split back towards 55. The panel's hint now says about 65 generations.
+- **Tools:** `run_soak.py --perk-gain X --perk-loss Y` sets the chances on every animal; `run_comparison.py` treatments may now be any `run_soak.py` arguments (`"old=--perk-gain 1 --perk-loss 1,new=--perk-gain 0.2 --perk-loss 2"`); `summarise_runs.py --traits Perk_ThickFur,…` adds the largest species' final share of each trait.
+- **The comparison** (`Logs/SoakRuns/item62-20261113`): MOSSY-FJORD, 10 years (about 31 generations), four runs with the old 1% both ways and four with 0.2% and 2%, alternating, all else as usual. Largest species' final share of each perk:
+
+  | Treatment | Thick fur | Venom | Camouflage | Regeneration | Scavenger gut | Marker (no effect) | Animals on average |
+  |---|---|---|---|---|---|---|---:|
+  | 1% both ways | 92, 39, 8, 46% | 99, 16, 9, 0% | 3, 20, 13, 1% | 13, 24, 3, 24% | 1, 12, 14, 0% | 51, 15, 74, 66% | 97 |
+  | 0.2% gain, 2% loss | 0, 1, 13, 0% | 2, 0, 0, 4% | 0, 8, 0, 75% | 0, 0, 0, 0% | 0, 0, 0, 0% | 0, 0, 1, 0% | 97 |
+
+- **Under the old rule, chance alone filled the perks.** The marker, which does nothing, reached 15 to 74% in ten years, against the 23% the average would predict, because in a population that mostly clones (91% of births) a whole family line takes over and carries whatever perks it has. Every real perk's share sat in that same range. So the reading in the 1 November second-round notes above, that thick fur "is now selected" (5% to 35% on MOSSY-FJORD), does not hold: the marker does as well.
+- **Under the new rule, costly perks stay rare,** as item 62 hoped: venom 0 to 4%, regeneration and the scavenger gut 0%, the marker at most 1%.
+- **But thick fur did not rise over the cold winters** (0 to 13%; there were no cold deaths in any run). Selection for it, if any, is too weak to lift a perk that appears about four times in a run and is lost by 2% of births.
+- **And a costly perk can still sweep by riding on a family line.** In one new-rule run camouflage reached 75% with no animal killed by a hunter all run, so it protected against nothing and cost 5% energy. All but 7 of its 564 carriers descend from one gain, in an animal born in year 2.5; that line carried 0.21 harmful mutations on average against 1.94 in the rest, about 9% less upkeep, and left 1.12 young per animal against 1.05. The line won on its low mutation load and took camouflage with it. With only 7 to 9% of births from two parents, a perk stays tied to the line it arose in. Telling such hitchhiking from selection needs the per-line view (item 65) or the per-gene selection measure (item 58); the marker alone can't, since a sweep carries the marker only if the line happens to have it.
+- Population and births did not differ between the rules (97 animals on average in both; 2,104 to 2,447 births per run).
+- Tests: `PerksAreGainedAndLostAtTheirOwnChances` (new), and the callers of `CreateChild` updated. Full Unity suite: **329 passed, 0 failed** (`Logs/TestResults/20261113T133026425931Z/results.xml`).
+

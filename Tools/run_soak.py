@@ -27,6 +27,8 @@ parser.add_argument('--sexual-drive', help='Lock sexual drive at this value (0 o
 parser.add_argument('--sexual-drive-at', default='800',
                     help='Simulated seconds before the lock starts (default 800, two years: three founders that can only mate die out)')
 parser.add_argument('--ledger', default='0', help='1 adds up every change to the animals\' energy and logs any gap (item 61)')
+parser.add_argument('--perk-gain', help='Perk gain chance in per cent per birth on every animal (item 62; default 0.2)')
+parser.add_argument('--perk-loss', help='Perk loss chance in per cent per birth on every animal (item 62; default 2)')
 parser.add_argument('--thirst', default='1', help='0 switches thirst off on every animal')
 parser.add_argument('--own-kind', default='1', help='0 stops animals hunting their own species (item 66), for control runs')
 parser.add_argument('--daynight', default='1', help='0 switches day and night off (always midday), for control runs')
@@ -84,6 +86,10 @@ if args.sexual_drive is not None:
 if args.events:
     command += ['-soakEvents', args.events]
 command += ['-soakLedger', args.ledger]
+if args.perk_gain is not None:
+    command += ['-soakPerkGain', args.perk_gain]
+if args.perk_loss is not None:
+    command += ['-soakPerkLoss', args.perk_loss]
 command += ['-soakThirst', args.thirst, '-soakDayNight', args.daynight, '-soakOwnKind', args.own_kind]
 if args.start_search is not None:
     command += ['-soakStartSearch', args.start_search]

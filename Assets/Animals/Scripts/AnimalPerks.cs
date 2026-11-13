@@ -4,8 +4,8 @@ using UnityEngine;
 
 namespace Boreal.Animals
 {
-    // What an animal's perks do to it. Perks are on/off inherited traits that flip rarely at birth (SeekFood's Perk
-    // Flip Chance), and each comes with a cost:
+    // What an animal's perks do to it. Perks are on/off inherited traits, rarely gained and more often lost at birth
+    // (SeekFood's Perk Gain Chance and Perk Loss Chance), and each comes with a cost:
     // - thick fur: more cold tolerance, as much less heat tolerance
     // - venom: an attacker takes back part of the damage of every bite; costs energy
     // - camouflage: other animals only spot it, as prey or as a hunter, within part of their vision, except while it

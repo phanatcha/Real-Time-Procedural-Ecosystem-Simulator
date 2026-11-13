@@ -500,7 +500,8 @@ namespace Boreal.Animals.Tests
             // The child is compared with its parent, so it must be an exact copy: a mutation in vision, body size or a
             // body part (about one birth in several) would otherwise fail the comparisons below by chance.
             parent.mutationChance = 0f;
-            parent.perkFlipChance = 0f;
+            parent.perkGainChance = 0f;
+            parent.perkLossChance = 0f;
             parent.harmfulMutationChance = 0f;
             parent.bodyPlanMutation = default;
 

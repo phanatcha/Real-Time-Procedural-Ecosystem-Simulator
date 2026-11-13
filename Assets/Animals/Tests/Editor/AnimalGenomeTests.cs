@@ -489,7 +489,7 @@ namespace Boreal.Animals.Tests
             expectedMutated |= expected.MutatePerks(1f);
 
             Random.InitState(99);
-            AnimalGenome child = parent.CreateChild(5f, 0.1f, BodyPlanMutation.Default, 1f, 10f, out bool mutated);
+            AnimalGenome child = parent.CreateChild(5f, 0.1f, BodyPlanMutation.Default, 1f, 1f, 10f, out bool mutated);
 
             Assert.AreEqual(expectedMutated, mutated);
             Assert.AreEqual(0f, AnimalGenome.Distance(expected, child));
@@ -503,7 +503,7 @@ namespace Boreal.Animals.Tests
             AnimalGenome parent = CreateGenomeWithMutationRate(2f);
             BodyPlanMutation rules = new BodyPlanMutation { sproutChance = 50f, sproutSize = 0.05f, allowFins = true };
 
-            AnimalGenome child = parent.CreateChild(50f, 0.5f, rules, 50f, 50f, out bool mutated);
+            AnimalGenome child = parent.CreateChild(50f, 0.5f, rules, 50f, 50f, 50f, out bool mutated);
 
             Assert.IsTrue(mutated);
             for (int index = 0; index < AnimalGenome.GeneCount; index++)
@@ -535,8 +535,8 @@ namespace Boreal.Animals.Tests
             int fastAdded = 0;
             for (int birth = 0; birth < 1000; birth++)
             {
-                slowAdded += slow.CreateChild(0f, 0f, default, 0f, 10f, out _).HarmfulMutations;
-                fastAdded += fast.CreateChild(0f, 0f, default, 0f, 10f, out _).HarmfulMutations;
+                slowAdded += slow.CreateChild(0f, 0f, default, 0f, 0f, 10f, out _).HarmfulMutations;
+                fastAdded += fast.CreateChild(0f, 0f, default, 0f, 0f, 10f, out _).HarmfulMutations;
             }
 
             // 5% and 20% of births.
@@ -549,10 +549,10 @@ namespace Boreal.Animals.Tests
         {
             AnimalGenome parent = CreateGenomeWithMutationRate(1.5f);
 
-            Assert.AreEqual(1.5f, parent.CreateChild(0f, 0.1f, default, 0f, 0f, out _)[AnimalGene.MutationRate]);
+            Assert.AreEqual(1.5f, parent.CreateChild(0f, 0.1f, default, 0f, 0f, 0f, out _)[AnimalGene.MutationRate]);
 
             // At 1.5 times a 70% chance every gene mutates, the rate gene too, by up to 10% of its value.
-            float changed = parent.CreateChild(70f, 0.1f, default, 0f, 0f, out _)[AnimalGene.MutationRate];
+            float changed = parent.CreateChild(70f, 0.1f, default, 0f, 0f, 0f, out _)[AnimalGene.MutationRate];
             Assert.AreNotEqual(1.5f, changed);
             Assert.That(changed, Is.InRange(1.35f, 1.65f));
         }
@@ -605,6 +605,49 @@ namespace Boreal.Animals.Tests
             }
 
             Assert.That(flips, Is.InRange(60, 140));
+        }
+
+        // Item 62: a perk is gained at one chance and lost at another.
+        [Test]
+        public void PerksAreGainedAndLostAtTheirOwnChances()
+        {
+            // Never gained, always lost: a genome with every perk loses them all, one with none stays bare.
+            AnimalGenome bare = AnimalGenome.Create();
+            Assert.IsFalse(bare.MutatePerks(0f, 100f));
+            for (int index = 0; index < AnimalGenome.PerkCount; index++)
+                Assert.IsFalse(bare.HasPerk((AnimalPerk)index));
+            AnimalGenome full = AnimalGenome.Create();
+            for (int index = 0; index < AnimalGenome.PerkCount; index++) full.SetPerk((AnimalPerk)index, true);
+            Assert.IsTrue(full.MutatePerks(0f, 100f));
+            for (int index = 0; index < AnimalGenome.PerkCount; index++)
+                Assert.IsFalse(full.HasPerk((AnimalPerk)index));
+
+            // Always gained, never lost: the reverse.
+            Assert.IsTrue(bare.MutatePerks(100f, 0f));
+            Assert.IsFalse(bare.MutatePerks(100f, 0f), "A perk already there is not lost at a loss chance of 0.");
+            for (int index = 0; index < AnimalGenome.PerkCount; index++)
+                Assert.IsTrue(bare.HasPerk((AnimalPerk)index));
+
+            // At 0.2% to gain and 2% to lose, over 2000 births: about 0.2% of absent perks appear and 2% of present
+            // ones vanish.
+            int gained = 0, kept = 0;
+            for (int birth = 0; birth < 2000; birth++)
+            {
+                AnimalGenome without = AnimalGenome.Create();
+                without.MutatePerks(0.2f, 2f);
+                AnimalGenome with = AnimalGenome.Create();
+                for (int index = 0; index < AnimalGenome.PerkCount; index++) with.SetPerk((AnimalPerk)index, true);
+                with.MutatePerks(0.2f, 2f);
+                for (int index = 0; index < AnimalGenome.PerkCount; index++)
+                {
+                    if (without.HasPerk((AnimalPerk)index)) gained++;
+                    if (with.HasPerk((AnimalPerk)index)) kept++;
+                }
+            }
+            int trials = 2000 * AnimalGenome.PerkCount;
+            // Expected 0.2% and 98% of the 12,000 trials: 24 gained and 11,760 kept.
+            Assert.That(gained, Is.InRange(8, 44));
+            Assert.That(kept, Is.InRange(trials - 330, trials - 150));
         }
 
         [Test]

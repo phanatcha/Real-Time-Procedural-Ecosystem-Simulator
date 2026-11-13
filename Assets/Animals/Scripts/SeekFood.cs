@@ -269,9 +269,13 @@ namespace Boreal.Animals
         private int harmfulMutations;
 
         [Header("Perks")]
-        [Tooltip("Percent chance per birth, at a mutation rate of 1, that each perk (thick fur, venom, camouflage, " +
-                 "regeneration, scavenger gut) turns on or off. AnimalPerks describes what each does and costs.")]
-        [Range(0f, 100f)] public float perkFlipChance = 1f;
+        [Tooltip("Percent chance per birth, at a mutation rate of 1, that a child gains each perk (thick fur, venom, " +
+                 "camouflage, regeneration, scavenger gut) its parent lacked. Building a trait is rare, so a perk only " +
+                 "spreads if it pays (item 62). AnimalPerks describes what each does and costs.")]
+        [Range(0f, 100f)] public float perkGainChance = 0.2f;
+        [Tooltip("Percent chance per birth, at a mutation rate of 1, that a child loses each perk its parent had. " +
+                 "Losing a working trait is much easier than building one, so this is ten times the gain chance.")]
+        [Range(0f, 100f)] public float perkLossChance = 2f;
         [SerializeField, Tooltip("This animal's perks, for reference.")]
         private string perks;
 
@@ -2641,7 +2645,8 @@ namespace Boreal.Animals
             // God tools can raise or lower every animal's mutation chances for a while (SpeciesManager.mutationMultiplier).
             float boost = SpeciesManager.Instance != null ? Mathf.Max(0f, SpeciesManager.Instance.mutationMultiplier) : 1f;
             return inherited.CreateChild(mutationChance * boost, mutationMagnitude, bodyPlanMutation,
-                                         perkFlipChance * boost, harmfulMutationChance * boost, out mutated);
+                                         perkGainChance * boost, perkLossChance * boost, harmfulMutationChance * boost,
+                                         out mutated);
         }
 
         // How many young this birth has: the litter size gene's whole part, plus one more with the fraction as the

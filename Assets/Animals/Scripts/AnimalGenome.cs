@@ -70,7 +70,8 @@ namespace Boreal.Animals
         Fins
     }
 
-    // On/off inherited traits, each flipping rarely at birth. See AnimalPerks for what each does and costs.
+    // On/off inherited traits. At birth a perk is rarely gained and more often lost (item 62). See AnimalPerks for what
+    // each does and costs.
     public enum AnimalPerk
     {
         ThickFur,
@@ -78,8 +79,10 @@ namespace Boreal.Animals
         Camouflage,
         Regeneration,
         ScavengerGut,
-        // Does nothing and doesn't count towards genetic distance: the perks' yardstick (item 56). With the same 1%
-        // flip each way, chance alone takes it to about 9% of animals after 10 generations and 17% after 20.
+        // Does nothing and doesn't count towards genetic distance: the perks' yardstick (item 56). It is gained and lost
+        // at the same rates as the real perks, so at SeekFood's defaults (0.2% and 2% per birth) chance alone takes it
+        // to about 2% of animals after 10 generations, 3% after 20 and 4% after 30, levelling out near 9%
+        // (0.2 / (0.2 + 2)). A real perk well above that has been selected for.
         Marker
     }
 
@@ -385,42 +388,50 @@ namespace Boreal.Animals
             return true;
         }
 
-        // chance is a percentage per perk per birth. Call it once on each newborn's genome. Each perk that flips
-        // turns on if it was off and off if it was on. Returns true when any perk flipped.
-        public bool MutatePerks(float chance)
+        // Chances are percentages per perk per birth. Call it once on each newborn's genome. A perk this genome lacks
+        // turns on with gainChance; one it has turns off with lossChance. Losing a working trait is much easier than
+        // building one, so SeekFood's defaults make losses ten times as likely (item 62). Returns true when any perk
+        // changed.
+        public bool MutatePerks(float gainChance, float lossChance)
         {
-            if (chance <= 0f)
+            if (gainChance <= 0f && lossChance <= 0f)
             {
                 return false;
             }
 
-            bool flipped = false;
+            bool changed = false;
             for (int perk = 0; perk < PerkCount; perk++)
             {
-                if (chance < 100f && Random.Range(0f, 100f) >= chance)
+                int bit = PerkBit((AnimalPerk)perk);
+                float chance = (perks & bit) != 0 ? lossChance : gainChance;
+                if (chance <= 0f || (chance < 100f && Random.Range(0f, 100f) >= chance))
                 {
                     continue;
                 }
 
-                perks ^= PerkBit((AnimalPerk)perk);
-                flipped = true;
+                perks ^= bit;
+                changed = true;
             }
 
-            return flipped;
+            return changed;
         }
+
+        // The same chance both ways: each perk that flips turns on if it was off and off if it was on.
+        public bool MutatePerks(float chance) => MutatePerks(chance, chance);
 
         // A child's genome: a mutated copy of this one, as SeekFood makes at every birth. Chances are percentages at a
         // mutation rate of 1, and this genome's mutation rate gene multiplies every one of them: for the genes, the
         // body plan, the perks and harmful mutations. The magnitude stays as it is. A clone mutates at its parent's
         // rate; for a child of two parents, call it on the recombined genome, so it mutates at the rate it inherited.
         public AnimalGenome CreateChild(float mutationChance, float mutationMagnitude, BodyPlanMutation bodyPlanMutation,
-                                        float perkFlipChance, float harmfulMutationChance, out bool mutated)
+                                        float perkGainChance, float perkLossChance, float harmfulMutationChance,
+                                        out bool mutated)
         {
             float rate = this[AnimalGene.MutationRate];
             AnimalGenome child = CreateMutatedCopy(mutationChance * rate, mutationMagnitude,
                                                    bodyPlanMutation.WithChancesScaledBy(rate), out mutated);
             mutated |= child.TryAddHarmfulMutation(harmfulMutationChance * rate);
-            mutated |= child.MutatePerks(perkFlipChance * rate);
+            mutated |= child.MutatePerks(perkGainChance * rate, perkLossChance * rate);
             return child;
         }
 

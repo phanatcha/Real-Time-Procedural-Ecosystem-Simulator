@@ -1,4 +1,8 @@
-# Latest verification — 13 November 2026, with the carcass rules fixed (item 61)
+# Latest verification — 13 November 2026, with perks easier to lose than to gain (item 62)
+
+**329 passed, 0 failed, 0 skipped** in Unity 6000.4.1f1 ([NUnit XML](Logs/TestResults/20261113T133026425931Z/results.xml)). New: `PerksAreGainedAndLostAtTheirOwnChances`. `SpeciesSplitCalibrationTests` passes with a median first split of 66.5 generations (was about 51.5), inside its 40 to 75 band.
+
+# 13 November 2026, with the carcass rules fixed (item 61)
 
 **328 passed, 0 failed, 0 skipped** in Unity 6000.4.1f1 ([NUnit XML](Logs/TestResults/20261113T082017918454Z/results.xml)). New: `ACarcassHoldsNoMoreThanTheBodyCostAndTheStore`. Its first run failed because the dying animal ate its own carcass before it was removed, which the test loop allows and the game loop does not; a dying animal can no longer eat. The hunting and scavenging tests pass with the leaner carcasses.
 

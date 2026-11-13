@@ -77,6 +77,8 @@ namespace Boreal.Soak.Editor
             SessionState.SetFloat(Key + "SexualDriveAt", float.Parse(Arg("soakSexualDriveAt", "0"), CultureInfo.InvariantCulture));
             SessionState.SetBool(Key + "DriveLocked", false);
             SessionState.SetBool(Key + "Ledger", Arg("soakLedger", "0") == "1");
+            SessionState.SetFloat(Key + "PerkGain", float.Parse(Arg("soakPerkGain", "-1"), CultureInfo.InvariantCulture));
+            SessionState.SetFloat(Key + "PerkLoss", float.Parse(Arg("soakPerkLoss", "-1"), CultureInfo.InvariantCulture));
 
             // The founders' start search (item 9) lives in AnimalTerrainIntegration, which this assembly can't
             // reference, so it is set by its serialized name.
@@ -217,6 +219,11 @@ namespace Boreal.Soak.Editor
                 foreach (SeekFood founder in animals)
                 {
                     if (harmfulChance >= 0f) founder.harmfulMutationChance = harmfulChance;
+                    // Item 62 comparisons: the perk gain and loss chances, copied by every descendant.
+                    float perkGain = SessionState.GetFloat(Key + "PerkGain", -1f);
+                    float perkLoss = SessionState.GetFloat(Key + "PerkLoss", -1f);
+                    if (perkGain >= 0f) founder.perkGainChance = perkGain;
+                    if (perkLoss >= 0f) founder.perkLossChance = perkLoss;
                     if (!SessionState.GetBool(Key + "Thirst", true)) founder.enableThirst = false;
                     // Item 66 off: no diet is high enough to hunt the animals' own species.
                     if (!SessionState.GetBool(Key + "OwnKind", true)) founder.huntOwnKindFromDiet = 2f;
@@ -224,6 +231,8 @@ namespace Boreal.Soak.Editor
                     Debug.Log($"Soak: founder {founder.name} at x {p.x:0} z {p.z:0} (height {p.y:0})");
                 }
                 if (harmfulChance >= 0f) Debug.Log($"Soak: harmful mutation chance set to {harmfulChance}% on the founders");
+                if (animals.Length > 0)
+                    Debug.Log($"Soak: perks gained at {animals[0].perkGainChance}% and lost at {animals[0].perkLossChance}% per birth");
                 // God tools scheduled for the run, e.g. "drought@800:200x0.2,extinction@1200x0.5" (GodTools.TryParse).
                 string events = SessionState.GetString(Key + "Events", "");
                 GodTools tools = Object.FindAnyObjectByType<GodTools>();
