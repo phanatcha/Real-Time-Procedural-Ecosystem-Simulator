@@ -239,3 +239,24 @@ Built on the 29 October follow-up above, which was still uncommitted.
 - Not read: `SexualDrive` in the item 60 pools (β −0.31 in clones, +0.27 in mate-first) comes from the lock switching animals' behaviour at year 2 (item 60), not from selection on the gene.
 - Limits: the gradient is linear; it can't see selection for a middle value. Body parts are counted by total size of each kind. Animals alive at the end are left out, so the last year or so of each run adds little.
 
+## Backlog item 68, ageing instead of a hard lifespan — 13 November 2026
+
+- **The rule:** a new inherited gene, **Ageing Onset** (10 to 1,200 simulated seconds; founders 180 s, against their 300 s lifespan), sets when an animal starts to age. From then its vigour falls from 1 to 0 over **Ageing Span** (120 s, not inherited). Vigour caps health at that share of the maximum, slows the animal towards **Aged Speed Floor** (30% of its speed), and makes it take each chance to breed with that probability, resting as if it had bred otherwise. At vigour 0 it dies of old age. **Maximum Lifespan** stays an outer limit; at the founders' values both end at 300 s. A later onset costs upkeep, as repair does: **Repair Metabolic Weight** (0.2) charges the onset against the founders' like the other traits, so doubling it costs about 10% more energy. **Enable Ageing** off gives the old rule, with no decline and no cost. The inspector shows "ageing, vigour 62%" and the gene; the soak runner takes `--ageing 0`.
+- The gene is last in the genome, so genomes saved before it keep their genes in place. `traits.csv` and `lives.csv` gain an `AgeingOnset` column (recording schema 9). Off-screen populations don't age.
+- **Calibration (item 14):** one more gene moved the median first split from 66.5 generations to 71 (runs 40 to 86), near the top of the test's 40 to 75 band; the test passes. A sweep in the test copy gives 54.5 at a threshold of 0.045 and 44.5 at 0.04. Not changed, because the Terrain scene sets its own 0.05 and the Editor is open on it: lower both to 0.045 before the next gene.
+- **The comparison** (`Logs/SoakRuns/item68-20261113`): MOSSY-FJORD, 10 years, four runs with ageing and four without, alternating.
+
+  | | Ageing | No ageing |
+  |---|---|---|
+  | Animals on average | 81 (77 to 87) | 90 (84 to 94) |
+  | Births per run | 1,855 (1,714 to 2,025) | 2,094 (1,941 to 2,164) |
+  | Average generation after 10 years | 34.6 | 30.9 |
+  | Of animals that reached 180 s, died of something else before 290 s | 78% | 59% |
+  | Median age at death | 191 s | 166 s |
+  | Ageing Onset at the end (largest species) | 178 to 194 s | 181 to 191 s (does nothing here) |
+  | Selection gradient on Ageing Onset | +0.000 (−0.03 to +0.03) | +0.004 |
+
+- **What it shows:** ageing works as built. Old animals weaken and slow, so of those that reached the onset, 78% starved or died of thirst before the end against 59% without it. Fewer old animals breed, so births fell 11% and the population 10%, and generations turned over about 12% faster. Median age at death rose, probably because with fewer animals fewer young starve (not checked).
+- **But the onset is not selected.** Its gradient is zero within ±0.03, and it ended where it started. Only about half the animals live to 180 s, and by then most of their young are already born, so a later onset adds little and costs upkeep all life long. That is the classic reason ageing evolves at all: selection weakens with age once few animals live that long. Don't expect the onset to move without much longer runs, or a world where more animals reach old age.
+- Tests: `AgeingAnimalsWeakenSlowDownAndDieBeforeTheirLifespan` (vigour, the health cap, the slowdown, the upkeep cost of a later onset, death when vigour runs out, and no ageing when it is off). The test animals elsewhere get an onset of 1,200 s, so nothing else ages. Full Unity suite: **330 passed, 0 failed** (`Logs/TestResults/20261113T151331352848Z/results.xml`).
+

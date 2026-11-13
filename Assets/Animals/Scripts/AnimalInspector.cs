@@ -128,8 +128,9 @@ namespace Boreal.Animals
             NavMeshAgent agent = animal.GetComponent<NavMeshAgent>();
             text.Append($"<b>{animal.name}</b>   species {animal.speciesName}, generation {animal.Generation}   " +
                         $"{(following ? "following (F stops)" : "F: follow")}   Esc: close\n");
-            string youth = animal.IsMature ? "adult"
-                : $"young, {animal.Growth:P0} grown, mature at {animal.maturityTime:0} s";
+            string youth = !animal.IsMature ? $"young, {animal.Growth:P0} grown, mature at {animal.maturityTime:0} s"
+                : animal.Vigour < 1f ? $"ageing, vigour {animal.Vigour:P0}"
+                : animal.enableAgeing ? $"adult, ageing from {animal.ageingOnset:0} s" : "adult";
             text.Append($"{Lower(animal.Activity)}{(animal.IsInWater ? ", in water" : "")}   age {animal.CurrentAge:0} of " +
                         $"{animal.maxLifespan:0} s, {youth}\n");
             text.Append($"energy {animal.currentEnergy:0} of {animal.maxEnergy:0} ({animal.CurrentEnergyDrainPerSecond:0.00}/s)   " +
@@ -153,7 +154,7 @@ namespace Boreal.Animals
                 text.Append($"bulk {genome[AnimalGene.BodyBulk]:0.00} → {animal.bodyBulk * animal.Growth:0.00}   " +
                             $"height {genome[AnimalGene.BodyHeight]:0.00} → {animal.bodyHeight * animal.Growth:0.00}   " +
                             $"energy store {genome[AnimalGene.MaxEnergy]:0}   lifespan {genome[AnimalGene.MaxLifespan]:0} s   " +
-                            $"maturity {genome[AnimalGene.MaturityTime]:0} s\n");
+                            $"maturity {genome[AnimalGene.MaturityTime]:0} s   ageing from {genome[AnimalGene.AgeingOnset]:0} s\n");
                 text.Append($"diet {genome[AnimalGene.DietAffinity]:0.00} ({SeekFood.ClassifyDiet(animal.dietAffinity)}" +
                             $"{(animal.HuntsOwnKind ? ", hunts its own kind" : "")})   " +
                             $"prefers {genome[AnimalGene.PreferredTemperature]:0.#} °C, −{genome[AnimalGene.ColdTolerance]:0} / " +

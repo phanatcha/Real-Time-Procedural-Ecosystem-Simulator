@@ -103,6 +103,54 @@ namespace Boreal.Animals.Tests
             Assert.AreEqual(0, record.sexualOffspring);
         }
 
+        // Ageing (item 68): past its onset an animal's vigour falls, which caps its health, slows it and ends its life
+        // well before its lifespan; with ageing off it stays in full health. A later onset costs upkeep.
+        [UnityTest]
+        public IEnumerator AgeingAnimalsWeakenSlowDownAndDieBeforeTheirLifespan()
+        {
+            EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
+            yield return new EnterPlayMode(ReloadsDomain);
+
+            BakeNavMesh(CreateGround(Vector3.zero, 80f));
+            StartSimulation();
+            AnimalGenome genome = Genome(maturityTime: 200f);
+            genome[AnimalGene.AgeingOnset] = 100f;
+            // Halfway through a 20 s decline: vigour 0.5.
+            SeekFood aged = CreateAnimal(new Vector3(-20f, 0f, 0f), genome, energyFraction: 0.9f, age: 110f);
+            aged.ageingSpan = 20f;
+            SeekFood young = CreateAnimal(new Vector3(0f, 0f, 20f), genome, energyFraction: 0.9f, age: 50f);
+            SeekFood unaged = CreateAnimal(new Vector3(20f, 0f, 0f), genome, energyFraction: 0.9f, age: 110f);
+            unaged.enableAgeing = false;
+            yield return null;
+            yield return null;
+
+            Assert.AreEqual(1f, young.Vigour);
+            Assert.AreEqual(1f, unaged.Vigour, "With ageing off an animal keeps its vigour.");
+            Assert.That(aged.Vigour, Is.InRange(0.35f, 0.5f));
+            Assert.LessOrEqual(aged.currentHealth, aged.maxHealth * aged.Vigour + 0.01f, "Health is capped by vigour.");
+            Assert.AreEqual(unaged.maxHealth, unaged.currentHealth, 0.01f);
+            float speedShare = aged.GetComponent<NavMeshAgent>().speed / young.GetComponent<NavMeshAgent>().speed;
+            Assert.That(speedShare, Is.EqualTo(Mathf.Lerp(aged.agedSpeedFloor, 1f, aged.Vigour)).Within(0.05f),
+                        "An ageing animal is slower by its vigour.");
+
+            // A later onset costs upkeep, charged against the onset it started with like the other traits.
+            float before = young.CurrentEnergyDrainPerSecond;
+            young.ageingOnset *= 2f;
+            young.RefreshMetabolicRate();
+            float total = young.speedMetabolicWeight + young.strengthMetabolicWeight + young.bodyMassMetabolicWeight +
+                          young.visionMetabolicWeight + young.energyCapacityMetabolicWeight +
+                          young.staminaCapacityMetabolicWeight + young.healthMetabolicWeight + young.repairMetabolicWeight;
+            Assert.That(young.CurrentEnergyDrainPerSecond / before,
+                        Is.EqualTo(1f + young.repairMetabolicWeight / total).Within(1e-3f));
+
+            // Vigour runs out at age 120, long before the 1200 s lifespan.
+            float deadline = Time.time + 20f;
+            while (aged != null && Time.time < deadline) yield return null;
+            Assert.IsTrue(aged == null, "The ageing animal did not die when its vigour ran out.");
+            Assert.AreEqual(1, Telemetry().oldAgeDeaths);
+            Assert.IsTrue(unaged != null, "With ageing off the animal lives on.");
+        }
+
         // The energy ledger (item 61): through eating, growing, a litter and a death, every change to the animals' stores
         // is accounted for, and no rule makes energy from nothing.
         [UnityTest]
@@ -985,6 +1033,8 @@ namespace Boreal.Animals.Tests
             genome[AnimalGene.MaxHealth] = 100f;
             genome[AnimalGene.MaturityTime] = maturityTime;
             genome[AnimalGene.MaxLifespan] = 1200f;
+            // No ageing within any test's time unless the test asks for it (item 68).
+            genome[AnimalGene.AgeingOnset] = 1200f;
             genome[AnimalGene.DietAffinity] = diet;
             genome[AnimalGene.PreferredTemperature] = 2f;
             genome[AnimalGene.ColdTolerance] = 18f;

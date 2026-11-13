@@ -79,6 +79,7 @@ namespace Boreal.Soak.Editor
             SessionState.SetBool(Key + "Ledger", Arg("soakLedger", "0") == "1");
             SessionState.SetFloat(Key + "PerkGain", float.Parse(Arg("soakPerkGain", "-1"), CultureInfo.InvariantCulture));
             SessionState.SetFloat(Key + "PerkLoss", float.Parse(Arg("soakPerkLoss", "-1"), CultureInfo.InvariantCulture));
+            SessionState.SetBool(Key + "Ageing", Arg("soakAgeing", "1") == "1");
 
             // The founders' start search (item 9) lives in AnimalTerrainIntegration, which this assembly can't
             // reference, so it is set by its serialized name.
@@ -224,6 +225,12 @@ namespace Boreal.Soak.Editor
                     float perkLoss = SessionState.GetFloat(Key + "PerkLoss", -1f);
                     if (perkGain >= 0f) founder.perkGainChance = perkGain;
                     if (perkLoss >= 0f) founder.perkLossChance = perkLoss;
+                    // Item 68 control runs: no ageing, full health until the lifespan runs out.
+                    if (!SessionState.GetBool(Key + "Ageing", true))
+                    {
+                        founder.enableAgeing = false;
+                        founder.RefreshMetabolicRate();
+                    }
                     if (!SessionState.GetBool(Key + "Thirst", true)) founder.enableThirst = false;
                     // Item 66 off: no diet is high enough to hunt the animals' own species.
                     if (!SessionState.GetBool(Key + "OwnKind", true)) founder.huntOwnKindFromDiet = 2f;
@@ -232,7 +239,8 @@ namespace Boreal.Soak.Editor
                 }
                 if (harmfulChance >= 0f) Debug.Log($"Soak: harmful mutation chance set to {harmfulChance}% on the founders");
                 if (animals.Length > 0)
-                    Debug.Log($"Soak: perks gained at {animals[0].perkGainChance}% and lost at {animals[0].perkLossChance}% per birth");
+                    Debug.Log($"Soak: perks gained at {animals[0].perkGainChance}% and lost at {animals[0].perkLossChance}% per birth; " +
+                              (animals[0].enableAgeing ? $"ageing from {animals[0].ageingOnset} s over {animals[0].ageingSpan} s" : "ageing off"));
                 // God tools scheduled for the run, e.g. "drought@800:200x0.2,extinction@1200x0.5" (GodTools.TryParse).
                 string events = SessionState.GetString(Key + "Events", "");
                 GodTools tools = Object.FindAnyObjectByType<GodTools>();

@@ -58,8 +58,8 @@ namespace Boreal.Animals.Tests
             string summary = $"median {median} generations (runs: {string.Join(", ", firstSplits)})";
             Debug.Log($"Neutral drift at species threshold {threshold}: first split after a {summary}.");
             // Single runs vary from about 20 to 100 generations, so the band is wide: with the target met, the median
-            // of 20 runs stays between about 45 and 60. Since perks became rarer to gain than to lose (item 62) it is
-            // 66.5, still inside the band.
+            // of 20 runs stays between about 45 and 60. Since perks became rarer to gain than to lose (item 62) and
+            // the ageing onset gene arrived (item 68) it is 71, near the top of the band; a threshold of 0.045 gives 54.5.
             Assert.That(median, Is.InRange(40f, 75f), summary);
         }
 
@@ -109,6 +109,7 @@ namespace Boreal.Animals.Tests
             founder[AnimalGene.MaxHealth] = 100f;
             founder[AnimalGene.MaturityTime] = 45f;
             founder[AnimalGene.MaxLifespan] = 300f;
+            founder[AnimalGene.AgeingOnset] = 180f;
             founder[AnimalGene.DietAffinity] = 0.15f;
             founder[AnimalGene.PreferredTemperature] = 2f;
             founder[AnimalGene.ColdTolerance] = 18f;

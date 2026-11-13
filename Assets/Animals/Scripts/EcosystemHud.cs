@@ -345,7 +345,7 @@ namespace Boreal.Animals
                         $"{manager.AverageGeneration:0.0} on average, newest {manager.HighestGeneration}\n");
             text.Append($"<b>Species</b> {manager.SpeciesAliveCount} alive, {speciesEver} ever, {extinct} extinct    " +
                         $"(a group splits off once it is {manager.speciationThreshold:0.###} apart genetically, " +
-                        "after about 65 generations of drift alone)\n");
+                        "after about 70 generations of drift alone)\n");
 
             AppendLargestSpecies(manager);
             return text.ToString().TrimEnd();

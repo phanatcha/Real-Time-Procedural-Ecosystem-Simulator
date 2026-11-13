@@ -67,6 +67,9 @@ namespace Boreal.Animals
         [Min(0f)] public float energyCapacityMetabolicWeight = 0.2f;
         [Min(0f)] public float staminaCapacityMetabolicWeight = 0.2f;
         [Min(0f)] public float healthMetabolicWeight = 0.2f;
+        [Tooltip("What a later onset of ageing costs (item 68): energy spent on repair. Charged against the founders' " +
+                 "onset like the other traits; nothing while ageing is off.")]
+        [Min(0f)] public float repairMetabolicWeight = 0.2f;
         [Min(0f)] public float minimumMetabolicMultiplier = 0.25f;
         [Min(0f)] public float maximumMetabolicMultiplier = 4f;
 
@@ -80,6 +83,7 @@ namespace Boreal.Animals
         [SerializeField, Min(0f)] private float referenceMaxEnergy;
         [SerializeField, Min(0f)] private float referenceMaxStamina;
         [SerializeField, Min(0f)] private float referenceMaxHealth;
+        [SerializeField, Min(0f)] private float referenceAgeingOnset;
         [SerializeField] private Vector3 referenceLocalScale;
         [SerializeField, Min(0f)] private float referenceAgentRadius;
         [SerializeField, Min(0f)] private float referenceAgentHeight;
@@ -137,6 +141,17 @@ namespace Boreal.Animals
         [Tooltip("Simulated seconds this animal can live before dying of old age.")]
         [InspectorName("Maximum Lifespan (Simulated Seconds)")]
         [Min(0.01f)] public float maxLifespan = 200f;
+        [Tooltip("Inherited: the age at which the animal starts to age (item 68). From then its vigour falls to nothing " +
+                 "over Ageing Span, capping its health, slowing it and making it skip chances to breed, until it dies of " +
+                 "old age. Maximum Lifespan stays an outer limit. A later onset costs upkeep (Repair Metabolic Weight).")]
+        [InspectorName("Ageing Onset (Simulated Seconds)")]
+        [Min(0f)] public float ageingOnset = 180f;
+        [Tooltip("Simulated seconds from the onset of ageing until vigour reaches zero. Not inherited.")]
+        [Min(0.01f)] public float ageingSpan = 120f;
+        [Tooltip("Off, an animal stays in full health until Maximum Lifespan, as before item 68, and the onset costs nothing.")]
+        public bool enableAgeing = true;
+        [Tooltip("The share of its speed an animal keeps as its vigour runs out.")]
+        [Range(0f, 1f)] public float agedSpeedFloor = 0.3f;
 
         [Header("Day and Night")]
         [Tooltip("Inherited (0 to 1): when the animal is active. 0 by day, 1 by night, around 0.5 at dawn and dusk and " +
@@ -488,6 +503,11 @@ namespace Boreal.Animals
                 ? perkEffects.visibility * Mathf.Lerp(AnimalPerks.CamouflageNightVisibility, 1f, WorldDay.Current.daylight)
                 : perkEffects.visibility;
         public float RemainingLifespan => Mathf.Max(0f, maxLifespan - currentAge);
+        // 1 until the onset of ageing, then falling to 0 over Ageing Span (item 68). Health is capped at this share of
+        // its maximum, speed falls towards Aged Speed Floor, and each chance to breed is taken with this probability.
+        public float Vigour => !enableAgeing || currentAge <= ageingOnset
+            ? 1f
+            : Mathf.Clamp01(1f - (currentAge - ageingOnset) / Mathf.Max(0.01f, ageingSpan));
         public float AgeFraction => maxLifespan <= Mathf.Epsilon
             ? 1f
             : Mathf.Clamp01(currentAge / maxLifespan);
@@ -705,6 +725,7 @@ namespace Boreal.Animals
             maturityTime = Mathf.Max(0f, maturityTime);
             currentAge = Mathf.Max(0f, currentAge);
             maxLifespan = Mathf.Max(0.01f, maxLifespan);
+            ageingOnset = Mathf.Max(0f, ageingOnset);
             dietAffinity = Mathf.Clamp01(dietAffinity);
             InitializeMetabolicReference();
             BeginGrowth();
@@ -791,6 +812,18 @@ namespace Boreal.Animals
                 return;
             }
 
+            // Ageing (item 68): past its onset the animal's vigour falls; it caps health and ends the animal's life.
+            if (enableAgeing && currentAge > ageingOnset)
+            {
+                float vigour = Vigour;
+                if (vigour <= 0f)
+                {
+                    Die(AgentDeathCause.OldAge, null);
+                    return;
+                }
+                currentHealth = Mathf.Min(currentHealth, maxHealth * vigour);
+            }
+
             decisionRealTimeCooldown = Mathf.Max(0f, decisionRealTimeCooldown - unscaledDeltaTime);
             preyPathRefreshTimer = Mathf.Max(0f, preyPathRefreshTimer - unscaledDeltaTime);
             attackCooldownTimer = attackCooldownTimer > 0f
@@ -837,7 +870,7 @@ namespace Boreal.Animals
             // Regeneration slowly heals the animal while it has energy.
             if (perkEffects.regenerationPerSecond > 0f && currentEnergy > 0f && currentHealth < maxHealth)
             {
-                currentHealth = Mathf.Min(maxHealth,
+                currentHealth = Mathf.Min(maxHealth * Vigour,
                                           currentHealth + perkEffects.regenerationPerSecond * maxHealth * deltaTime);
             }
 
@@ -910,6 +943,15 @@ namespace Boreal.Animals
             if (!IsMature || maxEnergy <= 0f || currentEnergy < maxEnergy * reproductionThreshold ||
                 reproductionCooldownTimer > 0f || atPopulationCeiling)
             {
+                return;
+            }
+
+            // An ageing animal is less fertile (item 68): it takes each chance to breed with a probability equal to its
+            // vigour, and otherwise rests as if it had bred.
+            float fertility = Vigour;
+            if (fertility < 1f && Random.value > fertility)
+            {
+                reproductionCooldownTimer = reproductionCooldown;
                 return;
             }
 
@@ -1942,7 +1984,8 @@ namespace Boreal.Animals
             float baseSpeed = inWater
                 ? (geneMoveSpeed > 0f ? geneMoveSpeed : moveSpeed) * waterMovement.SpeedMultiplier(bodyEffects.swimmingAbility)
                 : moveSpeed * snowSpeedMultiplier;
-            agent.speed = Mathf.Max(0.01f, baseSpeed * growth * multiplier * temperatureMultiplier);
+            float agedMultiplier = Mathf.Lerp(Mathf.Clamp01(agedSpeedFloor), 1f, Vigour);
+            agent.speed = Mathf.Max(0.01f, baseSpeed * growth * multiplier * temperatureMultiplier * agedMultiplier);
         }
 
         // The animal is in water when its NavMesh position is down on the flat water surface, unless that is a frozen
@@ -2850,6 +2893,7 @@ namespace Boreal.Animals
             captured[AnimalGene.MarkerA] = 0.5f;
             captured[AnimalGene.MarkerB] = 0.5f;
             captured[AnimalGene.MarkerC] = 0.5f;
+            captured[AnimalGene.AgeingOnset] = ageingOnset;
             return captured;
         }
 
@@ -2865,6 +2909,7 @@ namespace Boreal.Animals
             maxHealth = genome[AnimalGene.MaxHealth];
             maturityTime = genome[AnimalGene.MaturityTime];
             maxLifespan = genome[AnimalGene.MaxLifespan];
+            ageingOnset = genome[AnimalGene.AgeingOnset];
             dietAffinity = genome[AnimalGene.DietAffinity];
             thermalResponse.preferredTemperature = genome[AnimalGene.PreferredTemperature];
             thermalResponse.coldTolerance = genome[AnimalGene.ColdTolerance];
@@ -2968,6 +3013,7 @@ namespace Boreal.Animals
             if (referenceMaxEnergy <= 0f) referenceMaxEnergy = Mathf.Max(0.01f, maxEnergy);
             if (referenceMaxStamina <= 0f) referenceMaxStamina = Mathf.Max(0.01f, maxStamina);
             if (referenceMaxHealth <= 0f) referenceMaxHealth = Mathf.Max(0.01f, maxHealth);
+            if (referenceAgeingOnset <= 0f) referenceAgeingOnset = Mathf.Max(0.01f, ageingOnset);
         }
 
         // Harmful mutations and perks add their costs on top of the traits' cost, outside its limits.
@@ -2980,9 +3026,10 @@ namespace Boreal.Animals
                                   (genome != null && genome.IsValid
                                       ? genome.EnergyUseMultiplier(harmfulMutationEnergyCost)
                                       : 1f);
+            float repairWeight = enableAgeing ? repairMetabolicWeight : 0f;
             float totalWeight = speedMetabolicWeight + strengthMetabolicWeight + bodyMassMetabolicWeight +
                                 visionMetabolicWeight + energyCapacityMetabolicWeight +
-                                staminaCapacityMetabolicWeight + healthMetabolicWeight;
+                                staminaCapacityMetabolicWeight + healthMetabolicWeight + repairWeight;
             if (totalWeight <= Mathf.Epsilon)
             {
                 currentEnergyDrainPerSecond = Mathf.Max(0f, baseEnergyDrainPerSecond) * inheritedCost;
@@ -3005,7 +3052,8 @@ namespace Boreal.Animals
                 (Mathf.Max(0.01f, visionRadius) / referenceVisionRadius) * visionMetabolicWeight +
                 (Mathf.Max(0.01f, maxEnergy) / referenceMaxEnergy) * energyCapacityMetabolicWeight +
                 (Mathf.Max(0.01f, maxStamina) / referenceMaxStamina) * staminaCapacityMetabolicWeight +
-                (Mathf.Max(0.01f, maxHealth) / referenceMaxHealth) * healthMetabolicWeight;
+                (Mathf.Max(0.01f, maxHealth) / referenceMaxHealth) * healthMetabolicWeight +
+                (Mathf.Max(0.01f, ageingOnset) / referenceAgeingOnset) * repairWeight;
 
             float minimum = Mathf.Max(0f, minimumMetabolicMultiplier);
             float maximum = Mathf.Max(minimum, maximumMetabolicMultiplier);

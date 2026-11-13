@@ -1,4 +1,8 @@
-# Latest verification — 13 November 2026, with perks easier to lose than to gain (item 62)
+# Latest verification — 13 November 2026, with ageing (item 68)
+
+**330 passed, 0 failed, 0 skipped** in Unity 6000.4.1f1 ([NUnit XML](Logs/TestResults/20261113T151331352848Z/results.xml)). New: `AgeingAnimalsWeakenSlowDownAndDieBeforeTheirLifespan`. `SpeciesSplitCalibrationTests` passes with a median first split of 71 generations, near the top of its 40 to 75 band; a threshold of 0.045 would give 54.5.
+
+# 13 November 2026, with perks easier to lose than to gain (item 62)
 
 **329 passed, 0 failed, 0 skipped** in Unity 6000.4.1f1 ([NUnit XML](Logs/TestResults/20261113T133026425931Z/results.xml)). New: `PerksAreGainedAndLostAtTheirOwnChances`. `SpeciesSplitCalibrationTests` passes with a median first split of 66.5 generations (was about 51.5), inside its 40 to 75 band.
 

@@ -172,15 +172,17 @@ namespace Boreal.Animals
         // The nocturnality gene (founders at 0.35) brought it from about 56 generations to 51.5 and was kept at 0.05.
         // Making perks rarer to gain (0.2% per birth) than to lose (2%, item 62) moved it to 66.5: under drift a perk
         // now reaches only a few per cent of the animals, so perks add much less to the distance between two animals.
-        // Kept at 0.05, which the Terrain scene also sets, since it is still within the calibration's band; a lower
-        // threshold would bring the first split back towards 55.
+        // Kept at 0.05, which the Terrain scene also sets, since it is still within the calibration's band. The ageing
+        // onset gene (item 68) moved it to 71: one more gene makes every other difference count a little less. At
+        // 0.045 the same calibration gives 54.5 (0.04 gives 44.5), so lower it to 0.045, here and in the Terrain scene's
+        // Species Manager, before the next gene pushes it out of the band.
         // Re-run the calibration after adding a gene, body site or perk, or changing a mutation chance.
         public const float DefaultSpeciationThreshold = 0.05f;
 
         [Header("Speciation")]
         [Tooltip("Genetic distance at which animals count as separate species: 0 means identical and 1 means " +
                  "opposite ends of every gene's range. Lower values produce more species. The default, 0.05, " +
-                 "splits the first species after about 65 generations of neutral drift.")]
+                 "splits the first species after about 70 generations of neutral drift.")]
         [Range(0.005f, 0.5f)] public float speciationThreshold = DefaultSpeciationThreshold;
         [Tooltip("Simulated seconds between checks for species that have drifted into separate groups.")]
         [Min(1f)] public float speciesCensusInterval = 10f;

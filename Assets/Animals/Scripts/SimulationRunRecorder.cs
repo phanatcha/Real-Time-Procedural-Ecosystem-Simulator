@@ -43,8 +43,9 @@ namespace Boreal.Animals
             // marker genes and perk (item 56). 5: population.csv gained the share of live animals resting, traits.csv the
             // Nocturnality gene (item 74). 6: traits.csv gained the NightVision gene (item 75). 7: population.csv and
             // species.csv gained the live animals' average and highest generation, traits.csv how many animals sit at
-            // each gene's limits (item 54). 8: a new lives.csv with one row per animal (item 57).
-            public int schemaVersion = 8;
+            // each gene's limits (item 54). 8: a new lives.csv with one row per animal (item 57). 9: traits.csv
+            // and lives.csv gained the AgeingOnset gene (item 68).
+            public int schemaVersion = 9;
             public string startedUtc, sourceRevision, experiment, unityVersion, worldSeed;
             public float sampleInterval;
             public bool offscreenEnabled;

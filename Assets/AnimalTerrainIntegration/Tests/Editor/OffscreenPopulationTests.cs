@@ -27,6 +27,7 @@ namespace Boreal.AnimalTerrainIntegration.Tests
             genome[AnimalGene.MaxHealth] = 100f;
             genome[AnimalGene.MaturityTime] = 45f;
             genome[AnimalGene.MaxLifespan] = 300f;
+            genome[AnimalGene.AgeingOnset] = 180f;
             genome[AnimalGene.DietAffinity] = diet;
             genome[AnimalGene.PreferredTemperature] = 2f;
             genome[AnimalGene.ColdTolerance] = 18f;

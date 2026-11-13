@@ -45,7 +45,12 @@ namespace Boreal.Animals
         // outside their spread (traits.csv).
         MarkerA,
         MarkerB,
-        MarkerC
+        MarkerC,
+        // 10 to 1200 simulated seconds: the age at which the animal starts to age (item 68). From then its vigour falls
+        // over SeekFood's Ageing Span, taking its health, speed and fertility with it, until it dies of old age. A later
+        // onset costs upkeep, as repair does (SeekFood.repairMetabolicWeight). Last in the list so genomes saved before
+        // it keep their genes in place.
+        AgeingOnset
     }
 
     // Where a body part can grow on the capsule body. Paired sites grow the same part mirrored left and right.
@@ -176,8 +181,8 @@ namespace Boreal.Animals
         public static readonly int SiteCount = System.Enum.GetValues(typeof(BodySite)).Length;
         public static readonly int PerkCount = System.Enum.GetValues(typeof(AnimalPerk)).Length;
 
-        // How much one body site counts towards genetic distance, next to the numeric genes' weights (23 in
-        // total: twenty genes at 1, diet at 3, the markers at 0). At 0.5 a whole full-size part of difference is about
+        // How much one body site counts towards genetic distance, next to the numeric genes' weights (24 in
+        // total: twenty-one genes at 1, diet at 3, the markers at 0). At 0.5 a whole full-size part of difference is about
         // 0.018, under half the default species threshold (0.05). SpeciesManager.DefaultSpeciationThreshold describes how the weights and threshold were
         // calibrated.
         public const float BodySiteDistanceWeight = 0.5f;
@@ -301,6 +306,8 @@ namespace Boreal.Animals
             // Markers step like the other 0-1 additive genes and weigh nothing towards genetic distance.
             AnimalGene.MarkerA or AnimalGene.MarkerB or AnimalGene.MarkerC =>
                 new AnimalGeneDefinition(0f, 1f, GeneMutationStyle.Additive, 1f, 0f),
+            // Steps like the lifespan: by a share of its value.
+            AnimalGene.AgeingOnset => new AnimalGeneDefinition(10f, 1200f, GeneMutationStyle.Proportional, 0.01f),
             _ => throw new System.ArgumentOutOfRangeException(nameof(gene), gene, null)
         };
 
