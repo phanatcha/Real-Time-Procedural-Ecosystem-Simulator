@@ -7,17 +7,19 @@ using UnityEngine.InputSystem;
 
 namespace Boreal.Animals
 {
-    // God tools (item 31): a drought, dropped food, a mass extinction and a burst of mutation, from buttons on a
-    // panel (K shows or hides it) or scheduled at a simulated time for experiments. Every use is recorded as an
-    // event with the Species Manager, which the run recorder saves. Adds itself to scenes with a Species Manager.
+    // God tools (item 31): a drought, dropped food, a mass extinction, a burst of mutation and a wildfire (item 79), from
+    // buttons on a panel (K shows or hides it) or scheduled at a simulated time for experiments. Every use is recorded
+    // as an event with the Species Manager, which the run recorder saves. Adds itself to scenes with a Species Manager.
     [DisallowMultipleComponent]
     public sealed class GodTools : MonoBehaviour
     {
-        public enum Kind { Drought, Food, Extinction, Mutation }
+        public enum Kind { Drought, Food, Extinction, Mutation, Fire }
 
         // One scheduled or running intervention. Duration and amount mean different things per kind: a drought
         // multiplies plant regrowth by amount for duration seconds; food drops amount plants; an extinction kills
-        // the share amount of the animals; mutation multiplies every mutation chance by amount for duration seconds.
+        // the share amount of the animals; mutation multiplies every mutation chance by amount for duration seconds; a
+        // fire is a wildfire with amount ignition points that burns out by itself, or is put out after duration seconds
+        // if that is above 0 (item 79).
         [Serializable]
         public struct Intervention
         {
@@ -33,6 +35,8 @@ namespace Boreal.Animals
                     Kind.Drought => $"drought: plants regrow at {amount * 100f:0}% for {duration:0} s",
                     Kind.Food => $"{amount:0} plants dropped",
                     Kind.Extinction => $"mass extinction: {amount * 100f:0}% of the animals",
+                    Kind.Fire => $"wildfire with {amount:0} ignition point{(amount >= 1.5f ? "s" : "")}" +
+                                 (duration > 0f ? $", put out after {duration:0} s" : ""),
                     _ => $"mutation chances x{amount:0.#} for {duration:0} s"
                 };
                 return $"{what} at {time:0} s";
@@ -42,6 +46,8 @@ namespace Boreal.Animals
         public bool visible;
         [Tooltip("Metres around the point in front of the camera that dropped food lands in.")]
         [Min(5f)] public float foodDropRadius = 40f;
+        [Tooltip("Metres in front of the camera where the panel's wildfire button lights a fire.")]
+        [Min(5f)] public float fireDistance = 80f;
 
         readonly List<Intervention> scheduled = new List<Intervention>();
         float droughtEndsAt = -1f;
@@ -63,16 +69,25 @@ namespace Boreal.Animals
 
         // "drought@800:200x0.2" is a drought at 800 s lasting 200 s with regrowth at 20%; "food@600x30" drops 30 plants
         // at 600 s; "extinction@1200x0.5" kills half the animals at 1200 s; "mutation@400:300x4" quadruples mutation
-        // chances from 400 s for 300 s. Durations and amounts have defaults. Returns false for anything else.
+        // chances from 400 s for 300 s; "fire@900" (or "wildfire@900") lights a wildfire at 900 s among the animals that
+        // burns out by itself, "fire@900:120x2" one with two ignition points put out after 120 s (item 79). Durations
+        // and amounts have defaults. Returns false for anything else.
         public static bool TryParse(string spec, out Intervention intervention)
         {
             intervention = default;
             if (string.IsNullOrWhiteSpace(spec)) return false;
             string[] atParts = spec.Trim().Split('@');
-            if (atParts.Length != 2 || !Enum.TryParse(atParts[0].Trim(), true, out Kind kind)) return false;
+            if (atParts.Length != 2) return false;
+            string name = atParts[0].Trim();
+            if (string.Equals(name, "wildfire", StringComparison.OrdinalIgnoreCase)) name = nameof(Kind.Fire);
+            if (int.TryParse(name, out _) || !Enum.TryParse(name, true, out Kind kind) || !Enum.IsDefined(typeof(Kind), kind))
+                return false;
 
             string rest = atParts[1];
-            float amount = kind switch { Kind.Drought => 0.2f, Kind.Food => 30f, Kind.Extinction => 0.5f, _ => 4f };
+            float amount = kind switch
+            {
+                Kind.Drought => 0.2f, Kind.Food => 30f, Kind.Extinction => 0.5f, Kind.Fire => 1f, _ => 4f
+            };
             float duration = kind == Kind.Drought ? 200f : kind == Kind.Mutation ? 300f : 0f;
             int x = rest.IndexOf('x');
             if (x >= 0)
@@ -87,6 +102,7 @@ namespace Boreal.Animals
                 !float.TryParse(timeParts[1], NumberStyles.Float, CultureInfo.InvariantCulture, out duration)) return false;
             if (amount < 0f || duration < 0f) return false;
             if (kind == Kind.Extinction) amount = Mathf.Clamp01(amount);
+            if (kind == Kind.Fire) amount = Mathf.Clamp(Mathf.Round(amount), 1f, 20f);
 
             intervention = new Intervention { kind = kind, time = time, duration = duration, amount = amount };
             return true;
@@ -150,8 +166,75 @@ namespace Boreal.Animals
                     manager.mutationMultiplier = Mathf.Max(0f, intervention.amount);
                     mutationEndsAt = Time.time + intervention.duration;
                     break;
+                case Kind.Fire:
+                    // The natural event director records the fire itself, with where and how it started.
+                    NaturalEventDirector director = NaturalEventDirector.Active;
+                    Vector3 at = fireAtCamera ? FireInFrontOfCamera() : FireAmongTheAnimals(manager);
+                    fireAtCamera = false;
+                    NaturalEvent fire = director != null
+                        ? director.Force("wildfire", at, intervention.amount, intervention.duration, "god tool")
+                        : null;
+                    if (fire == null)
+                    {
+                        manager.RecordEvent("fire", $"nothing caught fire at x {at.x:0} z {at.z:0} at {intervention.time:0} s");
+                    }
+                    return;
             }
             manager.RecordEvent(intervention.kind.ToString().ToLowerInvariant(), detail);
+        }
+
+        bool fireAtCamera;
+
+        // The point the panel's wildfire button aims at.
+        Vector3 FireInFrontOfCamera()
+        {
+            Camera camera = Camera.main;
+            return camera != null
+                ? camera.transform.position + Vector3.ProjectOnPlane(camera.transform.forward, Vector3.up).normalized * fireDistance
+                : Vector3.zero;
+        }
+
+        // A scheduled fire starts beside the live animal nearest the animals' average position, so it reaches them in
+        // every replicate of an experiment.
+        static Vector3 FireAmongTheAnimals(SpeciesManager manager)
+        {
+            Vector3 sum = Vector3.zero;
+            int count = 0;
+            foreach (SeekFood animal in manager.ActiveAgents)
+            {
+                if (animal == null || animal.IsInWater) continue;
+                sum += animal.transform.position;
+                count++;
+            }
+            if (count == 0)
+            {
+                Camera camera = Camera.main;
+                return camera != null ? camera.transform.position : Vector3.zero;
+            }
+            Vector3 middle = sum / count;
+            Vector3 best = middle;
+            float bestDistance = float.PositiveInfinity;
+            foreach (SeekFood animal in manager.ActiveAgents)
+            {
+                if (animal == null || animal.IsInWater) continue;
+                float distance = (animal.transform.position - middle).sqrMagnitude;
+                if (distance < bestDistance)
+                {
+                    bestDistance = distance;
+                    best = animal.transform.position;
+                }
+            }
+            return best;
+        }
+
+        // Puts out every burning wildfire.
+        public void PutOutFires()
+        {
+            NaturalEventDirector director = NaturalEventDirector.Active;
+            if (director == null) return;
+            int stopped = director.StopAll("put out by god tools");
+            if (stopped > 0 && SpeciesManager.Instance != null)
+                SpeciesManager.Instance.RecordEvent("end", $"{stopped} natural event{(stopped == 1 ? "" : "s")} ended early");
         }
 
         public void EndEffects()
@@ -203,6 +286,17 @@ namespace Boreal.Animals
             if (keyboard.kKey.wasPressedThisFrame) visible = !visible;
         }
 
+        public static string DescribeFireWeather(NaturalEventDirector director)
+        {
+            NaturalConditions conditions = director.Conditions;
+            WildfireKind fires = director.Wildfire;
+            string burning = fires.BurningFires > 0
+                ? $", {fires.BurningFires} burning ({fires.BurningHectares:0.0} ha alight)"
+                : "";
+            return $"fire danger {fires.Danger(conditions):0.00} (dryness {conditions.dryness:0.00}, wind " +
+                   $"{conditions.windSpeed:0} m/s to {conditions.WindTowards}){burning}";
+        }
+
         void OnGUI()
         {
             SpeciesManager manager = SpeciesManager.Instance;
@@ -213,7 +307,7 @@ namespace Boreal.Animals
             }
 
             const float Width = 300f;
-            float height = 196f + 18f * Mathf.Min(scheduled.Count, 4);
+            float height = 268f + 18f * Mathf.Min(scheduled.Count, 4);
             Rect panel = new Rect(Screen.width - Width - 10f, Screen.height - height - 10f, Width, height);
             GUI.Box(panel, "<b>God tools</b>   K: hide", boxStyle);
             GUILayout.BeginArea(new Rect(panel.x + 8f, panel.y + 26f, panel.width - 16f, panel.height - 30f));
@@ -222,10 +316,18 @@ namespace Boreal.Animals
             if (GUILayout.Button("Mass extinction: half the animals")) Apply(Kind.Extinction, 0f, 0.5f);
             if (GUILayout.Button("Mutation chances x4 for 300 s")) Apply(Kind.Mutation, 300f, 4f);
             if (GUILayout.Button("End the drought and mutation effects")) EndEffects();
+            if (GUILayout.Button($"Wildfire {fireDistance:0} m in front of the camera"))
+            {
+                fireAtCamera = true;
+                Apply(Kind.Fire, 0f, 1f);
+            }
+            if (GUILayout.Button("Put out every wildfire")) PutOutFires();
             string status = "";
             if (droughtEndsAt >= 0f) status += $"drought, {Mathf.Max(0f, droughtEndsAt - Time.time):0} s left   ";
             if (mutationEndsAt >= 0f) status += $"mutation x{manager.mutationMultiplier:0.#}, {Mathf.Max(0f, mutationEndsAt - Time.time):0} s left";
             GUILayout.Label(status.Length > 0 ? status : "no effect running", boxStyle.fontSize > 0 ? GUI.skin.label : GUI.skin.label);
+            NaturalEventDirector natural = NaturalEventDirector.Active;
+            if (natural != null) GUILayout.Label(DescribeFireWeather(natural));
             for (int index = 0; index < Mathf.Min(scheduled.Count, 4); index++) GUILayout.Label("scheduled: " + scheduled[index]);
             GUILayout.EndArea();
         }

@@ -44,12 +44,15 @@ namespace Boreal.Animals
             // Nocturnality gene (item 74). 6: traits.csv gained the NightVision gene (item 75). 7: population.csv and
             // species.csv gained the live animals' average and highest generation, traits.csv how many animals sit at
             // each gene's limits (item 54). 8: a new lives.csv with one row per animal (item 57). 9: traits.csv
-            // and lives.csv gained the AgeingOnset gene (item 68).
-            public int schemaVersion = 9;
+            // and lives.csv gained the AgeingOnset gene (item 68). 10: population.csv gained deaths by fire (a fire column
+            // before other) and the fire weather and burned area at its end (items 78 and 79); metadata the natural
+            // event settings.
+            public int schemaVersion = 10;
             public string startedUtc, sourceRevision, experiment, unityVersion, worldSeed;
             public float sampleInterval;
             public bool offscreenEnabled;
-            public string managerSettings, seasonSettings, dayClockSettings, foodSettings, representativeAnimalSettings;
+            public string managerSettings, seasonSettings, dayClockSettings, foodSettings, representativeAnimalSettings,
+                naturalEventSettings;
         }
 
         void OnEnable()
@@ -133,10 +136,11 @@ namespace Boreal.Animals
                 seasonSettings = SeasonClock.Active != null ? JsonUtility.ToJson(SeasonClock.Active) : "",
                 dayClockSettings = DayClock.Active != null ? JsonUtility.ToJson(DayClock.Active) : "",
                 foodSettings = food != null ? JsonUtility.ToJson(food) : "",
-                representativeAnimalSettings = representative != null ? JsonUtility.ToJson(representative) : ""
+                representativeAnimalSettings = representative != null ? JsonUtility.ToJson(representative) : "",
+                naturalEventSettings = NaturalEventDirector.Active != null ? JsonUtility.ToJson(NaturalEventDirector.Active) : ""
             };
             File.WriteAllText(Path.Combine(OutputDirectory, "metadata.json"), JsonUtility.ToJson(metadata, true));
-            population = Open("population.csv", "time,live,offscreen,species_alive,births,cloned_births,sexual_births,deaths,starvation,predation,old_age,cold,heat,venom,thirst,other,land_ceiling,sea_ceiling,requested_speed,achieved_speed,season,season_strength,offscreen_enabled,breeding_wait_episodes,breeding_wait_seconds,day,time_of_day,daylight,light,moon_phase,deaths_at_night,resting,average_generation,highest_generation");
+            population = Open("population.csv", "time,live,offscreen,species_alive,births,cloned_births,sexual_births,deaths,starvation,predation,old_age,cold,heat,venom,thirst,fire,other,land_ceiling,sea_ceiling,requested_speed,achieved_speed,season,season_strength,offscreen_enabled,breeding_wait_episodes,breeding_wait_seconds,day,time_of_day,daylight,light,moon_phase,deaths_at_night,resting,average_generation,highest_generation,dryness,fire_danger,fires_burning,burning_hectares,burned_hectares");
             species = Open("species.csv", "time,species,parent,origin,extinction,live,offscreen,births,sexual_births,deaths,breeding_wait_episodes,breeding_wait_seconds,average_generation,highest_generation");
             traits = Open("traits.csv", "time,species,trait,live_sample_count,mean,standard_deviation,minimum,maximum,at_minimum,at_maximum");
             events = Open("events.csv", "time,event,detail");
@@ -181,13 +185,18 @@ namespace Boreal.Animals
             Row(population, time, manager.TotalPopulation, manager.OffscreenTotal, manager.SpeciesAliveCount,
                 total.births, total.births - total.sexualBirths, total.sexualBirths, total.deaths,
                 total.starvationDeaths, total.predationDeaths, total.oldAgeDeaths, total.coldDeaths,
-                total.heatDeaths, total.venomDeaths, total.thirstDeaths, total.OtherDeaths, manager.IsAtPopulationCeiling,
+                total.heatDeaths, total.venomDeaths, total.thirstDeaths, total.fireDeaths, total.OtherDeaths,
+                manager.IsAtPopulationCeiling,
                 manager.IsAtSeaPopulationCeiling, manager.simulationSpeed, manager.AchievedSimulationSpeed,
                 SeasonClock.Active != null ? SeasonClock.Active.SeasonName : "None",
                 SeasonClock.IsRunning ? SeasonClock.Active.EffectiveStrength : 0f, manager.OffscreenPopulation != null,
                 manager.BreedingWaitEpisodes, manager.BreedingWaitSeconds, day.day, day.timeOfDay, day.daylight,
                 day.light, day.moonPhase, manager.DeathsAtNight, RestingShare(),
-                AverageGeneration(allGenerations), HighestGeneration(allGenerations));
+                AverageGeneration(allGenerations), HighestGeneration(allGenerations),
+                Fire(director => director.Conditions.dryness),
+                Fire(director => director.Wildfire.Danger(director.Conditions)),
+                Fire(director => director.Wildfire.BurningFires), Fire(director => director.Wildfire.BurningHectares),
+                Fire(director => director.Wildfire.BurnedHectares));
 
             foreach (SpeciesTelemetryRecord record in manager.Telemetry.Values)
             {
@@ -222,6 +231,13 @@ namespace Boreal.Animals
             }
             population.Flush(); species.Flush(); traits.Flush(); events.Flush(); lives.Flush();
             lastSample = time;
+        }
+
+        // The natural events' weather and wildfires (items 78 and 79); blank without a director.
+        static object Fire(Func<NaturalEventDirector, double> value)
+        {
+            NaturalEventDirector director = NaturalEventDirector.Active;
+            return director != null && director.Wildfire != null ? (object)value(director) : "";
         }
 
         // Share of the live animals resting now (item 74).

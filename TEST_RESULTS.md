@@ -1,4 +1,10 @@
-# Latest verification — 13 November 2026, with ageing (item 68)
+# Latest verification — 14 November 2026, with natural events and wildfire (items 78 and 79)
+
+**347 passed, 0 failed, 0 skipped** in Unity 6000.4.1f1 ([NUnit XML](Logs/TestResults/20261113T190355529596Z/results.xml)), with the final wildfire settings and the fire visuals (the fire map hooks in the Terrain, Vegetation and GrassField shaders, and the flame, spark and smoke particles); also 347 of 347 before the visuals ([NUnit XML](Logs/TestResults/20261113T182232492054Z/results.xml)). The visuals soaks' logs had no shader errors. Both runs were on a working tree that also held item 67 (body size scaling, not committed at the time), whose `BiggerBodiesStoreMoreAndLastLongerBetweenMeals` is one of the 347. New: 13 Edit Mode tests in `WildfireTests` (fire spreads through fuel and burns out; a river and bare rock stop it; snow and wet ground don't carry it; fuel follows trees, grass and rock; fire runs further downwind and uphill; the same seed burns the same cells; heat is felt in and beside the flames and smoke drifts downwind; putting a fire out; dryness peaks in late summer and stays up into fall; fire danger; god tool parsing; compass points) and 3 Play Mode tests in `WildfirePlayModeTests` (an animal near a fire runs from it; a trapped animal dies of fire, counted by the Species Manager and against its fire; a fire burns out, burns the plants inside it and not outside, and its start and end are recorded).
+
+The first full run, before the tuning, had 345 of 347: `SeasonTests.ASeasonSummaryReportsWhatHappenedDuringTheSeason` expected the season line without the new `fire 0`, and `AnAnimalCaughtInTheFlamesDiesOfFire` lost its death callback across the domain reload when entering Play Mode (the callback is now made after it, as the other Play Mode tests do). Both fixed; the 13 Edit Mode tests were also run outside Unity after each tuning change.
+
+# 13 November 2026, with ageing (item 68)
 
 **330 passed, 0 failed, 0 skipped** in Unity 6000.4.1f1 ([NUnit XML](Logs/TestResults/20261113T151331352848Z/results.xml)). New: `AgeingAnimalsWeakenSlowDownAndDieBeforeTheirLifespan`. `SpeciesSplitCalibrationTests` passes with a median first split of 71 generations, near the top of its 40 to 75 band; a threshold of 0.045 would give 54.5.
 

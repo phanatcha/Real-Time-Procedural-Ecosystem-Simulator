@@ -97,6 +97,14 @@ Shader "Custom/Terrain"
             // Set globally by SeasonalLook: snow lying on the ground in x, meadows dried to straw in y. Both 0 in summer.
             float4 _SeasonGround;
 
+            // Set globally by WildfireVisuals (Assets/Animals, item 79): one texel per 8 m fire cell over the habitable
+            // square, laid out like the heatmap: flames now in r, charred ground in g, embers in b (alpha is the canopy,
+            // for the vegetation). Its mipmaps blur the flames into the light they cast. Strength 0 without a fire.
+            TEXTURE2D(_BorealFireMap);
+            SAMPLER(sampler_BorealFireMap);
+            float4 _BorealFireMapRect;
+            float _BorealFireStrength;
+
             struct Attributes
             {
                 float4 positionOS : POSITION;
@@ -391,6 +399,23 @@ Shader "Custom/Terrain"
                     float straw = _SeasonGround.y * aboveWater * (0.45 + 0.35 * ValueNoise(IN.positionWS.xz / 23.0));
                     albedo = lerp(albedo, albedo * float3(1.22, 1.0, 0.62) + float3(0.04, 0.025, 0.0), straw);
                 }
+                // Wildfire: burned ground is charcoal black with patches of grey ash until plants come back, then fades;
+                // snow that falls later still covers it.
+                float4 fire = 0.0;
+                float fireLight = 0.0;
+                if (_BorealFireStrength > 0.0)
+                {
+                    float2 fireUV = (IN.positionWS.xz - _BorealFireMapRect.xy) * _BorealFireMapRect.zw;
+                    if (all(fireUV >= 0.0) && all(fireUV <= 1.0))
+                    {
+                        fire = SAMPLE_TEXTURE2D_LOD(_BorealFireMap, sampler_BorealFireMap, fireUV, 0);
+                        fireLight = SAMPLE_TEXTURE2D_LOD(_BorealFireMap, sampler_BorealFireMap, fireUV, 3.5).r;
+                        float ash = ValueNoise(IN.positionWS.xz / 2.3) * 0.6 + ValueNoise(IN.positionWS.xz / 0.7) * 0.4;
+                        float charred = smoothstep(0.05, 0.6, fire.g + (ash - 0.5) * 0.35) * aboveWater;
+                        float3 charcoal = lerp(float3(0.03, 0.026, 0.024), float3(0.2, 0.19, 0.18), smoothstep(0.7, 0.92, ash));
+                        albedo = lerp(albedo, charcoal, charred);
+                    }
+                }
                 if (_SeasonGround.x > 0.001)
                 {
                     float snowPatch = ValueNoise(IN.positionWS.xz / 31.0) * 0.7 + ValueNoise(IN.positionWS.xz / 7.0) * 0.3;
@@ -436,6 +461,20 @@ Shader "Custom/Terrain"
                 float3 ambient = SampleSH(shadingNormal) * occlusion.indirectAmbientOcclusion;
 
                 float3 colour = albedo * (radiance + ambient);
+                if (_BorealFireStrength > 0.0)
+                {
+                    // Wildfire light: scattered embers in the freshly burned ground, a patchy glow under the flames, and
+                    // the flames' light on the ground around them, which shows at night and hardly by day.
+                    float flicker = 0.6 + 0.4 * ValueNoise(IN.positionWS.xz / 1.7 + _Time.y * float2(1.3, -0.9));
+                    float speckle = smoothstep(0.7, 0.9, ValueNoise(IN.positionWS.xz / 0.9 + 17.0));
+                    float patches = smoothstep(0.35, 0.75, ValueNoise(IN.positionWS.xz / 3.1 - _Time.y * 0.15));
+                    // Embers hardly show in sunlight; in the dark they glow.
+                    float sunlit = saturate(dot(mainLight.color, float3(0.3, 0.59, 0.11)));
+                    float embers = fire.b * fire.b * fire.b * speckle * flicker * lerp(1.0, 0.2, sunlit);
+                    colour += float3(3.0, 0.8, 0.12) * (embers * aboveWater);
+                    colour += float3(1.6, 0.55, 0.12) * (fire.r * patches * (0.5 + 0.5 * flicker) * aboveWater);
+                    colour += albedo * float3(1.1, 0.45, 0.15) * saturate(fireLight * 2.5);
+                }
                 colour = MixFog(colour, IN.fogFactor);
 
                 return float4(colour, 1);

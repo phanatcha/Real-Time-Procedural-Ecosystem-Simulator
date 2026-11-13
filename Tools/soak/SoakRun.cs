@@ -1,9 +1,12 @@
 using System;
+using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Linq;
 using Boreal.Animals;
 using Boreal.Core;
+using Boreal.TerrainGeneration;
+using Boreal.World;
 using UnityEditor;
 using UnityEditor.SceneManagement;
 using UnityEngine;
@@ -80,6 +83,11 @@ namespace Boreal.Soak.Editor
             SessionState.SetFloat(Key + "PerkGain", float.Parse(Arg("soakPerkGain", "-1"), CultureInfo.InvariantCulture));
             SessionState.SetFloat(Key + "PerkLoss", float.Parse(Arg("soakPerkLoss", "-1"), CultureInfo.InvariantCulture));
             SessionState.SetBool(Key + "Ageing", Arg("soakAgeing", "1") == "1");
+            SessionState.SetBool(Key + "NaturalEvents", Arg("soakNaturalEvents", "1") == "1");
+            SessionState.SetBool(Key + "Fires", Arg("soakFires", "1") == "1");
+            SessionState.SetBool(Key + "FuelProbe", Arg("soakFuelProbe", "0") == "1");
+            SessionState.SetFloat(Key + "FireSpread", float.Parse(Arg("soakFireSpread", "-1"), CultureInfo.InvariantCulture));
+            SessionState.SetFloat(Key + "FireStrikes", float.Parse(Arg("soakFireStrikes", "-1"), CultureInfo.InvariantCulture));
 
             // The founders' start search (item 9) lives in AnimalTerrainIntegration, which this assembly can't
             // reference, so it is set by its serialized name.
@@ -174,6 +182,8 @@ namespace Boreal.Soak.Editor
                 Debug.Log($"Soak: sexual drive locked at {lockedDrive} on {animals.Length} animals and their descendants at {simulated:0} s");
             }
 
+            if (stage == 0 && SessionState.GetBool(Key + "Fast", false)) UpdateFireShots(manager, simulated);
+
             if (simulated - SessionState.GetFloat(Key + "LastStatus", -1f) >= 50f)
             {
                 SessionState.SetFloat(Key + "LastStatus", simulated);
@@ -201,6 +211,20 @@ namespace Boreal.Soak.Editor
                           $"ice {WaterAccess.IceCover:0.00}{(WaterAccess.FreshWaterFrozen ? " frozen" : "")}, " +
                           $"animal-seconds on ice {SessionState.GetFloat(Key + "IceSeconds", 0f):0}");
                 if (EnergyLedger.Enabled) Debug.Log("Soak: " + EnergyLedger.Report(animals));
+                NaturalEventDirector natural = NaturalEventDirector.Active;
+                if (natural != null)
+                {
+                    int fleeing = 0, inSmoke = 0;
+                    foreach (SeekFood animal in animals)
+                    {
+                        if (animal.IsFleeingFire) fleeing++;
+                        if (animal.SmokeFelt > 0.05f) inSmoke++;
+                    }
+                    if (SessionState.GetBool(Key + "FuelProbe", false)) ProbeFuel(natural, animals);
+                    Debug.Log($"Soak: wildfire {GodTools.DescribeFireWeather(natural)}, " +
+                              $"{natural.Wildfire.BurnedHectares:0.0} ha burned in all, fleeing {fleeing}, in smoke {inSmoke}, " +
+                              $"lightning {natural.Wildfire.Strikes} strikes, {natural.Wildfire.StrikesCaught} caught");
+                }
             }
 
             if (stage == 0 && animals.Length > 0 && !SessionState.GetBool(Key + "Fast", false) && manager != null)
@@ -241,6 +265,19 @@ namespace Boreal.Soak.Editor
                 if (animals.Length > 0)
                     Debug.Log($"Soak: perks gained at {animals[0].perkGainChance}% and lost at {animals[0].perkLossChance}% per birth; " +
                               (animals[0].enableAgeing ? $"ageing from {animals[0].ageingOnset} s over {animals[0].ageingSpan} s" : "ageing off"));
+                // Items 78 and 79: natural events on or off, wildfires on or off, and how often lightning strikes.
+                NaturalEventDirector director = Object.FindAnyObjectByType<NaturalEventDirector>();
+                if (director != null)
+                {
+                    director.randomEvents = SessionState.GetBool(Key + "NaturalEvents", true);
+                    director.wildfire.enabled = SessionState.GetBool(Key + "Fires", true);
+                    float strikes = SessionState.GetFloat(Key + "FireStrikes", -1f);
+                    if (strikes >= 0f) director.wildfire.strikesPerYear = strikes;
+                    float spread = SessionState.GetFloat(Key + "FireSpread", -1f);
+                    if (spread >= 0f) director.wildfire.rules.spreadStrength = spread;
+                    Debug.Log($"Soak: natural events {(director.randomEvents ? "on" : "off")}, wildfires " +
+                              $"{(director.wildfire.enabled ? $"on at {director.wildfire.strikesPerYear} strikes a year, spread strength {director.wildfire.rules.spreadStrength}" : "off")}");
+                }
                 // God tools scheduled for the run, e.g. "drought@800:200x0.2,extinction@1200x0.5" (GodTools.TryParse).
                 string events = SessionState.GetString(Key + "Events", "");
                 GodTools tools = Object.FindAnyObjectByType<GodTools>();
@@ -325,6 +362,115 @@ namespace Boreal.Soak.Editor
 
         static DateTime MapRequestedUtc =>
             new DateTime(long.Parse(SessionState.GetString(Key + "MapRequested", "0")), DateTimeKind.Utc);
+
+        // Item 79: up to three shots of each wildfire with 30 or more cells alight, 25 simulated seconds apart, from 150 m
+        // upwind and 55 m up, looking at the burning cells' centre. The flames are drawn for the shot's camera and the
+        // simulation runs at 1x for the 10 real seconds the particles (which run in real time) need to fill in and the
+        // smoke to rise.
+        static GameObject fireCamera;
+        static double fireShotAt;
+        static string fireShotPath;
+        static float fireShotSpeed;
+        static readonly Dictionary<int, int> fireShots = new Dictionary<int, int>();
+        static readonly Dictionary<int, float> fireShotTimes = new Dictionary<int, float>();
+
+        static void UpdateFireShots(SpeciesManager manager, float simulated)
+        {
+            NaturalEventDirector natural = NaturalEventDirector.Active;
+            if (natural == null || manager == null) return;
+            if (fireCamera != null)
+            {
+                if (EditorApplication.timeSinceStartup < fireShotAt) return;
+                string light = DayClock.IsRunning && DayClock.Current.daylight < 0.5f ? "night" : "day";
+                fireShotPath = fireShotPath.Replace("{light}", light);
+                Shot(fireCamera.GetComponent<Camera>(), fireShotPath);
+                Object.DestroyImmediate(fireCamera);
+                fireCamera = null;
+                WildfireVisuals.ViewerOverride = null;
+                manager.simulationSpeed = fireShotSpeed;
+                Debug.Log($"Soak: fire shot {fireShotPath}");
+                return;
+            }
+            WildfireGrid grid = natural.Wildfire.Grid;
+            if (grid == null || grid.BurningCount < 30 || Camera.main == null) return;
+            foreach (WildfireEvent fire in natural.Wildfire.Fires)
+            {
+                if (fire.IsOver || fire.Tally.burning < 30) continue;
+                fireShots.TryGetValue(fire.Id, out int taken);
+                if (taken >= 3) continue;
+                if (fireShotTimes.TryGetValue(fire.Id, out float last) && simulated - last < 25f) continue;
+                Vector2 sum = Vector2.zero;
+                float weight = 0f, height = 0f;
+                for (int i = 0; i < grid.BurningCount; i++)
+                {
+                    int index = grid.BurningCellAt(i, out Vector2 centre, out float intensity, out FireFuel fuel);
+                    if (grid.FireOf(index) != fire.FireId) continue;
+                    float w = 0.05f + intensity;
+                    sum += centre * w;
+                    height += fuel.height * w;
+                    weight += w;
+                }
+                if (weight <= 0f) continue;
+                Vector2 middle = sum / weight;
+                Vector3 target = new Vector3(middle.x, height / weight + 6f, middle.y);
+                Vector2 wind = natural.Conditions.windDirection;
+                fireCamera = new GameObject("Soak Fire Camera");
+                Camera camera = fireCamera.AddComponent<Camera>();
+                camera.CopyFrom(Camera.main);
+                camera.enabled = false;
+                camera.farClipPlane = Mathf.Max(camera.farClipPlane, 3000f);
+                fireCamera.transform.position = target - new Vector3(wind.x, 0f, wind.y) * 150f + Vector3.up * 55f;
+                fireCamera.transform.LookAt(target);
+                WildfireVisuals.ViewerOverride = camera;
+                fireShotAt = EditorApplication.timeSinceStartup + 10.0;
+                fireShotSpeed = manager.simulationSpeed;
+                manager.simulationSpeed = 1f;
+                fireShotPath = Path.Combine(SessionState.GetString(Key + "Output", "."),
+                                            $"fire-{fire.Id}-{taken + 1}-{{light}}-t{simulated + 10f:0}.png");
+                fireShots[fire.Id] = taken + 1;
+                fireShotTimes[fire.Id] = simulated;
+                return;
+            }
+        }
+
+        // Item 79 tuning: what lightning would find within 500 m of the animals, from 300 random points.
+        static void ProbeFuel(NaturalEventDirector natural, SeekFood[] animals)
+        {
+            AnimalTerrainWorld world = AnimalTerrainWorld.Active;
+            if (world == null || animals.Length == 0) return;
+            var tree = new List<float>(); var grass = new List<float>(); var moisture = new List<float>();
+            var wet = new List<float>(); var load = new List<float>(); var fuelMoisture = new List<float>();
+            var flammability = new List<float>();
+            int land = 0, sampled = 0, flammable = 0;
+            WildfireRules rules = natural.wildfire.rules;
+            float dryness = natural.Conditions.dryness;
+            for (int i = 0; i < 300; i++)
+            {
+                Vector3 around = animals[UnityEngine.Random.Range(0, animals.Length)].transform.position;
+                Vector2 offset = UnityEngine.Random.insideUnitCircle * 500f;
+                Vector2 at = new Vector2(around.x + offset.x, around.z + offset.y);
+                if (!world.TryGetSample(at, out EnvironmentSample sample) || !sample.isValid) continue;
+                sampled++;
+                if (!sample.isLand || sample.isWater) continue;
+                land++;
+                if (!natural.Wildfire.Landscape.TrySampleFuel(at, dryness, out FireFuel fuel)) continue;
+                tree.Add(sample.treeCover); grass.Add(sample.grassBiomass); moisture.Add(sample.moisture);
+                wet.Add(Mathf.Max(sample.riverStrength, sample.lakeStrength, sample.isShore ? 0.6f : 0f));
+                load.Add(fuel.load); fuelMoisture.Add(fuel.moisture);
+                float f = rules.Flammability(fuel);
+                flammability.Add(f);
+                if (f >= natural.wildfire.minimumStrikeFlammability) flammable++;
+            }
+            string Q(List<float> v)
+            {
+                if (v.Count == 0) return "-";
+                v.Sort();
+                return $"{v[v.Count / 10]:0.00}/{v[v.Count / 2]:0.00}/{v[v.Count * 9 / 10]:0.00}";
+            }
+            Debug.Log($"Soak: fuel probe at dryness {dryness:0.00}: {sampled} sampled, {land} on land, {flammable} flammable; " +
+                      $"10th/50th/90th percentiles: tree cover {Q(tree)}, grass {Q(grass)}, moisture {Q(moisture)}, " +
+                      $"wetness {Q(wet)}, fuel load {Q(load)}, fuel moisture {Q(fuelMoisture)}, flammability {Q(flammability)}");
+        }
 
         static void RequestMap(string kind)
         {

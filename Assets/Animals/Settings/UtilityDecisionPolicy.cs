@@ -22,6 +22,18 @@ namespace Boreal.Animals
                  "thirsty (SeekFood.RestUrgency). A partner or rich food close by can still wake it.")]
         [Min(0f)] public float restValue = 0.5f;
 
+        [Header("Wildfire")]
+        [Tooltip("What getting away from a wildfire is worth at full danger, as a fraction of maximum energy, weighed " +
+                 "against food, water and mates (item 79).")]
+        [Min(0f)] public float fireEscapeValue = 2f;
+        [Tooltip("Fire danger (0-1) at which an animal drops everything, predators included, and runs from the fire.")]
+        [Range(0f, 1f)] public float firePanicDanger = 0.45f;
+        [Tooltip("Metres from a fire's nearest burning block within which it is a danger; nearer is worse.")]
+        [Min(1f)] public float fireDangerDistance = 120f;
+        [Tooltip("How far an animal downwind of a fire turns across the wind as it runs: the fire runs with the " +
+                 "wind, so the way out is to the side.")]
+        [Range(0f, 2f)] public float crosswindEscape = 0.6f;
+
         [Header("Threat Response")]
         [FormerlySerializedAs("fleeAfterBeingAttacked")]
         public bool enableFightOrFlight = true;
@@ -62,6 +74,14 @@ namespace Boreal.Animals
 
         public override AnimalDecision Decide(SeekFood self, AnimalPerception perception)
         {
+            // A close fire comes before everything, predators included (item 79).
+            float fireDanger = FireDanger(self, perception);
+            if (fireDanger > 0f && fireDanger >= firePanicDanger)
+            {
+                ResetThreatDebug();
+                return FleeFire(perception);
+            }
+
             if (enableFightOrFlight && perception.HasThreats)
             {
                 return DecideThreatResponse(self, perception);
@@ -110,10 +130,73 @@ namespace Boreal.Animals
             float huntUtility = ScoreHunt(self, perception.nearestPrey, perception.nearestPreyDistance);
             if (huntUtility > bestUtility)
             {
+                bestUtility = huntUtility;
                 bestDecision = new AnimalDecision(AgentIntent.HuntPrey, preyTarget: perception.nearestPrey);
             }
 
+            // A fire further off is weighed against everything else: worth more the nearer it is.
+            float fireUtility = fireDanger > 0f ? fireEscapeValue * self.maxEnergy * fireDanger : float.NegativeInfinity;
+            if (fireUtility > bestUtility)
+            {
+                bestDecision = FleeFire(perception);
+            }
+
             return bestDecision;
+        }
+
+        // 0 to 1: nearer fires are worse, and worse still downwind of them, where the fire is heading; heat and smoke
+        // the animal already feels add to it. An animal in water is safe from all but the worst of it.
+        public float FireDanger(SeekFood self, AnimalPerception perception)
+        {
+            if (!perception.fireSensed && perception.fireHeat <= 0f) return 0f;
+            float danger = 0f;
+            if (perception.fireSensed)
+            {
+                danger = Mathf.Clamp01(1f - perception.fireDistance / Mathf.Max(1f, fireDangerDistance));
+                NaturalEventDirector director = NaturalEventDirector.Active;
+                if (director != null && danger > 0f)
+                {
+                    NaturalConditions conditions = director.Conditions;
+                    Vector3 wind = new Vector3(conditions.windDirection.x, 0f, conditions.windDirection.y);
+                    float downwind = Mathf.Clamp01(Vector3.Dot(wind, perception.fireAway));
+                    danger *= 1f + 0.5f * downwind * Mathf.Clamp01(conditions.windSpeed / 6f);
+                }
+            }
+            danger = Mathf.Max(danger, 1.5f * perception.fireHeat) + 0.3f * perception.smoke;
+            if (self.IsInWater) danger *= 0.3f;
+            return Mathf.Clamp01(danger);
+        }
+
+        // Away from the fires, turning across the wind when downwind of them. With nothing to go by (in the middle of
+        // the fire), upwind, onto ground it has already burned.
+        AnimalDecision FleeFire(AnimalPerception perception)
+        {
+            Vector3 away = perception.fireAway;
+            away.y = 0f;
+            NaturalEventDirector director = NaturalEventDirector.Active;
+            Vector3 wind = Vector3.zero;
+            if (director != null)
+            {
+                Vector2 flat = director.Conditions.windDirection;
+                wind = new Vector3(flat.x, 0f, flat.y);
+            }
+            if (away.sqrMagnitude < 0.01f)
+            {
+                away = wind.sqrMagnitude > 0.01f ? -wind : Vector3.zero;
+            }
+            else if (wind.sqrMagnitude > 0.01f)
+            {
+                away.Normalize();
+                float downwind = Vector3.Dot(away, wind);
+                if (downwind > 0f)
+                {
+                    Vector3 across = new Vector3(-wind.z, 0f, wind.x);
+                    if (Vector3.Dot(across, away) < 0f) across = -across;
+                    away += across * (crosswindEscape * downwind);
+                }
+            }
+            if (away.sqrMagnitude > 0.0001f) away.Normalize();
+            return new AnimalDecision(AgentIntent.Flee, fleeDirection: away, fromFire: true);
         }
 
         AnimalDecision DecideThreatResponse(SeekFood self, AnimalPerception perception)

@@ -302,6 +302,8 @@ namespace Boreal.Animals
             text.Append($"<b>Simulated time</b> {FormatDuration(simulatedSeconds)}{DescribeSeason()}\n");
             string day = DayClock.Describe();
             if (day.Length > 0) text.Append(day.TrimStart()).Append('\n');
+            string fire = DescribeWildfires(manager);
+            if (fire.Length > 0) text.Append(fire).Append('\n');
 
             bool seaCeiling = manager.seaPopulationCeiling > 0;
             string ceiling = manager.populationCeiling <= 0 ? ""
@@ -451,6 +453,20 @@ namespace Boreal.Animals
         }
 
         // The time of year and what it does compared with the terrain's base climate.
+        // Fire danger, the wind and any wildfires burning, with the animals fires have killed (items 78 and 79).
+        static string DescribeWildfires(SpeciesManager manager)
+        {
+            NaturalEventDirector director = NaturalEventDirector.Active;
+            if (director == null || director.Wildfire == null) return "";
+            int killed = 0;
+            foreach (SpeciesTelemetryRecord record in manager.Telemetry.Values) killed += record.fireDeaths;
+            WildfireKind fires = director.Wildfire;
+            string colour = fires.BurningFires > 0 ? "#ff9a50" : "#d8c890";
+            string burned = fires.BurnedHectares > 0f ? $", {fires.BurnedHectares:0.0} ha burned in this world" : "";
+            string deaths = killed > 0 ? $", {killed} animal{(killed == 1 ? "" : "s")} killed by fire" : "";
+            return $"<b>Wildfire</b> <color={colour}>{GodTools.DescribeFireWeather(director)}</color>{burned}{deaths}";
+        }
+
         static string DescribeSeason()
         {
             SeasonClock clock = SeasonClock.Active;

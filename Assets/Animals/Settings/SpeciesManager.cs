@@ -17,7 +17,9 @@ namespace Boreal.Animals
         // Bit a venomous animal.
         Venom,
         // Ran out of water (item 27).
-        Thirst
+        Thirst,
+        // Burned or overcome by heat in a wildfire (item 79).
+        Fire
     }
 
     // Animals kept as numbers away from the camera (see OffscreenPopulationBridge). They keep their species
@@ -83,6 +85,8 @@ namespace Boreal.Animals
         public int heatExposureDeaths;
         public int venomDeaths;
         public int thirstDeaths;
+        [Tooltip("Deaths in wildfires (item 79).")]
+        public int fireDeaths;
         public int fightResponses;
         public int fleeResponses;
         public int reproductionEvents;
@@ -679,6 +683,7 @@ namespace Boreal.Animals
                 if (deathCause == AgentDeathCause.HeatExposure) record.heatExposureDeaths++;
                 if (deathCause == AgentDeathCause.Venom) record.venomDeaths++;
                 if (deathCause == AgentDeathCause.Thirst) record.thirstDeaths++;
+                if (deathCause == AgentDeathCause.Fire) record.fireDeaths++;
 
                 if (speciesPopulation[speciesName] <= 0)
                 {
@@ -1025,7 +1030,7 @@ namespace Boreal.Animals
                 builder.Append($"living={living}, births={record.births}, deaths={record.deaths}, ");
                 builder.Append($"oldAge={record.oldAgeDeaths}, ");
                 builder.Append($"coldExposure={record.coldExposureDeaths}, heatExposure={record.heatExposureDeaths}, ");
-                builder.Append($"venom={record.venomDeaths}, thirst={record.thirstDeaths}, ");
+                builder.Append($"venom={record.venomDeaths}, thirst={record.thirstDeaths}, fire={record.fireDeaths}, ");
                 builder.Append($"fight={record.fightResponses}, flee={record.fleeResponses}, ");
                 builder.Append($"offspring={record.reproductionEvents} ({record.sexualOffspring} with two parents), ");
                 builder.Append($"plants={record.plantMeals} ");

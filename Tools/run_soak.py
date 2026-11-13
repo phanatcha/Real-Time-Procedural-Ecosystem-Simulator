@@ -33,6 +33,12 @@ parser.add_argument('--ageing', default='1', help='0 switches ageing off on ever
 parser.add_argument('--thirst', default='1', help='0 switches thirst off on every animal')
 parser.add_argument('--own-kind', default='1', help='0 stops animals hunting their own species (item 66), for control runs')
 parser.add_argument('--daynight', default='1', help='0 switches day and night off (always midday), for control runs')
+parser.add_argument('--natural-events', default='1',
+                    help='0 stops natural events (wildfires, item 78) starting by themselves; god tools can still start them')
+parser.add_argument('--fires', default='1', help='0 switches wildfires off altogether (item 79), for control runs')
+parser.add_argument('--fire-strikes', help='Lightning strikes on fuel per simulated year at full fire danger (item 79; default 45)')
+parser.add_argument('--fire-spread', help='Wildfire spread strength (item 79): how readily fire passes to the next cell')
+parser.add_argument('--fuel-probe', default='0', help='1 logs what fuel lightning would find around the animals, for tuning item 79')
 parser.add_argument('--start-search', help='Founder start search radius in metres; 0 starts at the simulation focus as before item 9')
 parser.add_argument('--events', help='God tools to schedule, e.g. "drought@800:200x0.2,extinction@1200x0.5" (see GodTools.TryParse)')
 parser.add_argument('--output', type=Path, help='Defaults to Logs/SoakRuns/<seed>-<UTC timestamp>')
@@ -92,6 +98,11 @@ if args.perk_gain is not None:
 if args.perk_loss is not None:
     command += ['-soakPerkLoss', args.perk_loss]
 command += ['-soakThirst', args.thirst, '-soakDayNight', args.daynight, '-soakOwnKind', args.own_kind]
+command += ['-soakNaturalEvents', args.natural_events, '-soakFires', args.fires, '-soakFuelProbe', args.fuel_probe]
+if args.fire_strikes is not None:
+    command += ['-soakFireStrikes', args.fire_strikes]
+if args.fire_spread is not None:
+    command += ['-soakFireSpread', args.fire_spread]
 if args.start_search is not None:
     command += ['-soakStartSearch', args.start_search]
 if channel:

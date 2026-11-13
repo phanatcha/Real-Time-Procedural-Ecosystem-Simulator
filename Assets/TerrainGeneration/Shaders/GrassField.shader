@@ -80,6 +80,13 @@ Shader "Custom/Grass Field"
             // Set globally by SeasonalLook: x snow on the ground, y grass dried to straw, z share of flowers finished.
             float4 _SeasonGround;
 
+            // Set globally by WildfireVisuals (Assets/Animals, item 79): flames now in r and charred ground in g, one
+            // texel per 8 m fire cell, laid out like the survivability heatmap. Strength 0 without a fire.
+            TEXTURE2D(_BorealFireMap);
+            SAMPLER(sampler_BorealFireMap);
+            float4 _BorealFireMapRect;
+            float _BorealFireStrength;
+
             float Hash21(float2 p)
             {
                 p = frac(p * float2(123.34, 456.21));
@@ -132,6 +139,19 @@ Shader "Custom/Grass Field"
                 {
                     stretch.y *= lerp(1.0, 0.75, _SeasonGround.y) * lerp(1.0, 0.25, snow);
                 }
+                // A wildfire burns grass and flowers down to black stubble, and nothing stands in the flames.
+                float burnt = 0.0;
+                if (_BorealFireStrength > 0.0)
+                {
+                    float2 fireUV = (plant.position.xz - _BorealFireMapRect.xy) * _BorealFireMapRect.zw;
+                    if (all(fireUV >= 0.0) && all(fireUV <= 1.0))
+                    {
+                        float4 fire = SAMPLE_TEXTURE2D_LOD(_BorealFireMap, sampler_BorealFireMap, fireUV, 0);
+                        burnt = saturate(max(fire.g, fire.r * 2.0) * 1.3 - Hash21(plant.position.xz + 3.0) * 0.3);
+                    }
+                }
+                if (_IsFlower > 0.5) stretch *= 1.0 - burnt;
+                else stretch.y *= lerp(1.0, 0.12, burnt);
                 float s = sin(plant.yaw);
                 float c = cos(plant.yaw);
                 float3 local = IN.positionOS * plant.scale * stretch;
@@ -154,6 +174,7 @@ Shader "Custom/Grass Field"
                     colour = lerp(colour, float3(0.9, 0.93, 0.97), snow * 0.6 * IN.color.r);
                 }
 
+                colour = lerp(colour, float3(0.035, 0.03, 0.026), burnt);
                 OUT.color = float4(colour, IN.color.a);
                 return OUT;
             }

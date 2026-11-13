@@ -58,6 +58,17 @@ namespace Boreal.Animals
         [Tooltip("Current hydration. Negative means full when the animal starts.")]
         public float currentHydration = -1f;
 
+        [Header("Wildfire")]
+        [Tooltip("Health lost per simulated second at full radiant heat, standing in the flames (item 79). Heat falls " +
+                 "off over about a cell and a half (12 m) from burning ground; in water the animal takes a tenth of it.")]
+        [Min(0f)] public float fireDamagePerSecond = 30f;
+        [Tooltip("Stamina lost per simulated second in thick smoke, which also stops stamina recovering.")]
+        [Min(0f)] public float smokeStaminaDrainPerSecond = 6f;
+        [Tooltip("Extra upkeep in thick smoke, as a share of the animal's upkeep: breathing hard through it.")]
+        [Min(0f)] public float smokeUpkeepCost = 0.5f;
+        [Tooltip("Metres within which the animal notices a fire, by its smoke and glow, whatever its sight.")]
+        [Min(0f)] public float fireSenseRadius = 150f;
+
         [Header("Metabolic Trait Tradeoffs")]
         [Min(0f)] public float speedMetabolicWeight = 0.4f;
         [Min(0f)] public float strengthMetabolicWeight = 0.2f;
@@ -339,7 +350,12 @@ namespace Boreal.Animals
         public float CurrentEnergyDrainPerSecond => currentEnergyDrainPerSecond * RestEnergyMultiplier *
             (thermalResponse != null ? thermalResponse.EnergyDrainMultiplier : 1f) *
             (inWater ? waterMovement.EnergyMultiplier(bodyEffects.swimmingAbility) : 1f) *
-            (inDeadZone ? SeaBiomeMap.CurrentRules.deadZoneEnergyCost : 1f);
+            (inDeadZone ? SeaBiomeMap.CurrentRules.deadZoneEnergyCost : 1f) *
+            (1f + Mathf.Max(0f, smokeUpkeepCost) * smokeFelt);
+        // Radiant heat from a wildfire the animal feels now (0 to about 1.5), and smoke (0 to 1), item 79.
+        public float FireHeat => fireHeat;
+        public float SmokeFelt => smokeFelt;
+        public bool IsFleeingFire => fleeingFire && currentState == State.Fleeing;
         public float SwimmingAbility => bodyEffects.swimmingAbility;
         public bool CanSwimDeepWater => waterMovement.CanSwimDeepWater(bodyEffects.swimmingAbility);
         public bool IsInWater => inWater;
@@ -660,6 +676,11 @@ namespace Boreal.Animals
 
         private enum State { Idling, Wandering, Chasing, Hunting, Fighting, Fleeing, Escaping, SeekingMate, Courting, SeekingWater, Drinking, Resting }
 
+        // Wildfire (item 79): what the animal feels now, and whether its flight is from a fire.
+        private float fireHeat;
+        private float smokeFelt;
+        private bool fleeingFire;
+
         // Resting (item 74): false while still walking to shelter, true once settled.
         private bool restSettled;
         private float restWalkTimer;
@@ -843,6 +864,10 @@ namespace Boreal.Animals
                         ? AgentDeathCause.ColdExposure : AgentDeathCause.HeatExposure, null);
                     return;
                 }
+            }
+            if (UpdateFireExposure(deltaTime))
+            {
+                return;
             }
             UpdateStamina(deltaTime);
             UpdateWater(deltaTime);
@@ -1054,6 +1079,23 @@ namespace Boreal.Animals
 
             float perceptionRadius = PerceptionRadius;
             float visionRadiusSquared = perceptionRadius * perceptionRadius;
+
+            // A wildfire is noticed by its smoke and glow from further than the animal can see (item 79), and food
+            // in burning cells is left alone.
+            WildfireKind fires = Wildfires.Current;
+            bool fireNearby = false;
+            perception.fireDistance = Mathf.Infinity;
+            if (fires != null && fires.Sense(transform.position, Mathf.Max(perceptionRadius, fireSenseRadius),
+                                             out float fireDistance, out Vector3 fireAway, out _))
+            {
+                fireNearby = true;
+                perception.fireSensed = true;
+                perception.fireDistance = fireDistance;
+                perception.fireAway = fireAway;
+            }
+            perception.fireHeat = fireHeat;
+            perception.smoke = smokeFelt;
+
             FoodItem.FindNearby(transform.position, perceptionRadius, nearbyFood);
             foreach (FoodItem food in nearbyFood)
             {
@@ -1063,6 +1105,11 @@ namespace Boreal.Animals
                 }
 
                 if (!CanEat(food) || IsRememberedAsUnreachable(food))
+                {
+                    continue;
+                }
+
+                if (fireNearby && fires.IsBurningAt(food.transform.position))
                 {
                     continue;
                 }
@@ -1138,6 +1185,39 @@ namespace Boreal.Animals
             }
 
             return perception;
+        }
+
+        // Near a wildfire (item 79) radiant heat hurts, a tenth as much in water, and smoke costs stamina (and upkeep,
+        // through CurrentEnergyDrainPerSecond). Flames close by break off a courtship and make the animal decide again
+        // at once. Returns true when the fire killed it.
+        bool UpdateFireExposure(float deltaTime)
+        {
+            WildfireKind fires = Wildfires.Current;
+            if (fires == null || !fires.IsActive)
+            {
+                fireHeat = smokeFelt = 0f;
+                return false;
+            }
+
+            fires.Exposure(transform.position, out float heat, out float smoke);
+            fireHeat = inWater ? heat * 0.1f : heat;
+            smokeFelt = smoke;
+            if (fireHeat > 0f)
+            {
+                currentHealth -= fireDamagePerSecond * fireHeat * deltaTime;
+                if (currentHealth <= 0f)
+                {
+                    Die(AgentDeathCause.Fire, null);
+                    return true;
+                }
+                if (currentState == State.Courting) EndCourtship();
+                else if (currentState != State.Fleeing) decisionTimer = 0f;
+            }
+            if (smokeFelt > 0f)
+            {
+                currentStamina = Mathf.Max(0f, currentStamina - smokeStaminaDrainPerSecond * smokeFelt * deltaTime);
+            }
+            return false;
         }
 
         // Hydration falls with time, faster in the heat, and refills while the animal drinks or stands in fresh water.
@@ -1376,6 +1456,8 @@ namespace Boreal.Animals
             FoodItem previousFoodTarget = currentFoodTarget;
             SeekFood previousPreyTarget = currentPreyTarget;
             SeekFood previousMate = currentMate;
+            bool wasFleeingFire = fleeingFire && previousState == State.Fleeing;
+            fleeingFire = false;
             ClearTargets();
 
             switch (decision.intent)
@@ -1430,7 +1512,19 @@ namespace Boreal.Animals
                     break;
 
                 case AgentIntent.Flee:
-                    if (IsOtherLivingAnimal(decision.preyTarget))
+                    if (decision.fromFire)
+                    {
+                        // Away from a wildfire (item 79): no animal to watch, only a direction, chosen again at every
+                        // decision while the danger lasts.
+                        currentFleeThreat = null;
+                        currentFleeDirection = decision.fleeDirection;
+                        currentState = State.Fleeing;
+                        fleeingFire = true;
+                        timer = 0f;
+                        SetFleeDestination(currentFleeDirection, null);
+                        if (!wasFleeingFire) Wildfires.Current?.NoteFlight(this);
+                    }
+                    else if (IsOtherLivingAnimal(decision.preyTarget))
                     {
                         currentFleeThreat = decision.preyTarget;
                         currentFleeDirection = decision.fleeDirection;
@@ -1963,7 +2057,8 @@ namespace Boreal.Animals
             {
                 currentStamina = Mathf.Min(maxStamina,
                                            currentStamina + staminaRecoveryPerSecond * deltaTime *
-                                           (thermalResponse != null ? thermalResponse.StaminaRecoveryMultiplier : 1f));
+                                           (thermalResponse != null ? thermalResponse.StaminaRecoveryMultiplier : 1f) *
+                                           (1f - Mathf.Clamp01(smokeFelt)));
             }
         }
 
@@ -2097,6 +2192,7 @@ namespace Boreal.Animals
             if (timer >= fleeDuration)
             {
                 currentFleeThreat = null;
+                fleeingFire = false;
                 currentFleeDirection = Vector3.zero;
                 currentState = State.Idling;
                 timer = actionTimer;

@@ -4,7 +4,8 @@
     "references": [
         "Boreal.Animals",
         "Boreal.Core",
-        "Boreal.TerrainGeneration"
+        "Boreal.TerrainGeneration",
+        "Boreal.World"
     ],
     "includePlatforms": [
         "Editor"

@@ -22,13 +22,14 @@ namespace Boreal.Animals
         public int heatDeaths;
         public int venomDeaths;
         public int thirstDeaths;
+        public int fireDeaths;
         public int plantMeals;
         public int meatMeals;
         public int speciesEver;
 
         // Deaths from causes without their own count, such as drowning out of bounds.
         public int OtherDeaths => deaths - starvationDeaths - predationDeaths - oldAgeDeaths - coldDeaths - heatDeaths -
-                                  venomDeaths - thirstDeaths;
+                                  venomDeaths - thirstDeaths - fireDeaths;
 
         public static EcosystemTally Of(IEnumerable<SpeciesTelemetryRecord> records)
         {
@@ -45,6 +46,7 @@ namespace Boreal.Animals
                 tally.heatDeaths += record.heatExposureDeaths;
                 tally.venomDeaths += record.venomDeaths;
                 tally.thirstDeaths += record.thirstDeaths;
+                tally.fireDeaths += record.fireDeaths;
                 tally.plantMeals += record.plantMeals;
                 tally.meatMeals += record.meatMeals;
                 tally.speciesEver++;
@@ -67,6 +69,7 @@ namespace Boreal.Animals
                 heatDeaths = later.heatDeaths - earlier.heatDeaths,
                 venomDeaths = later.venomDeaths - earlier.venomDeaths,
                 thirstDeaths = later.thirstDeaths - earlier.thirstDeaths,
+                fireDeaths = later.fireDeaths - earlier.fireDeaths,
                 plantMeals = later.plantMeals - earlier.plantMeals,
                 meatMeals = later.meatMeals - earlier.meatMeals,
                 speciesEver = later.speciesEver - earlier.speciesEver
@@ -101,6 +104,9 @@ namespace Boreal.Animals
         public readonly float startTime;
         readonly int startAnimals;
         readonly EcosystemTally startTally;
+        // Hectares burned in this world when the season began, and the most alight at once during it (item 79).
+        readonly float startBurnedHectares;
+        float peakBurningHectares;
 
         int lowestAnimals;
         int highestAnimals;
@@ -123,6 +129,8 @@ namespace Boreal.Animals
             this.startTime = startTime;
             startAnimals = animals;
             startTally = tally;
+            WildfireKind fires = Wildfires.Current;
+            startBurnedHectares = fires != null ? fires.BurnedHectares : 0f;
             lowestAnimals = animals;
             highestAnimals = animals;
         }
@@ -135,6 +143,8 @@ namespace Boreal.Animals
         {
             if (animals < lowestAnimals) lowestAnimals = animals;
             if (animals > highestAnimals) highestAnimals = animals;
+            WildfireKind fires = Wildfires.Current;
+            if (fires != null) peakBurningHectares = Mathf.Max(peakBurningHectares, fires.BurningHectares);
             if (!(seconds > 0f)) return;
 
             sampledSeconds += seconds;
@@ -172,7 +182,14 @@ namespace Boreal.Animals
                         $"{change.sexualBirths} from two parents)");
             line.Append($" | deaths {change.deaths}: starvation {change.starvationDeaths}, thirst {change.thirstDeaths}, " +
                         $"predation {change.predationDeaths}, old age {change.oldAgeDeaths}, cold {change.coldDeaths}, " +
-                        $"heat {change.heatDeaths}, venom {change.venomDeaths}, other {change.OtherDeaths}");
+                        $"heat {change.heatDeaths}, venom {change.venomDeaths}, fire {change.fireDeaths}, " +
+                        $"other {change.OtherDeaths}");
+            WildfireKind wildfires = Wildfires.Current;
+            if (wildfires != null)
+            {
+                line.Append($" | wildfires: {wildfires.BurnedHectares - startBurnedHectares:0.0} ha burned, " +
+                            $"up to {peakBurningHectares:0.0} ha alight at once");
+            }
             line.Append($" | meals: {change.plantMeals} plant, {change.meatMeals} meat");
             line.Append(float.IsNaN(averageEnergy)
                 ? " | energy at end: no live animals"

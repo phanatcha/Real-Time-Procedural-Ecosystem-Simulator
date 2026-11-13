@@ -63,6 +63,52 @@ Shader "Custom/Vegetation"
         return 0.0;
     }
 
+    // Set globally by WildfireVisuals (Assets/Animals, item 79): one texel per 8 m fire cell, laid out like the
+    // survivability heatmap: flames now in r, charred ground in g, embers in b, the canopy a fire has taken in a. Its
+    // mipmaps blur the flames into the light they cast. Strength 0 without a fire.
+    TEXTURE2D(_BorealFireMap);
+    SAMPLER(sampler_BorealFireMap);
+    float4 _BorealFireMapRect;
+    float _BorealFireStrength;
+
+    float4 FireAt(float3 positionWS, float level)
+    {
+        if (_BorealFireStrength <= 0.0) return 0.0;
+        float2 uv = (positionWS.xz - _BorealFireMapRect.xy) * _BorealFireMapRect.zw;
+        if (any(uv < 0.0) || any(uv > 1.0)) return 0.0;
+        return SAMPLE_TEXTURE2D_LOD(_BorealFireMap, sampler_BorealFireMap, uv, level);
+    }
+
+    // 1 where a wildfire has burned a part away: needles and leaves go clump by clump as the canopy burns (spruces keep
+    // a few charred stubs), berries with them, and grass and flexible stems once the ground is charred. Bark and rock
+    // stay. Every pass clips on it, as on SeasonHidden.
+    float FireHidden(float3 season, float3 positionWS, float flexibility)
+    {
+        if (_BorealFireStrength <= 0.0) return 0.0;
+        float4 fire = FireAt(positionWS, 0.0);
+        int part = (int)round(season.x);
+        float moment = 0.05 + 0.9 * (season.y * 0.6 + SeasonNoise(positionWS.xz / 3.0 + positionWS.y * 0.3) * 0.4);
+        if (part == 1 || part == 3 || part == 4) return step(moment, fire.a);
+        if (part == 2) return step(moment, fire.a * 0.9);
+        if (part == 0 && flexibility > 0.4) return step(moment, fire.g);
+        return 0.0;
+    }
+
+    // What a wildfire leaves of a part's colour: bark and what is left of the crowns turn to charcoal, rock is
+    // sooted. glow is how fiercely it burns now, light the fire's light reaching it from nearby flames.
+    float3 FireColour(float3 albedo, float3 season, float3 positionWS, out float2 glowAndLight)
+    {
+        glowAndLight = 0.0;
+        if (_BorealFireStrength <= 0.0) return albedo;
+        float4 fire = FireAt(positionWS, 0.0);
+        glowAndLight = float2(fire.r, FireAt(positionWS, 3.5).r);
+        int part = (int)round(season.x);
+        if (part == 5) return albedo * (1.0 - 0.45 * fire.g);
+        float charred = smoothstep(0.1, 0.7, max(fire.a, fire.g * 0.8));
+        float3 charcoal = float3(0.04, 0.035, 0.03) * (0.8 + 0.4 * SeasonNoise(positionWS.xz * 1.7 + positionWS.y));
+        return lerp(albedo, charcoal, charred);
+    }
+
     // A part's colour in this season: leaves fresh in spring and gold, orange or red in fall (leaves of food plants
     // stay coloured through winter), and snow on faces turned to the sky. Brightness is kept, so the leaves' shading
     // from dark insides to bright tips survives the change of colour.
@@ -147,6 +193,8 @@ Shader "Custom/Vegetation"
                 float fogFactor : TEXCOORD3;
                 float4 color : TEXCOORD4;
                 float hidden : TEXCOORD5;
+                // Wildfire: how fiercely it burns now, and the light of nearby flames.
+                float2 fire : TEXCOORD6;
             };
 
             Varyings vert(Attributes IN)
@@ -157,8 +205,9 @@ Shader "Custom/Vegetation"
                 OUT.normalWS = normalize(TransformObjectToWorldNormal(IN.normalOS));
                 OUT.positionHCS = TransformWorldToHClip(OUT.positionWS);
                 OUT.fogFactor = ComputeFogFactor(OUT.positionHCS.z);
-                OUT.color = float4(SeasonColour(IN.color.rgb, IN.season, OUT.normalWS, restWS), IN.color.a);
-                OUT.hidden = SeasonHidden(IN.season, restWS);
+                float3 seasonal = SeasonColour(IN.color.rgb, IN.season, OUT.normalWS, restWS);
+                OUT.color = float4(FireColour(seasonal, IN.season, restWS, OUT.fire), IN.color.a);
+                OUT.hidden = max(SeasonHidden(IN.season, restWS), FireHidden(IN.season, restWS, IN.color.a));
                 return OUT;
             }
 
@@ -200,6 +249,14 @@ Shader "Custom/Vegetation"
                 // A soft rim along silhouettes, lifting them off the background.
                 float rim = pow(1.0 - saturate(dot(normalWS, viewDirection)), 3.0) * _Rim;
                 colour += albedo * rim * (ambient + mainLight.color * shadow * 0.5);
+
+                // Wildfire: crowns in the flames glow, and nearby flames light the trees from below.
+                if (_BorealFireStrength > 0.0)
+                {
+                    float flicker = 0.65 + 0.35 * sin(_Time.y * 9.0 + dot(IN.positionWS, float3(1.3, 2.1, 0.7)));
+                    colour += float3(3.2, 1.1, 0.25) * (IN.fire.x * flicker * (0.4 + 0.6 * flexibility));
+                    colour += albedo * float3(1.1, 0.45, 0.15) * saturate(IN.fire.y * 2.5);
+                }
 
                 colour = MixFog(colour, IN.fogFactor);
                 return float4(colour, 1);
@@ -244,7 +301,7 @@ Shader "Custom/Vegetation"
             {
                 Varyings OUT;
                 float3 restWS = TransformObjectToWorld(IN.positionOS.xyz);
-                OUT.hidden = SeasonHidden(IN.season, restWS);
+                OUT.hidden = max(SeasonHidden(IN.season, restWS), FireHidden(IN.season, restWS, IN.color.a));
                 float3 positionWS = ApplyWind(restWS, IN.color.a);
                 float3 normalWS = TransformObjectToWorldNormal(IN.normalOS);
 
@@ -307,7 +364,7 @@ Shader "Custom/Vegetation"
                 Varyings OUT;
                 float3 restWS = TransformObjectToWorld(IN.positionOS.xyz);
                 OUT.positionCS = TransformWorldToHClip(ApplyWind(restWS, IN.color.a));
-                OUT.hidden = SeasonHidden(IN.season, restWS);
+                OUT.hidden = max(SeasonHidden(IN.season, restWS), FireHidden(IN.season, restWS, IN.color.a));
                 return OUT;
             }
 
@@ -353,7 +410,7 @@ Shader "Custom/Vegetation"
                 float3 restWS = TransformObjectToWorld(IN.positionOS.xyz);
                 OUT.positionCS = TransformWorldToHClip(ApplyWind(restWS, IN.color.a));
                 OUT.normalWS = TransformObjectToWorldNormal(IN.normalOS);
-                OUT.hidden = SeasonHidden(IN.season, restWS);
+                OUT.hidden = max(SeasonHidden(IN.season, restWS), FireHidden(IN.season, restWS, IN.color.a));
                 return OUT;
             }
 

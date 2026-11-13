@@ -51,6 +51,13 @@ namespace Boreal.Animals
         public bool hasDrinkingSpot;
         public Vector3 drinkingSpot;
         public float drinkingSpotDistance;
+        // A wildfire within the animal's fire sense radius (item 79): the distance to the nearest burning block's centre
+        // of heat, a direction away from the fires (unit, flat), and the heat and smoke the animal feels now.
+        public bool fireSensed;
+        public float fireDistance;
+        public Vector3 fireAway;
+        public float fireHeat;
+        public float smoke;
         public List<AnimalThreat> threats;
 
         public bool HasThreats => threats != null && threats.Count > 0;
@@ -64,9 +71,12 @@ namespace Boreal.Animals
         public Vector3 fleeDirection;
         public SeekFood mateTarget;
         public Vector3 drinkingSpot;
+        // A flight from a wildfire, with no animal to run from (item 79).
+        public bool fromFire;
 
         public AnimalDecision(AgentIntent intent, FoodItem foodTarget = null, SeekFood preyTarget = null,
-                              Vector3 fleeDirection = default, SeekFood mateTarget = null, Vector3 drinkingSpot = default)
+                              Vector3 fleeDirection = default, SeekFood mateTarget = null, Vector3 drinkingSpot = default,
+                              bool fromFire = false)
         {
             this.intent = intent;
             this.foodTarget = foodTarget;
@@ -74,6 +84,7 @@ namespace Boreal.Animals
             this.fleeDirection = fleeDirection;
             this.mateTarget = mateTarget;
             this.drinkingSpot = drinkingSpot;
+            this.fromFire = fromFire;
         }
     }
 

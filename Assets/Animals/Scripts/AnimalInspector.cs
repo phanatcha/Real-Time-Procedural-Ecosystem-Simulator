@@ -131,7 +131,11 @@ namespace Boreal.Animals
             string youth = !animal.IsMature ? $"young, {animal.Growth:P0} grown, mature at {animal.maturityTime:0} s"
                 : animal.Vigour < 1f ? $"ageing, vigour {animal.Vigour:P0}"
                 : animal.enableAgeing ? $"adult, ageing from {animal.ageingOnset:0} s" : "adult";
-            text.Append($"{Lower(animal.Activity)}{(animal.IsInWater ? ", in water" : "")}   age {animal.CurrentAge:0} of " +
+            // Wildfire (item 79): running from it, the heat felt and the smoke.
+            string fire = (animal.IsFleeingFire ? ", running from a fire" : "") +
+                          (animal.FireHeat > 0f ? $", fire heat {animal.FireHeat:0.00}" : "") +
+                          (animal.SmokeFelt > 0.01f ? $", in smoke {animal.SmokeFelt:P0}" : "");
+            text.Append($"{Lower(animal.Activity)}{(animal.IsInWater ? ", in water" : "")}{fire}   age {animal.CurrentAge:0} of " +
                         $"{animal.maxLifespan:0} s, {youth}\n");
             text.Append($"energy {animal.currentEnergy:0} of {animal.maxEnergy:0} ({animal.CurrentEnergyDrainPerSecond:0.00}/s)   " +
                         (animal.enableThirst ? $"water {animal.currentHydration:0} of {animal.maxHydration:0}{(animal.IsThirsty ? ", thirsty" : "")}   " : "") +

@@ -132,6 +132,8 @@ namespace Boreal.Animals
             // From the season: regrowth speed relative to the base climate, and whether the plant is buried.
             public float seasonalGrowth = 1f;
             public bool buried;
+            // Simulated Time.time until which the site grows nothing, after a wildfire (item 79); 0 when undisturbed.
+            public float disturbedUntil;
             // The SeasonClock step these were last refreshed for; -1, as without seasons, means unchanged.
             public int seasonStep = -1;
         }
@@ -331,6 +333,8 @@ namespace Boreal.Animals
                     // and hidden tiles let go of their plants themselves, so a plant still held here was eaten.
                     if (site.seaBiome != SeaBiome.None && !ReferenceEquals(site.plant, null)) seaPlantsEaten++;
                     site.plant = null;
+                    // Burned ground grows nothing until it recovers, then starts regrowing from nothing.
+                    if (site.disturbedUntil > Time.time) continue;
                     if (site.regrowProgress < 1f)
                     {
                         site.regrowProgress += deltaTime * site.seasonalGrowth * growthMultiplier / site.regrowSeconds;
@@ -450,6 +454,13 @@ namespace Boreal.Animals
                 };
                 // Set now, so a tile loaded in winter never shows its buried plants for a frame.
                 RefreshSeason(site, season, seasonStep);
+                // Ground that burned while the tile was unloaded is still recovering (item 79).
+                float disturbedUntil = DisturbedUntil != null ? DisturbedUntil(position, isTall) : 0f;
+                if (disturbedUntil > Time.time)
+                {
+                    site.disturbedUntil = disturbedUntil;
+                    site.regrowProgress = 0f;
+                }
                 tile.sites.Add(site);
             }
 
@@ -481,6 +492,46 @@ namespace Boreal.Animals
             loadedTileCount++;
             plantSiteCount += tile.sites.Count;
             tile.shown = Time.unscaledTime - tile.lastNeededTime <= unloadDelay;
+        }
+
+        // For plant sites in tiles loaded after a disturbance such as a wildfire (item 79): the simulated Time.time
+        // until which a site at this ground position grows nothing, given whether it is tall forest food. Unset, nothing
+        // is held back. Wildfires set it while their grid exists.
+        public static System.Func<Vector3, bool, float> DisturbedUntil;
+
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+        static void ResetDisturbance() => DisturbedUntil = null;
+
+        // Burns (or, later, washes away) the land plants in an area of ground (x and z, item 79): their plants go at
+        // once, and nothing grows there again until groundUntil for ground plants and tallUntil for forest food on the
+        // spruces (simulated Time.time), when they start to regrow from nothing. Sea and lake plants are untouched.
+        // Returns how many grown plants were destroyed.
+        public int Disturb(Rect area, float groundUntil, float tallUntil)
+        {
+            int destroyed = 0;
+            int minimumX = Mathf.FloorToInt(area.xMin / tileSize), maximumX = Mathf.FloorToInt(area.xMax / tileSize);
+            int minimumZ = Mathf.FloorToInt(area.yMin / tileSize), maximumZ = Mathf.FloorToInt(area.yMax / tileSize);
+            for (int tileZ = minimumZ; tileZ <= maximumZ; tileZ++)
+            {
+                for (int tileX = minimumX; tileX <= maximumX; tileX++)
+                {
+                    if (!tiles.TryGetValue(new Vector2Int(tileX, tileZ), out FoodTile tile) || tile.sites == null) continue;
+                    foreach (PlantSite site in tile.sites)
+                    {
+                        if (site.seaBiome != SeaBiome.None) continue;
+                        if (!area.Contains(new Vector2(site.position.x, site.position.z))) continue;
+                        if (site.plant != null)
+                        {
+                            if (site.plant.IsAvailable) destroyed++;
+                            Destroy(site.plant.gameObject);
+                        }
+                        site.plant = null;
+                        site.regrowProgress = 0f;
+                        site.disturbedUntil = Mathf.Max(site.disturbedUntil, site.isTall ? tallUntil : groundUntil);
+                    }
+                }
+            }
+            return destroyed;
         }
 
         // Puts plants down on walkable ground within radius of centre, for god tools (item 31). They are eaten like
