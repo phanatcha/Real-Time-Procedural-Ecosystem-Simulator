@@ -1,4 +1,11 @@
-# Latest verification — 13 November 2026
+# Latest verification — 13 November 2026, after the test fixes
+
+**324 passed, 0 failed, 0 skipped** in Unity 6000.4.1f1 ([NUnit XML](Logs/TestResults/20261113T070910670535Z/results.xml)), with two tests that failed now and then made independent of chance. Each then passed eight times in a row on its own. Only test code changed.
+
+- `NewbornsStartSmallAndGrowToFullSizeByMaturity` compares a clone with its parent, but children mutate (5% per gene, up to 10% of the value), so a mutation in vision, body size or a body part sometimes pushed a comparison past its tolerance. The test now turns mutation off for that parent.
+- `NightEyesFindFoodOnAMoonlessNight` left the ordinary-eyed animal free to wander 20 m at a time, so it could walk within its 16.5 m of night sight of a plant 25 m away. It now stays where it is.
+
+# Earlier on 13 November 2026
 
 **322 passed, 2 failed, 0 skipped** of 324 in Unity 6000.4.1f1 with life records (item 57) ([NUnit XML](Logs/TestResults/20261113T064931125928Z/results.xml)). The suite has not been re-run in full since.
 

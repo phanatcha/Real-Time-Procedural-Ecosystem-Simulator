@@ -388,6 +388,12 @@ namespace Boreal.Animals.Tests
             BakeNavMesh(CreateGround(Vector3.zero, 60f));
             StartSimulation();
             SeekFood parent = CreateAnimal(Vector3.zero, Genome(sexualDrive: 0f, maturityTime: 5f), energyFraction: 1f, age: 10f);
+            // The child is compared with its parent, so it must be an exact copy: a mutation in vision, body size or a
+            // body part (about one birth in several) would otherwise fail the comparisons below by chance.
+            parent.mutationChance = 0f;
+            parent.perkFlipChance = 0f;
+            parent.harmfulMutationChance = 0f;
+            parent.bodyPlanMutation = default;
 
             float deadline = Time.time + 20f;
             while (AnimalCount() < 2 && Time.time < deadline) yield return null;
@@ -686,6 +692,9 @@ namespace Boreal.Animals.Tests
                 AnimalGenome ordinaryEyed = Genome();
                 ordinaryEyed[AnimalGene.Nocturnality] = 1f;
                 SeekFood ordinary = CreateAnimal(new Vector3(-35f, 0f, 35f), ordinaryEyed, energyFraction: 0.5f, age: 10f);
+                // It must stay where it is: wandering 20 m at a time, it could walk within its 16.5 m of sight of the
+                // plant 25 m away and eat it, which is not what this test is about.
+                ordinary.wanderRadius = 0f;
                 AnimalGenome nightEyed = Genome();
                 nightEyed[AnimalGene.Nocturnality] = 1f;
                 nightEyed[AnimalGene.NightVision] = 1f;
