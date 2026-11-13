@@ -327,6 +327,10 @@ namespace Boreal.Soak.Editor
                 {
                     Debug.Log(animals.Length == 0 ? "Soak: every animal has died." : "Soak: reached the target years.");
                     if (EnergyLedger.Enabled) Debug.Log("Soak: final " + EnergyLedger.Report(animals));
+                    // Item 65: the in-game Muller plot of the family lines, as the M panel draws it, with its legend.
+                    FamilyLinesView lines = FamilyLinesView.Active;
+                    if (lines != null && lines.SaveChart(Path.Combine(Out, "family-lines.png")))
+                        Debug.Log($"Soak: family lines {lines.Latest.lines.Count}, saved {Path.Combine(Out, "family-lines.png")}");
                     SimulationRunRecorder recorder = Object.FindAnyObjectByType<SimulationRunRecorder>();
                     if (recorder != null)
                     {
