@@ -214,3 +214,28 @@ Built on the 29 October follow-up above, which was still uncommitted.
 - Population and births did not differ between the rules (97 animals on average in both; 2,104 to 2,447 births per run).
 - Tests: `PerksAreGainedAndLostAtTheirOwnChances` (new), and the callers of `CreateChild` updated. Full Unity suite: **329 passed, 0 failed** (`Logs/TestResults/20261113T133026425931Z/results.xml`).
 
+## Backlog item 58, selection on each gene — 13 November 2026
+
+- **The tool:** `Tools/selection_gradients.py <runs or comparison folder>` reads each run's `lives.csv` (item 57) and measures, for every trait (harmful mutations, every perk, every gene, and the total size of each kind of body part), how strongly it predicts the number of young an animal left. Animals born in the simulation that have died are grouped into cohorts by the year and season of their birth; within each cohort fitness is made relative and each trait standardised. It prints the selection differential S (total selection, including what a trait picks up from traits it travels with) and the Lande–Arnold gradient β (direct selection, from a multiple regression on all traits at once), with a 95% range, overall and for each season. Runs with the same experiment label are pooled. Pure Python, no packages; a 25-year, three-run pool takes about 5 s.
+- **Honest ranges:** relatives are alike, so ordinary regression ranges are too narrow. The standard errors are clustered by first parent (brothers and sisters), and the do-nothing marker genes and marker perk set the floor: "clearly selected" lists only traits whose range excludes zero and whose |β| is above every marker's. `--place` holds the birthplace equal (a smooth surface in the birth position within each cohort), because family lines live in different places and a line in a rich patch leaves more young whatever its genes. `--fitness bred` counts only young that went on to breed.
+- **Checked on made-up records with a known answer** (12,000 animals): a gene with direct selection of +0.3 came out at +0.29; a gene that only travelled with it (r = 0.7) had S +0.20 but β −0.01; a gene pushed up in winter and down in summer came out at +0.28 and −0.30 by season; a planted cost of 5% per harmful mutation came out at 5.4%; a perk planted on low-load animals had S +0.02 and β −0.01.
+- **On the recorded runs** (birthplace held equal; pooled over replicates, since single five-year runs gave different "selected" lists each time):
+
+  | Data | Animals | Marker floor | Thick fur (fall, winter) | Scavenger gut | Body height | Neck | Cost of one harmful mutation in young |
+  |---|---:|---:|---|---:|---:|---:|---:|
+  | Item 62, old perk rule, 4 × 10 years | 8,798 | 0.049 | **+0.061** (+0.15, +0.10) | **−0.086** | +0.047 | **+0.060** | 1.5% (−1 to 4) |
+  | Item 62, new perk rule, 4 × 10 years | 8,618 | 0.062 | too rare to measure | −0.048 | +0.030 | +0.026 | 5.2% (3 to 8) |
+  | Item 60, clones, 3 × 25 years | 22,383 | 0.019 | **+0.053** (+0.13, +0.09) | **−0.054** | **+0.047** | **+0.055** | 1.0% (0.1 to 1.9) |
+  | Item 60, mate first, 3 × 25 years | 13,246 | 0.010 | **+0.039** (+0.08, +0.03) | **−0.050** | **+0.026** | +0.006 | 1.9% (1.1 to 2.7) |
+
+  Bold: clearly selected (range excludes zero and |β| above every marker).
+- **What it shows:**
+  1. **Selection is weak.** Almost every |β| is below 0.07, against a typical 0.15 in field studies, and in a pool of four ten-year runs chance alone gives the markers up to 0.05 to 0.07. Single short runs can't tell selection from chance; pools of several runs, or long runs, can.
+  2. **Thick fur is really favoured in the cold.** β is near zero in spring and summer and +0.08 to +0.16 in fall and winter in every large pool, and stronger counted as young that bred (+0.10, fall +0.18). Its share stayed within what chance gives (item 62) because this pressure is too weak to beat drift in ten years, not because there is none. This corrects the item 62 note above, which read thick fur's share alone.
+  3. **The scavenger gut is selected against** in every pool and season (β −0.05 to −0.09), as its 30% plant penalty predicts.
+  4. **Tall bodies are favoured** (body height +0.03 to +0.05, and the neck +0.06 in two pools): reaching the tall forest food (item 8) pays.
+  5. **A harmful mutation costs only 1 to 2% of lifetime young** in the long runs, and about 5% in the new-rule ten-year runs. That is part of the answer to item 61's question: in the clone runs, carrying 18 to 22 of them cost each animal about a fifth of its young compared with an animal carrying none, but the differences between animals alive at the same time were a few mutations, worth a few per cent.
+  6. **The camouflage sweep (item 62) was mostly place.** In that run camouflage's β was +0.12 with the birthplace free and +0.07 (range −0.05 to +0.18, within chance) with it held equal; its line lived about 270 m west of the rest. Most of camouflage's apparent advantage came from where its family line lived.
+- Not read: `SexualDrive` in the item 60 pools (β −0.31 in clones, +0.27 in mate-first) comes from the lock switching animals' behaviour at year 2 (item 60), not from selection on the gene.
+- Limits: the gradient is linear; it can't see selection for a middle value. Body parts are counted by total size of each kind. Animals alive at the end are left out, so the last year or so of each run adds little.
+
