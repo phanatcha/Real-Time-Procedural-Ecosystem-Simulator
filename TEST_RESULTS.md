@@ -1,4 +1,8 @@
-# Latest verification — 13 November 2026, with the energy ledger (item 61)
+# Latest verification — 13 November 2026, with the carcass rules fixed (item 61)
+
+**328 passed, 0 failed, 0 skipped** in Unity 6000.4.1f1 ([NUnit XML](Logs/TestResults/20261113T082017918454Z/results.xml)). New: `ACarcassHoldsNoMoreThanTheBodyCostAndTheStore`. Its first run failed because the dying animal ate its own carcass before it was removed, which the test loop allows and the game loop does not; a dying animal can no longer eat. The hunting and scavenging tests pass with the leaner carcasses.
+
+# 13 November 2026, with the energy ledger (item 61)
 
 **327 passed, 0 failed, 0 skipped** in Unity 6000.4.1f1 ([NUnit XML](Logs/TestResults/20261113T081125841990Z/results.xml)). Two new Play Mode tests: `TheEnergyLedgerBalancesThroughEatingALitterGrowthAndADeath` (also passed three times on its own) and `HarmfulMutationsRaiseUpkeepByTheirFullCost`. `MeatLeaningAnimalsHuntTheirOwnKind`, which failed once in the run before, passed here; it has not been changed.
 

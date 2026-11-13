@@ -534,6 +534,55 @@ namespace Boreal.Animals.Tests
                                (1f - fraction * fraction * fraction);
             Assert.Greater(energyAtBirth - child.currentEnergy, upkeep + 0.5f * growthCost,
                            "Growing up should have cost energy on top of upkeep.");
+            // What it paid to grow is the meat its body is made of (item 61): no more than that goes into its carcass.
+            Assert.That(child.BodyEnergyPaid, Is.EqualTo(growthCost).Within(0.02f * growthCost));
+            Assert.LessOrEqual(child.EstimatedCarcassRawEnergy, child.BodyEnergyPaid + child.currentEnergy);
+        }
+
+        // A carcass never holds more than went into the animal (item 61): the cost of building its body and the store
+        // it died with, less the transfer loss. A big body does not multiply the store.
+        [UnityTest]
+        public IEnumerator ACarcassHoldsNoMoreThanTheBodyCostAndTheStore()
+        {
+            EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
+            yield return new EnterPlayMode(ReloadsDomain);
+
+            BakeNavMesh(CreateGround(Vector3.zero, 60f));
+            StartSimulation();
+            // The largest body the genes allow, with a large store.
+            AnimalGenome giant = Genome(maturityTime: 200f);
+            giant[AnimalGene.BodyBulk] = 1.8f;
+            giant[AnimalGene.BodyHeight] = 2.2f;
+            giant[AnimalGene.MaxEnergy] = 400f;
+            SeekFood animal = CreateAnimal(Vector3.zero, giant, energyFraction: 0.9f, age: 250f);
+            yield return null;
+            yield return null;
+            try
+            {
+                EnergyLedger.Begin(Object.FindObjectsByType<SeekFood>(FindObjectsSortMode.None));
+                float store = animal.currentEnergy, body = animal.BodyEnergyPaid;
+                Assert.Greater(animal.AdultBodyMassFactor, 4f, "The test animal should be far heavier than a founder.");
+                Assert.Greater(store, 300f);
+                Assert.That(body, Is.EqualTo(animal.growthEnergyCost * animal.carcassBodyEnergy * animal.AdultBodyMassFactor).Within(0.01f),
+                            "A placed animal's body is worth what a body its size costs to grow.");
+                float expected = (body + store) * animal.carcassEnergyTransferEfficiency;
+                Assert.That(animal.EstimatedCarcassRawEnergy, Is.EqualTo(expected).Within(0.01f));
+
+                animal.Kill(AgentDeathCause.Other);
+                yield return null;
+                yield return null;
+                FoodItem carcass = null;
+                foreach (FoodItem food in Object.FindObjectsByType<FoodItem>(FindObjectsSortMode.None))
+                    if (food.foodType == FoodType.Meat) carcass = food;
+                Assert.IsNotNull(carcass, "The dead animal left no carcass.");
+                Assert.That(carcass.nutritionValue, Is.EqualTo(expected).Within(0.01f * expected));
+                Assert.Less(carcass.nutritionValue, body + store);
+                Assert.AreEqual(0, EnergyLedger.Violations, EnergyLedger.Report(new SeekFood[0]));
+            }
+            finally
+            {
+                EnergyLedger.End();
+            }
         }
 
         // Litter size (item 16): a gene of exactly 3 gives three young at every birth, sharing the energy one child

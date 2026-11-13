@@ -176,3 +176,22 @@ Built on the 29 October follow-up above, which was still uncommitted.
   Nothing was changed: both are balance decisions. Suggested: scale only the body's meat by mass and take the store at its own value times the transfer efficiency, and bring the meat a body yields down to what it cost to grow (or the growth cost up).
 - Tests: `TheEnergyLedgerBalancesThroughEatingALitterGrowthAndADeath` (no gap and no violations through a meal, a litter of three, growth and a death, and a change made behind the ledger's back is caught) and `HarmfulMutationsRaiseUpkeepByTheirFullCost`.
 
+## Item 61 follow-up, both carcass rules fixed — 13 November 2026
+
+- **The new rule:** a carcass holds (what was paid to build the body + the store the animal died with) × the transfer efficiency (0.75). Nothing is scaled by body mass any more, so a big body no longer multiplies the store, and a body's meat is never worth more than it cost. `SeekFood.BodyEnergyPaid` adds up what an animal actually pays as it grows; an animal too hungry to pay in full builds a leaner body. A founder or an arrival from off-screen is placed with a body worth what one its size costs to grow (Growth Energy Cost × Carcass Body Energy × mass). Hunters weigh prey by the same figure. The cost of growing is unchanged.
+- **What it means in numbers:** a full-grown founder-sized animal that starves used to leave 37.5 of meat and now leaves about 17.6 (it paid 23.4 to grow from newborn size); a newborn that dies at once leaves only three quarters of its store. The largest body the genes allow, dying with a store of 100, left 518 and now leaves 161.
+- **Also fixed:** a dying animal could eat its own carcass if physics ran before it was removed. It showed only in a test, never in the soaks (their ledgers had no gap), and is now ruled out.
+- **Soaks with the ledger on, three years per seed, before and after** (one run each, so the head counts are single observations):
+
+  | Seed | Rule | Meat in | Growth paid | Meat as a share of growth | Meat as a share of all intake | Animals on average | Gap | Violations |
+  |---|---|---:|---:|---:|---:|---:|---:|---:|
+  | MOSSY-FJORD | old | 5,780 | 10,923 | 53% | 5.5% | 74 | 0 | 0 |
+  | MOSSY-FJORD | new | 2,308 | 7,992 | 29% | 3.0% | 52 | 0 | 0 |
+  | FOREST-001 | old | 2,563 | 4,994 | 51% | 5.2% | 34 | 0 | 0 |
+  | FOREST-001 | new | 1,583 | 5,560 | 28% | 3.1% | 36 | 0 | 0 |
+
+  Meat now brings in a little over half of what it did, as intended. Whether the lower head count on MOSSY-FJORD is the rule or chance needs replicates: three-year averages vary a good deal between runs, and FOREST-001 did not move.
+- **What this changes for earlier results:** runs before this commit had richer carcasses, so their numbers on meat-eating, scavenging and hunting their own kind (items 13 and 66) are not directly comparable with later ones. Meat-eating was already hard to evolve and is now harder.
+- Still unpaid: the three founders' bodies, a one-off at the start of each world.
+- Tests: `ACarcassHoldsNoMoreThanTheBodyCostAndTheStore` (the largest body with a large store) and two more checks in the newborn growth test. Full Unity suite: **328 passed, 0 failed** (`Logs/TestResults/20261113T082017918454Z/results.xml`).
+

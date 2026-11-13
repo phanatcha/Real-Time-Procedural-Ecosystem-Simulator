@@ -226,9 +226,10 @@ namespace Boreal.Animals
         [Tooltip("Prevents predation between parents, children, and siblings, including mutated offspring assigned to a new species.")]
         public bool avoidCloseKinPredation = true;
         [Range(0f, 1f)] public float carcassEnergyTransferEfficiency = 0.75f;
-        [Tooltip("Meat in the body itself, as energy per unit of body mass, on top of whatever energy the animal had " +
-                 "stored. Without it a starved animal would leave no carcass, which makes meat scarce and meat-eating " +
-                 "hard to evolve.")]
+        [Tooltip("What a full-grown body of mass 1 is made of, as energy. Growing up costs Growth Energy Cost times " +
+                 "this, and that cost is the meat the carcass holds, on top of whatever energy the animal had stored. " +
+                 "Without it a starved animal would leave no carcass, which makes meat scarce and meat-eating hard " +
+                 "to evolve.")]
         [Min(0f)] public float carcassBodyEnergy = 50f;
         [Min(1f)] public float carcassLifetime = 120f;
         [Tooltip("Simulated seconds a carcass stays as spoiled meat once it goes off. Only animals with a scavenger " +
@@ -512,11 +513,15 @@ namespace Boreal.Animals
         public float BodyPartsMass => bodyEffects.partsMass;
         // How far the longest legs lift the body off the ground, in world units.
         public float LegLift => Mathf.Max(0f, fullLegLength) * bodyEffects.longestLegs * Mathf.Max(0.01f, bodyHeight);
-        // A carcass holds the body's own meat plus the energy the animal had stored, scaled by its mass. Hunters
-        // weigh prey by the same amount, so even a starving animal is worth its meat.
-        public float EstimatedCarcassRawEnergy => (Mathf.Max(0f, carcassBodyEnergy) + Mathf.Max(0f, currentEnergy)) *
-                                                   carcassEnergyTransferEfficiency *
-                                                   BodyMassFactor;
+        // A carcass holds the energy that went into building the body plus the energy the animal had stored, less the
+        // share lost in the transfer. Neither is scaled up by anything, so a carcass never holds more than was put
+        // into the animal (item 61). Hunters weigh prey by the same amount, so even a starving animal is worth its meat.
+        public float EstimatedCarcassRawEnergy => (bodyEnergyPaid + Mathf.Max(0f, currentEnergy)) *
+                                                   carcassEnergyTransferEfficiency;
+        // The energy that went into building this animal's body: what it paid to grow, or for a founder or an arrival
+        // from off-screen, what a body its size costs to grow. It is the meat its carcass is made of.
+        public float BodyEnergyPaid => bodyEnergyPaid;
+        private float bodyEnergyPaid;
         public bool IsAlive => !isDying && currentHealth > 0f && isActiveAndEnabled;
         public bool IsMature => currentAge >= Mathf.Max(0f, maturityTime);
         public float MaturityProgress => maturityTime <= Mathf.Epsilon
@@ -699,6 +704,8 @@ namespace Boreal.Animals
             dietAffinity = Mathf.Clamp01(dietAffinity);
             InitializeMetabolicReference();
             BeginGrowth();
+            // A founder or an arrival is placed with the body it has; a newborn's is built from what it pays to grow.
+            bodyEnergyPaid = bornInSimulation ? 0f : GrowthCostPerMass * BodyMassFactor;
             RefreshMetabolicRate();
             thermalResponse.ResetRuntimeState();
             RefreshMovementSpeed();
@@ -2431,8 +2438,8 @@ namespace Boreal.Animals
 
         bool TryConsumeFood(FoodItem food)
         {
-            // Courting animals don't stop to eat food they happen to touch.
-            if (food == null || currentState == State.Courting || !CanEat(food) || currentEnergy >= maxEnergy ||
+            // Courting animals don't stop to eat food they happen to touch, and a dying one can't eat its own carcass.
+            if (food == null || isDying || currentState == State.Courting || !CanEat(food) || currentEnergy >= maxEnergy ||
                 !food.TryConsume(out float rawNutrition, out FoodType foodType))
             {
                 return false;
@@ -2591,7 +2598,7 @@ namespace Boreal.Animals
             isDying = true;
             deathCause = cause;
             float carcassEnergy = EstimatedCarcassRawEnergy;
-            EnergyLedger.CheckCarcass(carcassEnergy, Mathf.Max(0f, carcassBodyEnergy) * BodyMassFactor, currentEnergy, name);
+            EnergyLedger.CheckCarcass(carcassEnergy, bodyEnergyPaid, currentEnergy, name);
             SetEnergy(0f, EnergyFlow.LostAtDeath);
 
             if (carcassEnergy > 0f)
@@ -2708,6 +2715,7 @@ namespace Boreal.Animals
 
             childScript.currentEnergy = childEnergy;
             EnergyLedger.Record(EnergyFlow.BornWith, childEnergy);
+            childScript.bodyEnergyPaid = 0f;
             childScript.currentHydration = maxHydration;
             childScript.currentAge = 0f;
             childScript.bornInSimulation = true;
@@ -2917,6 +2925,9 @@ namespace Boreal.Animals
             return Mathf.Lerp(Mathf.Clamp(newbornSizeFraction, 0.1f, 1f), 1f, Mathf.Clamp01(maturityProgress));
         }
 
+        // Energy to grow one unit of body mass.
+        float GrowthCostPerMass => Mathf.Max(0f, growthEnergyCost) * Mathf.Max(0f, carcassBodyEnergy);
+
         void UpdateGrowth()
         {
             float previous = growth;
@@ -2926,8 +2937,10 @@ namespace Boreal.Animals
             // Mass goes with the cube of size, so the cost falls as the body fills out: a share of the adult body's own
             // meat, spread over the youth. An animal that can't pay starves like any other.
             float massGained = growth * growth * growth - previous * previous * previous;
-            SetEnergy(Mathf.Max(0f, currentEnergy - growthEnergyCost * Mathf.Max(0f, carcassBodyEnergy) *
-                                                    AdultBodyMassFactor * massGained), EnergyFlow.Growth);
+            float before = currentEnergy;
+            SetEnergy(Mathf.Max(0f, currentEnergy - GrowthCostPerMass * AdultBodyMassFactor * massGained), EnergyFlow.Growth);
+            // What it actually paid becomes its body's meat; an animal too hungry to pay in full builds a leaner body.
+            bodyEnergyPaid += before - currentEnergy;
             visionRadius = adultVisionRadius * growth;
 
             // The body, its parts and its upkeep follow in steps of 5%, so a growing animal doesn't rebuild its mesh
