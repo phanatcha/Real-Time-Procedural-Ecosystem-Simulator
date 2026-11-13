@@ -118,3 +118,21 @@ Built on the 29 October follow-up above, which was still uncommitted.
 - Genes at a limit at the end of both runs: **Torpor** (110 of 114 animals at its minimum on MOSSY-FJORD, 7 of 30 on FOREST-001) and **LitterSize** (98 of 114, and 29 of 30). Founders start both at the minimum, so mutation can only push them up and their averages cannot show selection against them; read "torpor stays at 0.01" and "litter size drifted only to 1.01–1.06" above with that in mind. No other gene had any animal at a limit.
 - One run per seed, so these are single observations, not a spread. Recordings: `Logs/SoakRuns/MOSSY-FJORD-20261110T091119Z` and `Logs/SoakRuns/FOREST-001-20261110T091230Z`.
 - Full Unity suite with item 54 in: **321 passed, 1 failed** of 322 (`Logs/TestResults/20261110T085806513443Z/results.xml`); see `TEST_RESULTS.md` for the one failure, which passed twice when run alone.
+
+## Backlog item 57, one record per animal — 13 November 2026
+
+- Each recording has a new `lives.csv` (schema 8, described in `RUN_RECORDING.md`): one row per animal with its ID, both parents' IDs, species, generation, origin, birth and end time, age, cause of death, where it joined and ended, how many young it had, and the genome it was born with (harmful mutations, perks, every gene and body part). A row is written as the animal dies; the animals still alive are added when the recording closes, so every animal has exactly one row.
+- The Species Manager gives each animal an ID as it joins (counting from 1 in each world) and raises `AnimalDied` and `AnimalLeft`; `SeekFood` keeps its parents' IDs, its birth time and place and a count of its young. Nothing about how animals behave changed.
+- `Tools/summarise_lives.py <run folder>` checks the rows against the last row of `population.csv` (births, deaths, animals alive, no duplicate IDs, no parent without a row) and prints how unevenly young are shared out.
+- First soaks, one five-year run per seed with the usual settings, revision `e8a94c77+dirty` (item 57 uncommitted). Both add up to `population.csv`.
+
+  | Seed | Rows | Dead | Alive | Lifetime young of the dead: mean | Variance | Most | Left no young | Young from the top tenth | Left young that bred | Average generation |
+  |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+  | MOSSY-FJORD | 853 | 735 | 118 | 1.16 | 1.50 | 4 | 42% | 29% | 42% | 15.7 |
+  | FOREST-001 | 404 | 371 | 33 | 1.18 | 1.40 | 4 | 40% | 28% | 44% | 18.2 |
+
+  Young are shared out almost as evenly as chance alone would: the variance in lifetime young is close to the mean, no animal left more than 4, and the rough effective size is 0.90 and 0.99 of the head count. Wild populations average about a tenth, because a few animals have most of the young. Here nearly every animal that breeds has one to three, so there is little difference between animals for selection to work on. That fits the genes not moving (items 9 and 12) and is worth keeping in mind for item 58. The ratio is N × mean² ÷ variance for one generation of a mostly cloning population; generations overlap here, so it is a rough guide.
+- Deaths: starvation 511, old age 155, thirst 69 on MOSSY-FJORD; starvation 272, old age 91, thirst 8 on FOREST-001. Median age at death about 200 s, half a simulated year.
+- One run per seed, single observations. Recordings: `Logs/SoakRuns/MOSSY-FJORD-20261113T065528Z` and `Logs/SoakRuns/FOREST-001-20261113T065633Z`.
+- Tests: an Edit Mode test for the row format and a Play Mode test that a clone's row names its parent, a killed animal's row has its cause, the survivor's row is `alive`, and the rows match the manager's births and deaths. Full Unity suite: **322 passed, 2 failed** of 324 (`Logs/TestResults/20261113T064931125928Z/results.xml`). One failure was the new Play Mode test expecting the wrong origin for the test helper's animals; corrected, and it and the nine recorder tests then passed. The other, `NightEyesFindFoodOnAMoonlessNight`, failed once more in three runs alone; see `TEST_RESULTS.md`.
+

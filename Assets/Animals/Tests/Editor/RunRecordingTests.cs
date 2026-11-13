@@ -53,6 +53,30 @@ namespace Boreal.Animals.Tests
         }
 
         [Test]
+        public void LifeRecordsHaveOneCellPerColumnAndLeaveMissingParentsBlank()
+        {
+            string[] columns = LifeRecords.Header().Split(',');
+            AnimalGenome genome = AnimalGenome.Create();
+            genome[AnimalGene.MaturityTime] = 45f;
+            genome.SetPart(BodySite.FrontPair, BodyPartType.Legs, 0.35f);
+            var cells = LifeRecords.Cells(7, 3, 0, "A", 2, "born", 12.5, null, 4.0, LifeRecords.StillAlive,
+                                          1.0, 2.0, 3.0, 4.0, 1, genome);
+            Assert.AreEqual(columns.Length, cells.Count);
+            object Cell(string column) => cells[Array.IndexOf(columns, column)];
+            Assert.AreEqual(7, Cell("id"));
+            Assert.AreEqual(3, Cell("first_parent"));
+            Assert.AreEqual("", Cell("second_parent"), "No second parent is blank, not 0.");
+            Assert.AreEqual("", Cell("ended"), "An animal still alive has no end time.");
+            Assert.AreEqual(45f, Cell("MaturityTime"));
+            Assert.AreEqual("Legs:0.35", Cell("Part_FrontPair"));
+            Assert.AreEqual("", Cell("Part_Head"));
+            Assert.AreEqual(0, Cell("Perk_Venom"));
+            // Every gene, perk and body site has a column.
+            CollectionAssert.Contains(columns, AnimalGene.NightVision.ToString());
+            Assert.AreEqual(16 + AnimalGenome.PerkCount + AnimalGenome.GeneCount + AnimalGenome.SiteCount, columns.Length);
+        }
+
+        [Test]
         public void SamplingPausesSkipsMissedFramesAndResetsWithoutFabricatingHistory()
         {
             var schedule = new SimulationSampleSchedule();

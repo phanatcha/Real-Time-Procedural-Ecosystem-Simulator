@@ -103,6 +103,83 @@ namespace Boreal.Animals.Tests
             Assert.AreEqual(0, record.sexualOffspring);
         }
 
+        // Life records (item 57): every animal gets one row in lives.csv, as it dies or when the recording closes, and a
+        // child's row names its parent.
+        [UnityTest]
+        public IEnumerator EveryAnimalLeavesOneLifeRecordThatNamesItsParent()
+        {
+            EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
+            yield return new EnterPlayMode(ReloadsDomain);
+
+            BakeNavMesh(CreateGround(Vector3.zero, 60f));
+            SpeciesManager manager = StartSimulation();
+            manager.enableSafetyPause = false;
+            SeekFood parent = CreateAnimal(Vector3.zero, Genome(sexualDrive: 0f, maturityTime: 5f), energyFraction: 1f, age: 10f);
+            var recorder = manager.gameObject.AddComponent<SimulationRunRecorder>();
+            recorder.sourceRevision = "test";
+            yield return null;
+            yield return null;
+            string directory = recorder.OutputDirectory;
+            try
+            {
+                Assert.Greater(parent.AnimalId, 0);
+                float deadline = Time.time + 20f;
+                while (AnimalCount() < 2 && Time.time < deadline) yield return null;
+                Assert.GreaterOrEqual(AnimalCount(), 2, "No clone was born within 20 simulated seconds.");
+                // Stop further births, then kill one child and let it be destroyed.
+                manager.populationCeiling = 1;
+                SeekFood child = null;
+                foreach (SeekFood animal in Object.FindObjectsByType<SeekFood>(FindObjectsSortMode.None))
+                    if (animal != parent && animal.FirstParentId == parent.AnimalId) child = animal;
+                Assert.IsNotNull(child, "The clone does not name its parent.");
+                int childId = child.AnimalId;
+                Assert.AreNotEqual(parent.AnimalId, childId);
+                child.Kill(AgentDeathCause.Predation);
+                yield return null;
+                yield return null;
+                int parentId = parent.AnimalId, young = parent.YoungBorn, born = Telemetry().reproductionEvents;
+                int deaths = Telemetry().deaths;
+                Assert.GreaterOrEqual(young, 1);
+                recorder.enabled = false;
+
+                string[] rows = System.IO.File.ReadAllLines(System.IO.Path.Combine(directory, "lives.csv"));
+                string[] columns = rows[0].Split(',');
+                int Column(string name) => System.Array.IndexOf(columns, name);
+                var byId = new Dictionary<string, string[]>();
+                for (int row = 1; row < rows.Length; row++)
+                {
+                    string[] cells = rows[row].Split(',');
+                    Assert.AreEqual(columns.Length, cells.Length);
+                    Assert.IsFalse(byId.ContainsKey(cells[Column("id")]), "An animal has two life records.");
+                    byId[cells[Column("id")]] = cells;
+                }
+                string[] childRow = byId[childId.ToString()];
+                Assert.AreEqual(parentId.ToString(), childRow[Column("first_parent")]);
+                Assert.AreEqual("", childRow[Column("second_parent")]);
+                Assert.AreEqual("Predation", childRow[Column("cause")]);
+                Assert.AreEqual("born", childRow[Column("origin")]);
+                Assert.AreEqual("1", childRow[Column("generation")]);
+                Assert.AreNotEqual("", childRow[Column("ended")]);
+                string[] parentRow = byId[parentId.ToString()];
+                // The test helper places its animals the way off-screen arrivals come back, so that is their origin.
+                Assert.AreEqual("offscreen", parentRow[Column("origin")]);
+                Assert.AreEqual(LifeRecords.StillAlive, parentRow[Column("cause")]);
+                Assert.AreEqual("", parentRow[Column("ended")]);
+                Assert.AreEqual(young.ToString(), parentRow[Column("young")]);
+                Assert.AreEqual("5", parentRow[Column("MaturityTime")]);
+                // The rows add up to the manager's counts: one founder plus every birth, and every death.
+                Assert.AreEqual(1 + born, byId.Count);
+                int ended = 0;
+                foreach (string[] cells in byId.Values) if (cells[Column("ended")] != "") ended++;
+                Assert.AreEqual(deaths, ended);
+            }
+            finally
+            {
+                recorder.enabled = false;
+                if (directory != null && System.IO.Directory.Exists(directory)) System.IO.Directory.Delete(directory, true);
+            }
+        }
+
         // A sexual drive of 1 means the animals only ever mate. Identical genomes are fully fertile together.
         [UnityTest]
         public IEnumerator PairsCourtAndHaveChildrenWithTwoParents()

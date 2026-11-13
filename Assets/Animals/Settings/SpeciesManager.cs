@@ -306,6 +306,12 @@ namespace Boreal.Animals
             events.Add(new SimulationEvent { time = time, kind = kind, detail = detail });
             Debug.Log($"Event at {time:0} s: {kind}, {detail}", this);
         }
+        // Life records (item 57). Raised as an animal dies, while it can still be read, and when one leaves to become
+        // an off-screen number. IDs count up from 1 in each world.
+        public event System.Action<SeekFood, AgentDeathCause> AnimalDied;
+        public event System.Action<SeekFood> AnimalLeft;
+        int nextAnimalId;
+
         // Refreshed at every species census. Founders are generation 0.
         public float AverageGeneration { get; private set; }
         public int HighestGeneration { get; private set; }
@@ -515,6 +521,7 @@ namespace Boreal.Animals
             mutationMultiplier = 1f;
             AverageGeneration = 0f;
             HighestGeneration = 0;
+            nextAnimalId = 0;
         }
 
         public string GetNextSpeciesName()
@@ -605,6 +612,8 @@ namespace Boreal.Animals
                 return;
             }
 
+            agent.BeginLifeRecord(++nextAnimalId, Mathf.Max(0f, Time.time - WorldStartTime));
+
             // A newcomer joins this frame's grid where it stands. Animals leaving have the grid rebuilt instead.
             if (agentGrid != null && !agentGridStale && agentGridFrame == Time.frameCount)
             {
@@ -647,6 +656,7 @@ namespace Boreal.Animals
             }
 
             agentGridStale = true;
+            AnimalDied?.Invoke(agent, deathCause);
 
             string speciesName = agent.speciesName;
             if (speciesPopulation.ContainsKey(speciesName))
@@ -702,6 +712,7 @@ namespace Boreal.Animals
             if (agent == null || !activeAgents.Remove(agent)) return;
 
             agentGridStale = true;
+            AnimalLeft?.Invoke(agent);
 
             string speciesName = agent.speciesName;
             if (speciesPopulation.TryGetValue(speciesName, out int population))

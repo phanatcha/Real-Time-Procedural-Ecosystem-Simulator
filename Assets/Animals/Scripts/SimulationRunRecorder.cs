@@ -28,7 +28,7 @@ namespace Boreal.Animals
         public string OutputDirectory { get; private set; }
 
         SpeciesManager manager;
-        StreamWriter population, species, traits, events;
+        StreamWriter population, species, traits, events, lives;
         int eventsWritten;
         float worldStart;
         int worldRevision = -1;
@@ -43,15 +43,45 @@ namespace Boreal.Animals
             // marker genes and perk (item 56). 5: population.csv gained the share of live animals resting, traits.csv the
             // Nocturnality gene (item 74). 6: traits.csv gained the NightVision gene (item 75). 7: population.csv and
             // species.csv gained the live animals' average and highest generation, traits.csv how many animals sit at
-            // each gene's limits (item 54).
-            public int schemaVersion = 7;
+            // each gene's limits (item 54). 8: a new lives.csv with one row per animal (item 57).
+            public int schemaVersion = 8;
             public string startedUtc, sourceRevision, experiment, unityVersion, worldSeed;
             public float sampleInterval;
             public bool offscreenEnabled;
             public string managerSettings, seasonSettings, dayClockSettings, foodSettings, representativeAnimalSettings;
         }
 
-        void OnEnable() { manager = GetComponent<SpeciesManager>(); failed = false; }
+        void OnEnable()
+        {
+            manager = GetComponent<SpeciesManager>();
+            failed = false;
+            manager.AnimalDied += OnAnimalDied;
+            manager.AnimalLeft += OnAnimalLeft;
+        }
+
+        void OnAnimalDied(SeekFood animal, AgentDeathCause cause) => WriteLife(animal, cause.ToString(), true);
+        void OnAnimalLeft(SeekFood animal) => WriteLife(animal, LifeRecords.LeftForOffscreen, true);
+
+        // One row per animal as it dies or leaves; Close adds the animals still alive (item 57).
+        void WriteLife(SeekFood animal, string cause, bool ended)
+        {
+            // A death in a world this run isn't recording (before its first frame, or after a reset) has no file.
+            if (failed || lives == null || animal == null || manager == null || manager.WorldRevision != worldRevision) return;
+            try
+            {
+                double time = Math.Max(0, Time.timeAsDouble - worldStart);
+                Vector3 birth = animal.BirthPosition, end = animal.transform.position;
+                Row(lives, LifeRecords.Cells(animal.AnimalId, animal.FirstParentId, animal.SecondParentId,
+                    animal.speciesName, animal.Generation, animal.Origin, animal.BirthTime, ended ? time : (double?)null,
+                    animal.CurrentAge, cause, birth.x, birth.z, end.x, end.z, animal.YoungBorn, animal.Genome).ToArray());
+            }
+            catch (Exception e) when (e is IOException || e is UnauthorizedAccessException)
+            {
+                failed = true;
+                DisposeWriters();
+                Debug.LogError("Run recording stopped: " + e.Message, this);
+            }
+        }
 
         void LateUpdate()
         {
@@ -109,6 +139,7 @@ namespace Boreal.Animals
             species = Open("species.csv", "time,species,parent,origin,extinction,live,offscreen,births,sexual_births,deaths,breeding_wait_episodes,breeding_wait_seconds,average_generation,highest_generation");
             traits = Open("traits.csv", "time,species,trait,live_sample_count,mean,standard_deviation,minimum,maximum,at_minimum,at_maximum");
             events = Open("events.csv", "time,event,detail");
+            lives = Open("lives.csv", LifeRecords.Header());
             eventsWritten = 0;
             Debug.Log("Recording simulation to " + OutputDirectory, this);
         }
@@ -188,7 +219,7 @@ namespace Boreal.Animals
                 SpeciesManager.SimulationEvent happening = happened[eventsWritten];
                 Row(events, happening.time, happening.kind, happening.detail);
             }
-            population.Flush(); species.Flush(); traits.Flush(); events.Flush();
+            population.Flush(); species.Flush(); traits.Flush(); events.Flush(); lives.Flush();
             lastSample = time;
         }
 
@@ -233,7 +264,16 @@ namespace Boreal.Animals
             writer.WriteLine();
         }
 
-        void OnDisable() { Close("recorder disabled or Play stopped"); worldRevision = -1; }
+        void OnDisable()
+        {
+            Close("recorder disabled or Play stopped");
+            worldRevision = -1;
+            if (manager != null)
+            {
+                manager.AnimalDied -= OnAnimalDied;
+                manager.AnimalLeft -= OnAnimalLeft;
+            }
+        }
         void OnApplicationQuit() { Close("application quit"); }
 
         void Close(string reason)
@@ -246,6 +286,9 @@ namespace Boreal.Animals
                 {
                     double time = Math.Max(0, Time.timeAsDouble - worldStart);
                     if (time > lastSample) Sample(time);
+                    // The animals still alive close the life records, so every animal has exactly one row.
+                    foreach (SeekFood animal in manager.ActiveAgents)
+                        WriteLife(animal, LifeRecords.StillAlive, false);
                 }
                 File.WriteAllText(Path.Combine(OutputDirectory, "ended.txt"), reason);
             }
@@ -263,7 +306,11 @@ namespace Boreal.Animals
                 finally
                 {
                     try { traits?.Dispose(); }
-                    finally { try { events?.Dispose(); } finally { population = species = traits = events = null; } }
+                    finally
+                    {
+                        try { events?.Dispose(); }
+                        finally { try { lives?.Dispose(); } finally { population = species = traits = events = lives = null; } }
+                    }
                 }
             }
         }

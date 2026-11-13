@@ -1,4 +1,11 @@
-# Latest verification — 10 November 2026
+# Latest verification — 13 November 2026
+
+**322 passed, 2 failed, 0 skipped** of 324 in Unity 6000.4.1f1 with life records (item 57) ([NUnit XML](Logs/TestResults/20261113T064931125928Z/results.xml)). The suite has not been re-run in full since.
+
+- `EveryAnimalLeavesOneLifeRecordThatNamesItsParent` (new) failed because it expected the origin `founder` for an animal the test helper places the way off-screen arrivals come back; the expectation was corrected to `offscreen`. It then passed, as did `RunRecordingTests` (5) and `RunRecorderLifecycleTests` (4) run on their own.
+- `NightEyesFindFoodOnAMoonlessNight` failed with "the animal with ordinary eyes found food it should not see". Run alone three times it passed twice and failed once, so it fails now and then. The likely cause, not confirmed: the ordinary-eyed animal wanders up to 20 m and its plant is 25 m away, so it can come within its 16.5 m night sight. Item 57 does not touch seeing or wandering.
+
+# 10 November 2026
 
 **321 passed, 1 failed, 0 skipped** of 322 in Unity 6000.4.1f1 with generations recorded (item 54) ([NUnit XML](Logs/TestResults/20261110T085806513443Z/results.xml)). Two tests cover the item: `GeneLimitsCountAnimalsAtEitherEndOfAGenesRange`, and the recorder's live-animal test now checks the generation and gene-limit columns. The failure was `NewbornsStartSmallAndGrowToFullSizeByMaturity`: a child's vision read 110.55 against 110 ± 0.5. It passed twice when run alone afterwards, so it looks like an occasional failure, possibly a vision mutation in the child; the cause is not confirmed.
 

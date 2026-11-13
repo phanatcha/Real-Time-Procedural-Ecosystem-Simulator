@@ -54,6 +54,53 @@ namespace Boreal.Animals
         }
     }
 
+    // One row of lives.csv per animal (item 57): who its parents were, when and where it lived, how it ended, how
+    // many young it had and the genome it was born with. Parent IDs link the rows into the run's full family tree.
+    public static class LifeRecords
+    {
+        public const string StillAlive = "alive";
+        public const string LeftForOffscreen = "left";
+
+        public static string Header()
+        {
+            var header = new System.Text.StringBuilder(
+                "id,first_parent,second_parent,species,generation,origin,born,ended,age,cause," +
+                "birth_x,birth_z,end_x,end_z,young,harmful_mutations");
+            for (int perk = 0; perk < AnimalGenome.PerkCount; perk++) header.Append(",Perk_").Append((AnimalPerk)perk);
+            for (int gene = 0; gene < AnimalGenome.GeneCount; gene++) header.Append(',').Append((AnimalGene)gene);
+            for (int site = 0; site < AnimalGenome.SiteCount; site++) header.Append(",Part_").Append((BodySite)site);
+            return header.ToString();
+        }
+
+        // ended is blank while the animal lives; a parent ID of 0 (none) is written blank. Positions are world x and z.
+        public static List<object> Cells(int id, int firstParent, int secondParent, string species, int generation,
+                                         string origin, double born, double? ended, double age, string cause,
+                                         double birthX, double birthZ, double endX, double endZ, int young,
+                                         AnimalGenome genome)
+        {
+            var cells = new List<object>
+            {
+                id, firstParent > 0 ? (object)firstParent : "", secondParent > 0 ? (object)secondParent : "", species,
+                generation, origin, born, ended.HasValue ? (object)ended.Value : "", age, cause,
+                birthX, birthZ, endX, endZ, young
+            };
+            bool valid = genome != null && genome.IsValid;
+            cells.Add(valid ? (object)genome.HarmfulMutations : "");
+            for (int perk = 0; perk < AnimalGenome.PerkCount; perk++)
+                cells.Add(valid ? (object)(genome.HasPerk((AnimalPerk)perk) ? 1 : 0) : "");
+            for (int gene = 0; gene < AnimalGenome.GeneCount; gene++)
+                cells.Add(valid ? (object)genome[(AnimalGene)gene] : "");
+            for (int site = 0; site < AnimalGenome.SiteCount; site++)
+            {
+                BodyPartType part = valid ? genome.GetPartType((BodySite)site) : BodyPartType.None;
+                // "Legs:0.35"; blank where nothing grows.
+                cells.Add(part == BodyPartType.None ? "" : part + ":" +
+                          genome.GetPartSize((BodySite)site).ToString("0.###", CultureInfo.InvariantCulture));
+            }
+            return cells;
+        }
+    }
+
     public sealed class SimulationSampleSchedule
     {
         double next;

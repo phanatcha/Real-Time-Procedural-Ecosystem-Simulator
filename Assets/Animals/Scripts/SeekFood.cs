@@ -345,6 +345,26 @@ namespace Boreal.Animals
         public int Generation => generation;
         public SeekFood FirstParent => firstParent;
         public SeekFood SecondParent => secondParent;
+        // The animal's life record (item 57). None of it is serialized, so a child copied from its parent starts blank.
+        // The ID is unique within one world and given by the Species Manager when the animal joins; 0 means none.
+        // Parent IDs outlive the parents themselves.
+        public int AnimalId { get; private set; }
+        public int FirstParentId { get; private set; }
+        public int SecondParentId { get; private set; }
+        // Simulated seconds since the world started. Negative for a founder placed with an age.
+        public float BirthTime { get; private set; }
+        // Where it joined the simulation: its birthplace, or where a founder was placed.
+        public Vector3 BirthPosition { get; private set; }
+        // Children born to it so far, as either parent.
+        public int YoungBorn { get; private set; }
+        public string Origin => fromOffscreenPopulation ? "offscreen" : bornInSimulation ? "born" : "founder";
+
+        public void BeginLifeRecord(int id, float worldTime)
+        {
+            AnimalId = id;
+            BirthTime = worldTime - currentAge;
+            BirthPosition = transform.position;
+        }
         // What the animal is doing now, for the inspector.
         public string Activity => currentState.ToString();
         public bool IsResting => currentState == State.Resting;
@@ -2651,6 +2671,11 @@ namespace Boreal.Animals
             childScript.generation = Mathf.Max(generation, partner != null ? partner.generation : 0) + 1;
             childScript.firstParent = this;
             childScript.secondParent = partner;
+            childScript.FirstParentId = AnimalId;
+            childScript.SecondParentId = partner != null ? partner.AnimalId : 0;
+            childScript.YoungBorn = 0;
+            YoungBorn++;
+            if (partner != null) partner.YoungBorn++;
             // The child copies this genome into its traits when it starts.
             childScript.genome = childGenome;
 
