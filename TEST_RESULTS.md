@@ -1,4 +1,8 @@
-# Latest verification — 14 November 2026, with family lines (item 65)
+# Latest verification — 14 November 2026, with the replay without selection (item 59)
+
+**357 passed, 0 failed, 0 skipped** in Unity 6000.4.1f1 ([NUnit XML](Logs/TestResults/20261114T043451407722Z/results.xml)), on a working tree that also held item 67 (not committed). New: `NeutralReplayTests` (three Edit Mode tests, one of them run for both replay modes). `python3 Tools/neutral_replay.py --self-test` passes seven checks on the same kind of made-up records outside Unity. A first full run, before the family-tree mode, had 356 of 356.
+
+# 14 November 2026, with family lines (item 65)
 
 **353 passed, 0 failed, 0 skipped** in Unity 6000.4.1f1 ([NUnit XML](Logs/TestResults/20261113T193928177706Z/results.xml)), on a working tree that also held item 67 (not committed). New: five Edit Mode tests in `FamilyLinesTests` and `FamilyLinesPlayModeTests.TheViewRecordsBirthsAndDeathsAndBuildsAFounderLineEach`; `Tools/muller_plot.py --self-test` passes on the same made-up family. The first full run had 352 of 353: the new Play Mode test redrew the chart before a simulated second had passed (the founder clones within its first frames) and the view skipped redraws under 1 s; the view now draws from any time above 0, the test waits 2 s, and the six family line tests then passed on their own ([NUnit XML](Logs/TestResults/20261113T193855304370Z/results.xml)) before this full run.
 
