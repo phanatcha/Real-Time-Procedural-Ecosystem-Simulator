@@ -125,7 +125,7 @@ namespace Boreal.AnimalTerrainIntegration
         public float DeathRate(OffscreenSample sample, float celsius)
         {
             return 1f / Mathf.Max(1f, sample.genome[AnimalGene.MaxLifespan]) +
-                   EnergyUse(sample, celsius) / Mathf.Max(1f, sample.genome[AnimalGene.MaxEnergy]);
+                   EnergyUse(sample, celsius) / Mathf.Max(1f, sample.energyStore);
         }
     }
 
@@ -144,15 +144,19 @@ namespace Boreal.AnimalTerrainIntegration
         public readonly float torpor;
         // Energy use while resting, as a share of the usual, from the live animal (SeekFood's Rest Energy Multiplier).
         public readonly float restEnergyMultiplier;
+        // The live animal's energy store, which grows with its body's size (item 67); the gene's value if not given.
+        public readonly float energyStore;
 
         public float DietAffinity => genome[AnimalGene.DietAffinity];
 
-        public OffscreenSample(AnimalGenome genome, float baseEnergyUse, int generation, float restEnergyMultiplier = 1f)
+        public OffscreenSample(AnimalGenome genome, float baseEnergyUse, int generation, float restEnergyMultiplier = 1f,
+                               float energyStore = 0f)
         {
             this.genome = genome ?? throw new ArgumentNullException(nameof(genome));
             this.baseEnergyUse = Mathf.Max(0.001f, baseEnergyUse);
             this.generation = Mathf.Max(0, generation);
             this.restEnergyMultiplier = Mathf.Clamp01(restEnergyMultiplier);
+            this.energyStore = energyStore > 0f ? energyStore : genome[AnimalGene.MaxEnergy];
 
             BodyPlanEffects effects = AnimalBodyPlan.Evaluate(genome);
             PerkEffects perks = AnimalPerks.Evaluate(genome);

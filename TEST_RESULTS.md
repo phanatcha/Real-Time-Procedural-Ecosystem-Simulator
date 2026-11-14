@@ -8,6 +8,10 @@
 
 The first full run, before the tuning, had 345 of 347: `SeasonTests.ASeasonSummaryReportsWhatHappenedDuringTheSeason` expected the season line without the new `fire 0`, and `AnAnimalCaughtInTheFlamesDiesOfFire` lost its death callback across the domain reload when entering Play Mode (the callback is now made after it, as the other Play Mode tests do). Both fixed; the 13 Edit Mode tests were also run outside Unity after each tuning change.
 
+# 13 November 2026, with body size scaling (item 67)
+
+**331 passed, 0 failed, 0 skipped** in Unity 6000.4.1f1 ([NUnit XML](Logs/TestResults/20261113T164654069141Z/results.xml)). New: `BiggerBodiesStoreMoreAndLastLongerBetweenMeals`. The calibration test is unaffected (item 67 adds no gene).
+
 # 13 November 2026, with ageing (item 68)
 
 **330 passed, 0 failed, 0 skipped** in Unity 6000.4.1f1 ([NUnit XML](Logs/TestResults/20261113T151331352848Z/results.xml)). New: `AgeingAnimalsWeakenSlowDownAndDieBeforeTheirLifespan`. `SpeciesSplitCalibrationTests` passes with a median first split of 71 generations, near the top of its 40 to 75 band; a threshold of 0.045 would give 54.5.

@@ -157,7 +157,8 @@ namespace Boreal.Animals
                             $"reach {animal.FeedingReach:0.0} m   strength {animal.strength:0}\n");
                 text.Append($"bulk {genome[AnimalGene.BodyBulk]:0.00} → {animal.bodyBulk * animal.Growth:0.00}   " +
                             $"height {genome[AnimalGene.BodyHeight]:0.00} → {animal.bodyHeight * animal.Growth:0.00}   " +
-                            $"energy store {genome[AnimalGene.MaxEnergy]:0}   lifespan {genome[AnimalGene.MaxLifespan]:0} s   " +
+                            $"energy store {genome[AnimalGene.MaxEnergy]:0} → {animal.maxEnergy:0}   " +
+                            $"mass ×{animal.RelativeBodyMass:0.00}   lifespan {genome[AnimalGene.MaxLifespan]:0} s   " +
                             $"maturity {genome[AnimalGene.MaturityTime]:0} s   ageing from {genome[AnimalGene.AgeingOnset]:0} s\n");
                 text.Append($"diet {genome[AnimalGene.DietAffinity]:0.00} ({SeekFood.ClassifyDiet(animal.dietAffinity)}" +
                             $"{(animal.HuntsOwnKind ? ", hunts its own kind" : "")})   " +

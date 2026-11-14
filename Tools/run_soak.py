@@ -30,6 +30,8 @@ parser.add_argument('--ledger', default='0', help='1 adds up every change to the
 parser.add_argument('--perk-gain', help='Perk gain chance in per cent per birth on every animal (item 62; default 0.2)')
 parser.add_argument('--perk-loss', help='Perk loss chance in per cent per birth on every animal (item 62; default 2)')
 parser.add_argument('--ageing', default='1', help='0 switches ageing off on every animal (item 68), for control runs')
+parser.add_argument('--size-scaling', default='1',
+                    help='0 gives every animal the store and upkeep rule from before item 67 (size ignored), for control runs')
 parser.add_argument('--thirst', default='1', help='0 switches thirst off on every animal')
 parser.add_argument('--own-kind', default='1', help='0 stops animals hunting their own species (item 66), for control runs')
 parser.add_argument('--daynight', default='1', help='0 switches day and night off (always midday), for control runs')
@@ -92,7 +94,7 @@ if args.sexual_drive is not None:
     command += ['-soakSexualDrive', args.sexual_drive, '-soakSexualDriveAt', args.sexual_drive_at]
 if args.events:
     command += ['-soakEvents', args.events]
-command += ['-soakLedger', args.ledger, '-soakAgeing', args.ageing]
+command += ['-soakLedger', args.ledger, '-soakAgeing', args.ageing, '-soakSizeScaling', args.size_scaling]
 if args.perk_gain is not None:
     command += ['-soakPerkGain', args.perk_gain]
 if args.perk_loss is not None:

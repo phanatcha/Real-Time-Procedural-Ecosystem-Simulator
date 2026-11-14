@@ -181,7 +181,7 @@ namespace Boreal.AnimalTerrainIntegration
                                        Mathf.Max(0.01f, animal.RestEnergyMultiplier);
                 store.AddAnimal(cell, animal.speciesName, animal.speciesColor,
                     new OffscreenSample(animal.Genome.Clone(), awakeEnergyUse, animal.Generation,
-                                        animal.restEnergyMultiplier));
+                                        animal.restEnergyMultiplier, animal.maxEnergy));
 
                 // Leaves without being recorded as a death; the population now counts it.
                 animal.PrepareForAbstraction();

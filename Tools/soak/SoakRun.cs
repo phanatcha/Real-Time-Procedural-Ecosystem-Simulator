@@ -83,6 +83,7 @@ namespace Boreal.Soak.Editor
             SessionState.SetFloat(Key + "PerkGain", float.Parse(Arg("soakPerkGain", "-1"), CultureInfo.InvariantCulture));
             SessionState.SetFloat(Key + "PerkLoss", float.Parse(Arg("soakPerkLoss", "-1"), CultureInfo.InvariantCulture));
             SessionState.SetBool(Key + "Ageing", Arg("soakAgeing", "1") == "1");
+            SessionState.SetBool(Key + "SizeScaling", Arg("soakSizeScaling", "1") == "1");
             SessionState.SetBool(Key + "NaturalEvents", Arg("soakNaturalEvents", "1") == "1");
             SessionState.SetBool(Key + "Fires", Arg("soakFires", "1") == "1");
             SessionState.SetBool(Key + "FuelProbe", Arg("soakFuelProbe", "0") == "1");
@@ -255,6 +256,12 @@ namespace Boreal.Soak.Editor
                         founder.enableAgeing = false;
                         founder.RefreshMetabolicRate();
                     }
+                    // Item 67 control runs: the store ignores size and mass adds only its own share of upkeep.
+                    if (!SessionState.GetBool(Key + "SizeScaling", true))
+                    {
+                        founder.scaleWithBodySize = false;
+                        founder.RefreshEnergyStore();
+                    }
                     if (!SessionState.GetBool(Key + "Thirst", true)) founder.enableThirst = false;
                     // Item 66 off: no diet is high enough to hunt the animals' own species.
                     if (!SessionState.GetBool(Key + "OwnKind", true)) founder.huntOwnKindFromDiet = 2f;
@@ -264,7 +271,10 @@ namespace Boreal.Soak.Editor
                 if (harmfulChance >= 0f) Debug.Log($"Soak: harmful mutation chance set to {harmfulChance}% on the founders");
                 if (animals.Length > 0)
                     Debug.Log($"Soak: perks gained at {animals[0].perkGainChance}% and lost at {animals[0].perkLossChance}% per birth; " +
-                              (animals[0].enableAgeing ? $"ageing from {animals[0].ageingOnset} s over {animals[0].ageingSpan} s" : "ageing off"));
+                              (animals[0].enableAgeing ? $"ageing from {animals[0].ageingOnset} s over {animals[0].ageingSpan} s" : "ageing off") +
+                              (animals[0].scaleWithBodySize
+                                  ? $"; store with mass^{animals[0].storeMassExponent}, upkeep with mass^{animals[0].upkeepMassExponent}"
+                                  : "; size scaling off"));
                 // Items 78 and 79: natural events on or off, wildfires on or off, and how often lightning strikes.
                 NaturalEventDirector director = Object.FindAnyObjectByType<NaturalEventDirector>();
                 if (director != null)

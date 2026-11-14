@@ -84,6 +84,21 @@ namespace Boreal.Animals
         [Min(0f)] public float minimumMetabolicMultiplier = 0.25f;
         [Min(0f)] public float maximumMetabolicMultiplier = 4f;
 
+        [Header("Body Size Scaling")]
+        [Tooltip("Item 67: the energy store grows in proportion to the body's mass, and the whole upkeep with mass to " +
+                 "the 3/4 power (Kleiber's law), both against the founders' body. A bigger body needs more food but " +
+                 "lasts longer between meals: mass to the 1/4 power. Body parts and growing up are charged as before. " +
+                 "Off, the store ignores size and mass only adds its share through Body Mass Metabolic Weight.")]
+        public bool scaleWithBodySize = true;
+        [Tooltip("The power of body mass the energy store follows: 1 is in proportion.")]
+        [Min(0f)] public float storeMassExponent = 1f;
+        [Tooltip("The power of body mass the whole upkeep follows: 0.75 is Kleiber's law.")]
+        [Min(0f)] public float upkeepMassExponent = 0.75f;
+        // What the energy store gene has been multiplied by for this body's size (1 at the founders' size).
+        [System.NonSerialized] private float energyStoreScale = 1f;
+        // An arrival from an off-screen population starts with this share of its store; negative for everyone else.
+        [System.NonSerialized] private float arrivalEnergyFraction = -1f;
+
         [Header("Founder Trait Reference (0 = Capture at Birth)")]
         [SerializeField, Min(0f)] private float referenceMoveSpeed;
         [SerializeField, Min(0f)] private float referenceStrength;
@@ -551,6 +566,28 @@ namespace Boreal.Animals
             }
         }
         public float BodyPartsMass => bodyEffects.partsMass;
+        // The adult body's mass against the founders', from its bulk and height alone: what sets the size of the
+        // energy store and the scale of the upkeep (item 67). Body parts are bone, horn and muscle, not storage, and
+        // keep their own charge.
+        public float RelativeBodyMass
+        {
+            get
+            {
+                float bulkRatio = Mathf.Max(0.01f, bodyBulk) /
+                                  (referenceBodyBulk > 0f ? referenceBodyBulk : Mathf.Max(0.01f, bodyBulk));
+                float heightRatio = Mathf.Max(0.01f, bodyHeight) /
+                                    (referenceBodyHeight > 0f ? referenceBodyHeight : Mathf.Max(0.01f, bodyHeight));
+                return bulkRatio * bulkRatio * Mathf.Lerp(1f, heightRatio, Mathf.Clamp01(heightMassContribution));
+            }
+        }
+        // What the energy store gene is multiplied by for this body's size, and the store per unit of the founders'
+        // mass that the gene sets.
+        public float EnergyStoreScale => energyStoreScale;
+        public float EnergyStorePerMass => maxEnergy / Mathf.Max(0.0001f, energyStoreScale);
+        // What the body's size multiplies the whole upkeep by.
+        public float UpkeepSizeScale => scaleWithBodySize
+            ? Mathf.Pow(RelativeBodyMass, Mathf.Max(0f, upkeepMassExponent))
+            : 1f;
         // How far the longest legs lift the body off the ground, in world units.
         public float LegLift => Mathf.Max(0f, fullLegLength) * bodyEffects.longestLegs * Mathf.Max(0.01f, bodyHeight);
         // A carcass holds the energy that went into building the body plus the energy the animal had stored, less the
@@ -728,6 +765,11 @@ namespace Boreal.Animals
             timer = actionTimer;
             decisionTimer = Random.Range(0f, Mathf.Max(0.05f, decisionInterval));
             decisionRealTimeCooldown = Random.Range(0f, Mathf.Max(0f, minimumDecisionIntervalRealSeconds));
+            if (arrivalEnergyFraction >= 0f)
+            {
+                currentEnergy = arrivalEnergyFraction * maxEnergy;
+                arrivalEnergyFraction = -1f;
+            }
             float energyGiven = currentEnergy;
             currentEnergy = Mathf.Clamp(currentEnergy, 0f, maxEnergy);
             if (EnergyLedger.Enabled)
@@ -785,6 +827,8 @@ namespace Boreal.Animals
             generation = animalGeneration;
             currentAge = Mathf.Max(0f, age);
             currentEnergy = Mathf.Clamp01(energyFraction) * inheritedGenome[AnimalGene.MaxEnergy];
+            // The store depends on the body's size (item 67), which is known only once the genome is applied.
+            arrivalEnergyFraction = Mathf.Clamp01(energyFraction);
             firstParent = null;
             secondParent = null;
             fromOffscreenPopulation = true;
@@ -2941,6 +2985,28 @@ namespace Boreal.Animals
 
             ApplyGenome();
             ApplyBodyPlan();
+            ApplyEnergyStoreScale();
+        }
+
+        // Sizes the energy store for the body (item 67): the gene is the store at the founders' mass. The founders'
+        // reference is taken first, from the genes before scaling, so a founder's own store is its gene.
+        void ApplyEnergyStoreScale()
+        {
+            InitializeMetabolicReference();
+            float perMass = EnergyStorePerMass;
+            energyStoreScale = scaleWithBodySize
+                ? Mathf.Pow(RelativeBodyMass, Mathf.Max(0f, storeMassExponent))
+                : 1f;
+            maxEnergy = perMass * energyStoreScale;
+        }
+
+        // For a body whose size or switch changed after it started (tests, tools): resizes the store, losing what no
+        // longer fits, and the upkeep.
+        public void RefreshEnergyStore()
+        {
+            ApplyEnergyStoreScale();
+            if (currentEnergy > maxEnergy) SetEnergy(maxEnergy, EnergyFlow.OverCapacity);
+            RefreshMetabolicRate();
         }
 
         // Body parts and perks adjust the traits the genes have just set (see AnimalBodyPlan and AnimalPerks). The
@@ -3001,6 +3067,7 @@ namespace Boreal.Animals
             bodyHeight = genome[AnimalGene.BodyHeight];
             visionRadius = genome[AnimalGene.VisionRadius];
             maxEnergy = genome[AnimalGene.MaxEnergy];
+            energyStoreScale = 1f;
             maxStamina = genome[AnimalGene.MaxStamina];
             maxHealth = genome[AnimalGene.MaxHealth];
             maturityTime = genome[AnimalGene.MaturityTime];
@@ -3126,19 +3193,18 @@ namespace Boreal.Animals
             float totalWeight = speedMetabolicWeight + strengthMetabolicWeight + bodyMassMetabolicWeight +
                                 visionMetabolicWeight + energyCapacityMetabolicWeight +
                                 staminaCapacityMetabolicWeight + healthMetabolicWeight + repairWeight;
+            // With size scaling (item 67) the adult body's mass scales the whole upkeep, below, rather than adding
+            // its own share here.
+            float sizeScale = UpkeepSizeScale;
             if (totalWeight <= Mathf.Epsilon)
             {
-                currentEnergyDrainPerSecond = Mathf.Max(0f, baseEnergyDrainPerSecond) * inheritedCost;
+                currentEnergyDrainPerSecond = Mathf.Max(0f, baseEnergyDrainPerSecond) * sizeScale * inheritedCost;
                 return;
             }
 
-            float bulkRatio = Mathf.Max(0.01f, bodyBulk) / referenceBodyBulk;
-            float heightRatio = Mathf.Max(0.01f, bodyHeight) / referenceBodyHeight;
             // Body parts add their weight; their other advantages (speed, strength, vision) are charged below.
             // A young animal is cheaper to run while it is small; growing is charged separately (UpdateGrowth).
-            float relativeMassBurden = bulkRatio * bulkRatio *
-                                       Mathf.Lerp(1f, heightRatio,
-                                                  Mathf.Clamp01(heightMassContribution)) *
+            float relativeMassBurden = (scaleWithBodySize ? 1f : RelativeBodyMass) *
                                        (1f + bodyEffects.partsMass) * growth * growth * growth;
 
             float weightedTraitCost =
@@ -3146,7 +3212,8 @@ namespace Boreal.Animals
                 (Mathf.Max(0.01f, strength) / referenceStrength) * strengthMetabolicWeight +
                 relativeMassBurden * bodyMassMetabolicWeight +
                 (Mathf.Max(0.01f, visionRadius) / referenceVisionRadius) * visionMetabolicWeight +
-                (Mathf.Max(0.01f, maxEnergy) / referenceMaxEnergy) * energyCapacityMetabolicWeight +
+                // The store the gene sets: the extra a bigger body holds is paid for by its size.
+                (Mathf.Max(0.01f, EnergyStorePerMass) / referenceMaxEnergy) * energyCapacityMetabolicWeight +
                 (Mathf.Max(0.01f, maxStamina) / referenceMaxStamina) * staminaCapacityMetabolicWeight +
                 (Mathf.Max(0.01f, maxHealth) / referenceMaxHealth) * healthMetabolicWeight +
                 (Mathf.Max(0.01f, ageingOnset) / referenceAgeingOnset) * repairWeight;
@@ -3154,7 +3221,7 @@ namespace Boreal.Animals
             float minimum = Mathf.Max(0f, minimumMetabolicMultiplier);
             float maximum = Mathf.Max(minimum, maximumMetabolicMultiplier);
             float multiplier = Mathf.Clamp(weightedTraitCost / totalWeight, minimum, maximum);
-            currentEnergyDrainPerSecond = Mathf.Max(0f, baseEnergyDrainPerSecond) * multiplier * inheritedCost;
+            currentEnergyDrainPerSecond = Mathf.Max(0f, baseEnergyDrainPerSecond) * multiplier * sizeScale * inheritedCost;
         }
 
         // Called by SpeciesManager when this animal's group splits off into a new species.

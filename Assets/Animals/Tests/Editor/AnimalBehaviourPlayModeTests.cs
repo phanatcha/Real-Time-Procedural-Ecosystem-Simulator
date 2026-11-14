@@ -151,6 +151,81 @@ namespace Boreal.Animals.Tests
             Assert.IsTrue(unaged != null, "With ageing off the animal lives on.");
         }
 
+        // Body size (item 67): against the founders' body, the store grows in proportion to mass and the whole upkeep
+        // with mass to the 3/4 power, so a bigger body lasts longer between meals by mass to the 1/4 power. Off, the
+        // store ignores size and mass adds only its own share of upkeep. A copy keeps the founders' body as its
+        // reference, so an arrival or a child with a bigger body gets the bigger store.
+        [UnityTest]
+        public IEnumerator BiggerBodiesStoreMoreAndLastLongerBetweenMeals()
+        {
+            EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
+            yield return new EnterPlayMode(ReloadsDomain);
+
+            BakeNavMesh(CreateGround(Vector3.zero, 80f));
+            StartSimulation();
+            SeekFood founder = CreateAnimal(new Vector3(-20f, 0f, 0f), Genome(), energyFraction: 0.9f, age: 50f);
+            SeekFood big = CreateAnimal(new Vector3(0f, 0f, 20f), Genome(), energyFraction: 0.9f, age: 50f);
+            SeekFood small = CreateAnimal(new Vector3(0f, 0f, -20f), Genome(), energyFraction: 0.9f, age: 50f);
+            SeekFood unscaled = CreateAnimal(new Vector3(20f, 0f, 0f), Genome(), energyFraction: 0.9f, age: 50f);
+            yield return null;
+            yield return null;
+            Assert.AreEqual(1f, founder.RelativeBodyMass, 1e-4f);
+            Assert.AreEqual(150f, founder.maxEnergy, 0.01f, "At the founders' size the store is the gene.");
+
+            try
+            {
+                EnergyLedger.Begin(Object.FindObjectsByType<SeekFood>(FindObjectsSortMode.None));
+                big.bodyBulk = 1.5f;
+                big.RefreshEnergyStore();
+                small.bodyBulk = 0.7f;
+                small.RefreshEnergyStore();
+                unscaled.scaleWithBodySize = false;
+                unscaled.bodyBulk = 1.5f;
+                unscaled.RefreshEnergyStore();
+                // Shrinking the store loses what no longer fits, and the ledger sees it.
+                Assert.AreEqual(0, EnergyLedger.Violations, EnergyLedger.Report(new SeekFood[0]));
+                Assert.Less(EnergyLedger.Total(EnergyFlow.OverCapacity), 0);
+            }
+            finally
+            {
+                EnergyLedger.End();
+            }
+
+            float bigMass = 1.5f * 1.5f, smallMass = 0.7f * 0.7f;
+            Assert.AreEqual(bigMass, big.RelativeBodyMass, 1e-4f);
+            Assert.AreEqual(150f * bigMass, big.maxEnergy, 0.01f, "The store grows in proportion to mass.");
+            Assert.AreEqual(150f * smallMass, small.maxEnergy, 0.01f);
+            Assert.LessOrEqual(small.currentEnergy, small.maxEnergy);
+            float founderUse = founder.CurrentEnergyDrainPerSecond;
+            Assert.AreEqual(Mathf.Pow(bigMass, 0.75f), big.CurrentEnergyDrainPerSecond / founderUse, 1e-3f,
+                            "Upkeep follows mass to the 3/4 power.");
+            Assert.AreEqual(Mathf.Pow(smallMass, 0.75f), small.CurrentEnergyDrainPerSecond / founderUse, 1e-3f);
+            float founderFast = founder.maxEnergy / founderUse;
+            Assert.AreEqual(Mathf.Pow(bigMass, 0.25f), big.maxEnergy / big.CurrentEnergyDrainPerSecond / founderFast, 1e-3f,
+                            "A bigger body lasts longer on a full store.");
+            Assert.Less(small.maxEnergy / small.CurrentEnergyDrainPerSecond, founderFast);
+
+            // The rule before item 67: the same store, and mass adds only its share of the upkeep.
+            Assert.AreEqual(150f, unscaled.maxEnergy, 0.01f);
+            float total = founder.speedMetabolicWeight + founder.strengthMetabolicWeight + founder.bodyMassMetabolicWeight +
+                          founder.visionMetabolicWeight + founder.energyCapacityMetabolicWeight +
+                          founder.staminaCapacityMetabolicWeight + founder.healthMetabolicWeight + founder.repairMetabolicWeight;
+            Assert.AreEqual(1f + founder.bodyMassMetabolicWeight * (bigMass - 1f) / total,
+                            unscaled.CurrentEnergyDrainPerSecond / founderUse, 1e-3f);
+
+            // An arrival copied from a founder, as the off-screen bridge makes them, keeps the founders' body as its
+            // reference.
+            AnimalGenome bigGenome = Genome();
+            bigGenome[AnimalGene.BodyBulk] = 1.5f;
+            GameObject copy = Object.Instantiate(founder.gameObject, new Vector3(20f, 0f, 20f), Quaternion.identity);
+            SeekFood arrival = copy.GetComponent<SeekFood>();
+            arrival.PrepareFromOffscreenPopulation(bigGenome, Species, Color.green, 1, 50f, 0.5f);
+            yield return null;
+            yield return null;
+            Assert.AreEqual(150f * bigMass, arrival.maxEnergy, 0.01f);
+            Assert.AreEqual(0.5f * 150f * bigMass, arrival.currentEnergy, 2f, "An arrival starts with its share of its own store.");
+        }
+
         // The energy ledger (item 61): through eating, growing, a litter and a death, every change to the animals' stores
         // is accounted for, and no rule makes energy from nothing.
         [UnityTest]
