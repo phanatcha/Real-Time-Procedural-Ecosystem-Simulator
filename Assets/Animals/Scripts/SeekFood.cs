@@ -529,10 +529,29 @@ namespace Boreal.Animals
         // How far other animals can spot this one, as a fraction of their vision: camouflage hides it, except while
         // it flees.
         // Camouflage (the only perk that lowers visibility) hides better in the dark (item 75).
-        public float Visibility => currentState == State.Fleeing ? 1f
-            : perkEffects.visibility < 1f
-                ? perkEffects.visibility * Mathf.Lerp(AnimalPerks.CamouflageNightVisibility, 1f, WorldDay.Current.daylight)
-                : perkEffects.visibility;
+        public float Visibility
+        {
+            get
+            {
+                float daylight = WorldDay.Current.daylight;
+                float hidden = currentState == State.Fleeing ? 1f
+                    : perkEffects.visibility < 1f
+                        ? perkEffects.visibility * Mathf.Lerp(AnimalPerks.CamouflageNightVisibility, 1f, daylight)
+                        : perkEffects.visibility;
+                if (!perkEffects.glows) return hidden;
+                // A glowing animal (item 76) can't hide in the dark, and is seen from further the darker it is.
+                float darkness = 1f - daylight;
+                return Mathf.Lerp(hidden, 1f, darkness) * AnimalPerks.GlowSpotting(darkness);
+            }
+        }
+        // Whether it has the glow perk (item 76), and how many living animals do: while none do, nobody looks further.
+        public bool Glows => perkEffects.glows;
+        public static int GlowingAnimals => glowingAnimals;
+        static int glowingAnimals;
+        private bool countedAsGlowing;
+
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+        static void ResetGlowingAnimals() => glowingAnimals = 0;
         public float RemainingLifespan => Mathf.Max(0f, maxLifespan - currentAge);
         // 1 until the onset of ageing, then falling to 0 over Ageing Span (item 68). Health is capped at this share of
         // its maximum, speed falls towards Aged Speed Floor, and each chance to breed is taken with this probability.
@@ -745,6 +764,11 @@ namespace Boreal.Animals
             thermalResponse = GetComponent<AnimalTemperature>();
             if (thermalResponse == null) thermalResponse = gameObject.AddComponent<AnimalTemperature>();
             InitializeGenome();
+            if (perkEffects.glows && !countedAsGlowing)
+            {
+                countedAsGlowing = true;
+                glowingAnimals++;
+            }
             minimumBodyBulk = Mathf.Max(0.01f, minimumBodyBulk);
             maximumBodyBulk = Mathf.Max(minimumBodyBulk, maximumBodyBulk);
             bodyBulk = Mathf.Clamp(bodyBulk, minimumBodyBulk, maximumBodyBulk);
@@ -837,6 +861,11 @@ namespace Boreal.Animals
 
         void OnDestroy()
         {
+            if (countedAsGlowing)
+            {
+                countedAsGlowing = false;
+                glowingAnimals = Mathf.Max(0, glowingAnimals - 1);
+            }
             // An animal removed without dying (a scene unloading, a test) takes its store out of the ledger.
             if (EnergyLedger.Enabled && !isDying && !leftTheLedger)
                 EnergyLedger.Record(EnergyFlow.LostAtDeath, -(double)currentEnergy);
@@ -1181,7 +1210,16 @@ namespace Boreal.Animals
             if (manager != null)
             {
                 // Only animals in the grid cells this animal's vision covers can be seen, so the rest aren't checked.
-                manager.FindAgentsNear(transform.position, perceptionRadius, nearbyAnimals);
+                // In the dark a glowing animal is seen from further (item 76), so while any animal glows the search
+                // reaches as far as one could be seen.
+                float darkness = 1f - WorldDay.Current.daylight;
+                float searchRadius = perceptionRadius;
+                if (glowingAnimals > 0 && darkness > 0f)
+                {
+                    searchRadius *= Mathf.Max(AnimalPerks.GlowSpotting(darkness),
+                                              seekingMate ? AnimalPerks.GlowMateNotice(darkness) : 1f);
+                }
+                manager.FindAgentsNear(transform.position, searchRadius, nearbyAnimals);
                 float bestMateScore = 0f;
                 foreach (SeekFood other in nearbyAnimals)
                 {
@@ -1455,8 +1493,10 @@ namespace Boreal.Animals
                 return;
             }
 
+            // A glowing partner is noticed from up to twice as far in the dark (item 76).
+            float notice = other.Glows ? AnimalPerks.GlowMateNotice(1f - WorldDay.Current.daylight) : 1f;
             float distanceSquared = (transform.position - other.transform.position).sqrMagnitude;
-            if (distanceSquared > visionRadiusSquared || IsAvoidedMate(other))
+            if (distanceSquared > visionRadiusSquared * notice * notice || IsAvoidedMate(other))
             {
                 return;
             }
@@ -2620,7 +2660,7 @@ namespace Boreal.Animals
         {
             return !CanEat(food)
                 ? 0f
-                : food.nutritionValue * GetDigestionEfficiency(food.foodType);
+                : food.CurrentNutrition * GetDigestionEfficiency(food.foodType);
         }
 
         bool TryConsumeFood(FoodItem food)
@@ -3025,6 +3065,36 @@ namespace Boreal.Animals
                                                           perkEffects.heatToleranceChange);
             bodyPlan = AnimalBodyPlan.Describe(genome);
             perks = AnimalPerks.Describe(genome);
+        }
+
+        // Gives or takes a perk now, for god tools and experiments (the soak runner's --founder-perk): the genome, the
+        // perk's effects, the upkeep, the look and the count of glowing animals follow. Children inherit it as usual.
+        public void SetPerk(AnimalPerk perk, bool on)
+        {
+            if (genome == null || !genome.IsValid || genome.HasPerk(perk) == on) return;
+            PerkEffects before = perkEffects;
+            genome.SetPerk(perk, on);
+            perkEffects = AnimalPerks.Evaluate(genome);
+            perks = AnimalPerks.Describe(genome);
+            if (thermalResponse != null)
+            {
+                thermalResponse.coldTolerance = Mathf.Max(0f, thermalResponse.coldTolerance +
+                                                              perkEffects.coldToleranceChange - before.coldToleranceChange);
+                thermalResponse.heatTolerance = Mathf.Max(0f, thermalResponse.heatTolerance +
+                                                              perkEffects.heatToleranceChange - before.heatToleranceChange);
+            }
+            if (perkEffects.glows && !countedAsGlowing)
+            {
+                countedAsGlowing = true;
+                glowingAnimals++;
+            }
+            else if (!perkEffects.glows && countedAsGlowing)
+            {
+                countedAsGlowing = false;
+                glowingAnimals = Mathf.Max(0, glowingAnimals - 1);
+            }
+            RefreshMetabolicRate();
+            BuildBodyView();
         }
 
         AnimalGenome CaptureGenome()

@@ -1,4 +1,8 @@
-# Latest verification — 14 November 2026, with the replay without selection (item 59)
+# Latest verification — 14 November 2026, with plankton at night and the glow perk (item 76)
+
+**360 passed, 1 failed, 0 skipped** of 361 in Unity 6000.4.1f1 ([NUnit XML](Logs/TestResults/20261114T045404132772Z/results.xml)), on a working tree that also held items 67 and 59 (not committed). The failure was `MeatLeaningAnimalsHuntTheirOwnKind` ("did not kill its own kind within 30 s"), which has failed now and then since item 60; run alone afterwards it passed three times out of three. New: `AnimalPerksTests.GlowCostsEnergyAndIsNoticedFurtherInTheDark`, `SeaFoodTests.PlanktonAreRichAtNightAndPoorByDay` and `OnlyPlanktonFoodFollowsTheTimeOfDay`, and the Play Mode `AGlowingPartnerIsNoticedFromTwiceAsFarAtNight`. `SpeciesSplitCalibrationTests` passes with a median first split of 65.5 generations (runs 43 to 96).
+
+# 14 November 2026, with the replay without selection (item 59)
 
 **357 passed, 0 failed, 0 skipped** in Unity 6000.4.1f1 ([NUnit XML](Logs/TestResults/20261114T043451407722Z/results.xml)), on a working tree that also held item 67 (not committed). New: `NeutralReplayTests` (three Edit Mode tests, one of them run for both replay modes). `python3 Tools/neutral_replay.py --self-test` passes seven checks on the same kind of made-up records outside Unity. A first full run, before the family-tree mode, had 356 of 356.
 

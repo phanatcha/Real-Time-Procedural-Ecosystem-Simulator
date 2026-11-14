@@ -88,7 +88,11 @@ namespace Boreal.Animals
         // at the same rates as the real perks, so at SeekFood's defaults (0.2% and 2% per birth) chance alone takes it
         // to about 2% of animals after 10 generations, 3% after 20 and 4% after 30, levelling out near 9%
         // (0.2 / (0.2 + 2)). A real perk well above that has been selected for.
-        Marker
+        Marker,
+        // Bioluminescence (item 76): the animal glows in the dark, so partners notice it from twice as far at night,
+        // but it costs energy, cancels camouflage at night and lets hunters spot it from further (see AnimalPerks).
+        // Last, so genomes saved before it keep their perks in place.
+        Glow
     }
 
     // How the body plan changes at birth. Chances are percentages per birth at a mutation rate of 1; the mutation

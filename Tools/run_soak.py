@@ -29,6 +29,7 @@ parser.add_argument('--sexual-drive-at', default='800',
 parser.add_argument('--ledger', default='0', help='1 adds up every change to the animals\' energy and logs any gap (item 61)')
 parser.add_argument('--perk-gain', help='Perk gain chance in per cent per birth on every animal (item 62; default 0.2)')
 parser.add_argument('--perk-loss', help='Perk loss chance in per cent per birth on every animal (item 62; default 2)')
+parser.add_argument('--founder-perks', help='Perks the founders start with, e.g. "Glow" (item 76; comma-separated)')
 parser.add_argument('--ageing', default='1', help='0 switches ageing off on every animal (item 68), for control runs')
 parser.add_argument('--size-scaling', default='1',
                     help='0 gives every animal the store and upkeep rule from before item 67 (size ignored), for control runs')
@@ -99,6 +100,8 @@ if args.perk_gain is not None:
     command += ['-soakPerkGain', args.perk_gain]
 if args.perk_loss is not None:
     command += ['-soakPerkLoss', args.perk_loss]
+if args.founder_perks:
+    command += ['-soakFounderPerks', args.founder_perks]
 command += ['-soakThirst', args.thirst, '-soakDayNight', args.daynight, '-soakOwnKind', args.own_kind]
 command += ['-soakNaturalEvents', args.natural_events, '-soakFires', args.fires, '-soakFuelProbe', args.fuel_probe]
 if args.fire_strikes is not None:

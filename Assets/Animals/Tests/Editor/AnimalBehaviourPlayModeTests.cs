@@ -997,6 +997,66 @@ namespace Boreal.Animals.Tests
             }
         }
 
+        // Glow (item 76): on a moonless night an animal looking for a mate notices a glowing partner 25 m away, beyond
+        // the 16.5 m it sees by starlight but within twice that, and they breed; the same pair without the glow never
+        // meet. In the dark a glowing animal can't hide behind camouflage and is spotted from half as far again.
+        [UnityTest]
+        public IEnumerator AGlowingPartnerIsNoticedFromTwiceAsFarAtNight()
+        {
+            EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
+            yield return new EnterPlayMode(ReloadsDomain);
+
+            BakeNavMesh(CreateGround(Vector3.zero, 100f));
+            StartSimulation();
+            try
+            {
+                SetTimeOfDay(0f);
+                AnimalGenome plain = Genome(sexualDrive: 1f, maturityTime: 5f);
+                plain[AnimalGene.Nocturnality] = 1f;
+                AnimalGenome glowing = plain.Clone();
+                glowing.SetPerk(AnimalPerk.Glow, true);
+                AnimalGenome hidden = plain.Clone();
+                hidden.SetPerk(AnimalPerk.Glow, true);
+                hidden.SetPerk(AnimalPerk.Camouflage, true);
+
+                SeekFood seeker = CreateAnimal(new Vector3(-30f, 0f, 30f), plain, energyFraction: 1f, age: 10f);
+                SeekFood glower = CreateAnimal(new Vector3(-5f, 0f, 30f), glowing, energyFraction: 1f, age: 10f);
+                SeekFood lonely = CreateAnimal(new Vector3(-30f, 0f, -30f), plain, energyFraction: 1f, age: 10f);
+                SeekFood plainPartner = CreateAnimal(new Vector3(-5f, 0f, -30f), plain, energyFraction: 1f, age: 10f);
+                SeekFood camouflaged = CreateAnimal(new Vector3(30f, 0f, 0f), hidden, energyFraction: 1f, age: 10f);
+                foreach (SeekFood animal in new[] { seeker, glower, lonely, plainPartner, camouflaged })
+                {
+                    animal.wanderRadius = 0f;
+                    animal.mutationChance = 0f;
+                }
+                yield return null;
+                yield return null;
+
+                Assert.IsTrue(glower.Glows);
+                Assert.IsFalse(seeker.Glows);
+                Assert.AreEqual(2, SeekFood.GlowingAnimals);
+                Assert.AreEqual(1.5f, glower.Visibility, 0.01f, "In full dark a glowing animal is spotted from half as far again.");
+                Assert.AreEqual(1.5f, camouflaged.Visibility, 0.01f, "Glowing cancels camouflage in the dark.");
+                Assert.AreEqual(1f, seeker.Visibility, 1e-4f);
+
+                float deadline = Time.time + 25f;
+                while (glower.YoungBorn + seeker.YoungBorn == 0 && Time.time < deadline) yield return null;
+                Assert.Greater(glower.YoungBorn + seeker.YoungBorn, 0,
+                               "The animal looking for a mate did not find the glowing partner 25 m away.");
+                Assert.AreEqual(0, lonely.YoungBorn + plainPartner.YoungBorn,
+                                "Animals without the glow found each other beyond what they see by starlight.");
+
+                SetTimeOfDay(0.5f);
+                Assert.AreEqual(1f, glower.Visibility, 1e-3f, "By day the glow is not seen.");
+                Assert.AreEqual(AnimalPerks.CamouflageVisibility, camouflaged.Visibility, 1e-3f,
+                                "By day camouflage works as usual.");
+            }
+            finally
+            {
+                Boreal.World.WorldDay.Reset();
+            }
+        }
+
         // Night eyes cost energy: the best ones 6% more than ordinary eyes.
         [UnityTest]
         public IEnumerator NightEyesCostEnergy()

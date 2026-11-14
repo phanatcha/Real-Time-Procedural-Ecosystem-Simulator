@@ -13,6 +13,9 @@ namespace Boreal.Animals
     // - regeneration: slowly heals while the animal has energy; costs energy
     // - scavenger gut: can eat spoiled carcasses, which nothing else can; digests plants worse
     // - marker: nothing at all; a yardstick for how far chance alone spreads a perk (item 56)
+    // - glow (bioluminescence, item 76): in the dark partners notice it from twice as far, but camouflage stops working
+    //   and others spot it from half as far again; costs energy. Light made by a chemical reaction, so it works in
+    //   total darkness, as in fireflies.
     // Body plates already cover armour.
     public readonly struct PerkEffects
     {
@@ -30,13 +33,16 @@ namespace Boreal.Animals
         public readonly bool canEatSpoiledFood;
         // Multiplies how much of a plant's energy the animal digests.
         public readonly float plantDigestionMultiplier;
+        // Whether it glows in the dark (item 76).
+        public readonly bool glows;
 
         public static readonly PerkEffects None = new PerkEffects(0f, 0f, 1f, 0f, 1f, 0f, false, 1f);
 
         public PerkEffects(float coldToleranceChange, float heatToleranceChange, float energyUseMultiplier,
                            float venomDamageReturned, float visibility, float regenerationPerSecond,
-                           bool canEatSpoiledFood, float plantDigestionMultiplier)
+                           bool canEatSpoiledFood, float plantDigestionMultiplier, bool glows = false)
         {
+            this.glows = glows;
             this.coldToleranceChange = coldToleranceChange;
             this.heatToleranceChange = heatToleranceChange;
             this.energyUseMultiplier = energyUseMultiplier;
@@ -59,6 +65,14 @@ namespace Boreal.Animals
         public const float RegenerationPerSecond = 0.01f;  // 1% of maximum health per simulated second
         public const float RegenerationEnergyCost = 0.1f;  // +10% energy use
         public const float ScavengerPlantDigestion = 0.7f; // digests 30% less of a plant's energy
+        public const float GlowEnergyCost = 0.04f;         // +4% energy use
+        public const float GlowMateNoticeRange = 2f;       // partners notice it from twice as far in full dark
+        public const float GlowSpottingRange = 1.5f;       // others spot it from half as far again in full dark
+
+        // How much further than usual a glowing animal is noticed at this darkness (0 by day, 1 in full dark), as a
+        // partner and by other animals.
+        public static float GlowMateNotice(float darkness) => Mathf.Lerp(1f, GlowMateNoticeRange, Mathf.Clamp01(darkness));
+        public static float GlowSpotting(float darkness) => Mathf.Lerp(1f, GlowSpottingRange, Mathf.Clamp01(darkness));
 
         public static PerkEffects Evaluate(AnimalGenome genome)
         {
@@ -72,9 +86,10 @@ namespace Boreal.Animals
             bool camouflage = genome.HasPerk(AnimalPerk.Camouflage);
             bool regeneration = genome.HasPerk(AnimalPerk.Regeneration);
             bool scavenger = genome.HasPerk(AnimalPerk.ScavengerGut);
+            bool glow = genome.HasPerk(AnimalPerk.Glow);
 
             float upkeep = (venom ? VenomEnergyCost : 0f) + (camouflage ? CamouflageEnergyCost : 0f) +
-                           (regeneration ? RegenerationEnergyCost : 0f);
+                           (regeneration ? RegenerationEnergyCost : 0f) + (glow ? GlowEnergyCost : 0f);
             return new PerkEffects(
                 fur ? ThickFurToleranceShift : 0f,
                 fur ? -ThickFurToleranceShift : 0f,
@@ -83,7 +98,8 @@ namespace Boreal.Animals
                 camouflage ? CamouflageVisibility : 1f,
                 regeneration ? RegenerationPerSecond : 0f,
                 scavenger,
-                scavenger ? ScavengerPlantDigestion : 1f);
+                scavenger ? ScavengerPlantDigestion : 1f,
+                glow);
         }
 
         public static string PerkName(AnimalPerk perk) => perk switch
@@ -94,6 +110,7 @@ namespace Boreal.Animals
             AnimalPerk.Regeneration => "regeneration",
             AnimalPerk.ScavengerGut => "scavenger gut",
             AnimalPerk.Marker => "marker (no effect)",
+            AnimalPerk.Glow => "glow",
             _ => perk.ToString()
         };
 

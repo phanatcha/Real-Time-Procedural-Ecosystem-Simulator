@@ -46,8 +46,8 @@ namespace Boreal.Animals
             // each gene's limits (item 54). 8: a new lives.csv with one row per animal (item 57). 9: traits.csv
             // and lives.csv gained the AgeingOnset gene (item 68). 10: population.csv gained deaths by fire (a fire column
             // before other) and the fire weather and burned area at its end (items 78 and 79); metadata the natural
-            // event settings.
-            public int schemaVersion = 10;
+            // event settings. 11: traits.csv and lives.csv gained the glow perk (Perk_Glow, item 76).
+            public int schemaVersion = 11;
             public string startedUtc, sourceRevision, experiment, unityVersion, worldSeed;
             public float sampleInterval;
             public bool offscreenEnabled;

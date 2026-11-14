@@ -83,6 +83,20 @@ namespace Boreal.Animals
             return surfaceCelsius <= optimalMax ? 1f : 1f - Mathf.InverseLerp(optimalMax, maximum, surfaceCelsius);
         }
 
+        // Plankton by the time of day (item 76): zooplankton rise to the surface to feed at night and sink by day to hide
+        // from fish (diel vertical migration), and bright moonlight keeps them deeper. As a multiple of the open sea's
+        // nutrition: half by day, one and a half on a moonless night, 1.1 under a full moon high in the sky, and in
+        // between through twilight. Over a year the average is about 1, more in the long winter nights, less in summer.
+        public const float PlanktonByDay = 0.5f;
+        public const float PlanktonOnADarkNight = 1.5f;
+        public const float PlanktonUnderAFullMoon = 1.1f;
+
+        public static float PlanktonAtSurface(float daylight, float moonlight)
+        {
+            float night = Mathf.Lerp(PlanktonOnADarkNight, PlanktonUnderAFullMoon, Mathf.Clamp01(moonlight));
+            return Mathf.Lerp(night, PlanktonByDay, Mathf.Clamp01(daylight));
+        }
+
         public static string PlantName(SeaBiome biome) => biome switch
         {
             SeaBiome.SeagrassMeadow => "Seagrass",

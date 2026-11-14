@@ -47,6 +47,27 @@ namespace Boreal.Animals.Tests
             Assert.AreEqual(1f + AnimalPerks.VenomEnergyCost, effects.energyUseMultiplier, Tolerance);
         }
 
+        // Glow (item 76): costs 4% energy, and in the dark makes the animal noticed further away, twice as far as a
+        // partner and half as far again by anyone. By day it changes nothing but the cost.
+        [Test]
+        public void GlowCostsEnergyAndIsNoticedFurtherInTheDark()
+        {
+            PerkEffects effects = AnimalPerks.Evaluate(WithPerks(AnimalPerk.Glow));
+
+            Assert.IsTrue(effects.glows);
+            Assert.IsFalse(AnimalPerks.Evaluate(WithPerks()).glows);
+            Assert.AreEqual(1f + AnimalPerks.GlowEnergyCost, effects.energyUseMultiplier, Tolerance);
+            Assert.AreEqual(1.04f, effects.energyUseMultiplier, Tolerance);
+            Assert.AreEqual(1f, effects.visibility, "Glow hides nothing.");
+            Assert.AreEqual(1f, AnimalPerks.GlowMateNotice(0f), Tolerance);
+            Assert.AreEqual(2f, AnimalPerks.GlowMateNotice(1f), Tolerance);
+            Assert.AreEqual(1.5f, AnimalPerks.GlowMateNotice(0.5f), Tolerance);
+            Assert.AreEqual(1f, AnimalPerks.GlowSpotting(0f), Tolerance);
+            Assert.AreEqual(1.5f, AnimalPerks.GlowSpotting(1f), Tolerance);
+            Assert.AreEqual("glow", AnimalPerks.PerkName(AnimalPerk.Glow));
+            Assert.IsTrue(AnimalGenome.CountsTowardsDistance(AnimalPerk.Glow), "Glow is a real perk, unlike the marker.");
+        }
+
         [Test]
         public void CamouflageHidesTheAnimalAndCostsEnergy()
         {

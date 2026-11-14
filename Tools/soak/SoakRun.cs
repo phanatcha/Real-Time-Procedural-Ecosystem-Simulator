@@ -82,6 +82,7 @@ namespace Boreal.Soak.Editor
             SessionState.SetBool(Key + "Ledger", Arg("soakLedger", "0") == "1");
             SessionState.SetFloat(Key + "PerkGain", float.Parse(Arg("soakPerkGain", "-1"), CultureInfo.InvariantCulture));
             SessionState.SetFloat(Key + "PerkLoss", float.Parse(Arg("soakPerkLoss", "-1"), CultureInfo.InvariantCulture));
+            SessionState.SetString(Key + "FounderPerks", Arg("soakFounderPerks", ""));
             SessionState.SetBool(Key + "Ageing", Arg("soakAgeing", "1") == "1");
             SessionState.SetBool(Key + "SizeScaling", Arg("soakSizeScaling", "1") == "1");
             SessionState.SetBool(Key + "NaturalEvents", Arg("soakNaturalEvents", "1") == "1");
@@ -226,6 +227,14 @@ namespace Boreal.Soak.Editor
                               $"{natural.Wildfire.BurnedHectares:0.0} ha burned in all, fleeing {fleeing}, in smoke {inSmoke}, " +
                               $"lightning {natural.Wildfire.Strikes} strikes, {natural.Wildfire.StrikesCaught} caught");
                 }
+                // Item 76: how many animals glow, how many are in water, and the sea sparkles made so far.
+                int glowing = 0, swimming = 0;
+                foreach (SeekFood animal in animals)
+                {
+                    if (animal.Glows) glowing++;
+                    if (animal.IsInWater) swimming++;
+                }
+                Debug.Log($"Soak: night glow {glowing} glowing, {swimming} in water, {SeaSparkle.SparksMade} sea sparkles so far");
             }
 
             if (stage == 0 && animals.Length > 0 && !SessionState.GetBool(Key + "Fast", false) && manager != null)
@@ -250,6 +259,11 @@ namespace Boreal.Soak.Editor
                     float perkLoss = SessionState.GetFloat(Key + "PerkLoss", -1f);
                     if (perkGain >= 0f) founder.perkGainChance = perkGain;
                     if (perkLoss >= 0f) founder.perkLossChance = perkLoss;
+                    // Item 76 experiments: the founders start with these perks (e.g. "Glow"), passed on as usual.
+                    foreach (string name in SessionState.GetString(Key + "FounderPerks", "").Split(','))
+                    {
+                        if (System.Enum.TryParse(name.Trim(), true, out AnimalPerk founderPerk)) founder.SetPerk(founderPerk, true);
+                    }
                     // Item 68 control runs: no ageing, full health until the lifespan runs out.
                     if (!SessionState.GetBool(Key + "Ageing", true))
                     {

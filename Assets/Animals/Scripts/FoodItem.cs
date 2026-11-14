@@ -37,6 +37,12 @@ namespace Boreal.Animals
 
         public Vector3 GroundPosition => transform.position - Vector3.up * heightAboveGround;
 
+        // What eating it gives now. Plankton rise to the surface at night and sink by day (item 76), so in the open sea
+        // it is worth more by night than by day; everything else is worth its nutrition value.
+        public float CurrentNutrition => seaBiome == SeaBiome.OpenSea && WorldDay.IsRunning
+            ? nutritionValue * SeaFoodRules.PlanktonAtSurface(WorldDay.Current.daylight, WorldDay.Current.moonlight)
+            : nutritionValue;
+
         [Header("Water")]
         [Tooltip("The sea biome a sea plant grows in; None on land. Sea plants float at the water surface, so their " +
                  "ground position is on the water.")]
@@ -313,7 +319,7 @@ namespace Boreal.Animals
                 return false;
             }
 
-            nutrition = nutritionValue;
+            nutrition = CurrentNutrition;
             RemoveFromSimulation();
             return true;
         }

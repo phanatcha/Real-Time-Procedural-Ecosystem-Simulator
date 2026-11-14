@@ -14,6 +14,11 @@ namespace Boreal.Animals
         const string EyeshineObjectName = "Eyeshine";
         // The yellow-green of a deer's or cat's eyes in torchlight.
         static readonly Color EyeshineColor = new Color(0.75f, 0.95f, 0.45f);
+        const string GlowObjectName = "Glow";
+        // Bioluminescent blue-green, as most living light is (item 76).
+        static readonly Color GlowColor = new Color(0.18f, 0.62f, 0.56f);
+        // The glow shell is the body's own mesh, this much larger, so the light spills a little past the outline.
+        const float GlowShellScale = 1.08f;
         const float PartShade = 0.7f;
         const int FramesToCheckLift = 30;
 
@@ -22,6 +27,9 @@ namespace Boreal.Animals
         static readonly Dictionary<Color32, Material> materialsByColor = new Dictionary<Color32, Material>();
         static readonly Dictionary<PrimitiveType, Mesh> primitiveMeshes = new Dictionary<PrimitiveType, Mesh>();
         static Material eyeshineMaterial;
+        static Material glowMaterial;
+        // One coloured copy of each body mesh for the glow shell, shared by every glowing animal.
+        static readonly Dictionary<Mesh, Mesh> glowMeshes = new Dictionary<Mesh, Mesh>();
 
         readonly List<CombineInstance> pieces = new List<CombineInstance>();
         AnimalGenome genome;
@@ -43,6 +51,8 @@ namespace Boreal.Animals
             materialsByColor.Clear();
             primitiveMeshes.Clear();
             eyeshineMaterial = null;
+            glowMaterial = null;
+            glowMeshes.Clear();
         }
 
         // fullLegReach: how far below the body a full-size leg reaches, in world units.
@@ -159,6 +169,8 @@ namespace Boreal.Animals
                 BuildEyeshine(frame);
             }
 
+            BuildGlow();
+
             if (partsFilter == null)
             {
                 return;
@@ -243,6 +255,64 @@ namespace Boreal.Animals
             for (int index = 0; index < colours.Length; index++) colours[index] = colour;
             eyeshineMesh.colors32 = colours;
             eyes.GetComponent<MeshFilter>().sharedMesh = eyeshineMesh;
+        }
+
+        // An animal with the glow perk (item 76) gives off a soft blue-green light in the dark: a shell over its body,
+        // drawn added on top and faded in by the dark (Hidden/Boreal/Glow), so nothing runs per frame. The shell is a
+        // child of the body, so it grows and turns with it. An offspring starts with its parent's shell and hides it
+        // when it doesn't glow.
+        void BuildGlow()
+        {
+            Transform shell = transform.Find(GlowObjectName);
+            MeshFilter bodyFilter = GetComponent<MeshFilter>();
+            bool glows = genome != null && genome.IsValid && genome.HasPerk(AnimalPerk.Glow);
+            if (!glows || bodyFilter == null || bodyFilter.sharedMesh == null || GlowMaterial() == null)
+            {
+                if (shell != null) shell.gameObject.SetActive(false);
+                return;
+            }
+
+            if (shell == null)
+            {
+                shell = new GameObject(GlowObjectName).transform;
+                shell.SetParent(transform, false);
+                shell.localScale = Vector3.one * GlowShellScale;
+                shell.gameObject.layer = gameObject.layer;
+                shell.gameObject.AddComponent<MeshFilter>();
+                MeshRenderer renderer = shell.gameObject.AddComponent<MeshRenderer>();
+                renderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+                renderer.receiveShadows = false;
+                renderer.lightProbeUsage = UnityEngine.Rendering.LightProbeUsage.Off;
+                renderer.reflectionProbeUsage = UnityEngine.Rendering.ReflectionProbeUsage.Off;
+            }
+
+            shell.gameObject.SetActive(true);
+            shell.GetComponent<MeshFilter>().sharedMesh = GlowMesh(bodyFilter.sharedMesh);
+            shell.GetComponent<MeshRenderer>().sharedMaterial = GlowMaterial();
+        }
+
+        static Mesh GlowMesh(Mesh body)
+        {
+            if (glowMeshes.TryGetValue(body, out Mesh mesh) && mesh != null) return mesh;
+            mesh = Instantiate(body);
+            mesh.name = body.name + " Glow";
+            Color32[] colours = new Color32[mesh.vertexCount];
+            Color32 colour = GlowColor;
+            for (int index = 0; index < colours.Length; index++) colours[index] = colour;
+            mesh.colors32 = colours;
+            glowMeshes[body] = mesh;
+            return mesh;
+        }
+
+        static Material GlowMaterial()
+        {
+            if (glowMaterial == null)
+            {
+                Shader shader = Shader.Find("Hidden/Boreal/Glow");
+                if (shader != null) glowMaterial = new Material(shader) { name = "Glow" };
+            }
+
+            return glowMaterial;
         }
 
         static Material EyeshineMaterial()
