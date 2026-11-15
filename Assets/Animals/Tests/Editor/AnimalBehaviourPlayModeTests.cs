@@ -433,6 +433,48 @@ namespace Boreal.Animals.Tests
             Assert.AreEqual(record.reproductionEvents, record.sexualOffspring, "Animals that only mate should never clone.");
         }
 
+        // Hybrids (item 63): a pair more than half the species threshold apart has young that count as hybrids, and
+        // each child records how far apart its parents were. The straight fade with no fade keeps them fully fertile,
+        // so the test doesn't wait on chance; the snowball's numbers are in MatingRulesTests.
+        [UnityTest]
+        public IEnumerator DistantPairsHaveYoungThatCountAsHybrids()
+        {
+            EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
+            yield return new EnterPlayMode(ReloadsDomain);
+
+            BakeNavMesh(CreateGround(Vector3.zero, 60f));
+            SpeciesManager manager = StartSimulation();
+            AnimalGenome first = Genome(sexualDrive: 1f, maturityTime: 5f);
+            AnimalGenome second = Genome(sexualDrive: 1f, maturityTime: 5f);
+            second[AnimalGene.MutationRate] = 4f;
+            float distance = AnimalGenome.Distance(first, second);
+            Assert.Greater(distance, 0f);
+            // The pair stands at 60% of the threshold: a hybrid pair, but one species.
+            manager.speciationThreshold = distance / 0.6f;
+            SeekFood a = CreateAnimal(Vector3.zero, first, energyFraction: 1f, age: 10f);
+            SeekFood b = CreateAnimal(new Vector3(3f, 0f, 0f), second, energyFraction: 1f, age: 10f);
+            foreach (SeekFood animal in new[] { a, b })
+            {
+                animal.fertilityCurve = FertilityCurve.Linear;
+                animal.fertilityFadeStart = 1f;
+                animal.mutationChance = 0f;
+            }
+
+            float deadline = Time.time + 60f;
+            while (AnimalCount() < 3 && Time.time < deadline) yield return null;
+            Assert.GreaterOrEqual(AnimalCount(), 3, "The pair had no child within 60 simulated seconds.");
+
+            SpeciesTelemetryRecord record = Telemetry();
+            Assert.GreaterOrEqual(record.sexualOffspring, 1);
+            Assert.AreEqual(record.sexualOffspring, record.hybridOffspring, "Every child of this pair is a hybrid.");
+            Assert.AreEqual(0, record.crossSpeciesOffspring, "Both parents are of the same species.");
+            foreach (SeekFood animal in Object.FindObjectsByType<SeekFood>(FindObjectsSortMode.None))
+            {
+                if (animal == a || animal == b) Assert.AreEqual(-1f, animal.ParentDistance, "A founder has no parents.");
+                else Assert.AreEqual(distance, animal.ParentDistance, 1e-5f, "A child records its parents' distance.");
+            }
+        }
+
         [UnityTest]
         public IEnumerator BitingAVenomousAnimalHurtsTheBiter()
         {

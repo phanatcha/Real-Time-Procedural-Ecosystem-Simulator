@@ -46,8 +46,10 @@ namespace Boreal.Animals
             // each gene's limits (item 54). 8: a new lives.csv with one row per animal (item 57). 9: traits.csv
             // and lives.csv gained the AgeingOnset gene (item 68). 10: population.csv gained deaths by fire (a fire column
             // before other) and the fire weather and burned area at its end (items 78 and 79); metadata the natural
-            // event settings. 11: traits.csv and lives.csv gained the glow perk (Perk_Glow, item 76).
-            public int schemaVersion = 11;
+            // event settings. 11: traits.csv and lives.csv gained the glow perk (Perk_Glow, item 76). 12: hybrid and
+            // cross-species births at the end of population.csv and species.csv, and parent_distance in lives.csv after
+            // young (item 63).
+            public int schemaVersion = 12;
             public string startedUtc, sourceRevision, experiment, unityVersion, worldSeed;
             public float sampleInterval;
             public bool offscreenEnabled;
@@ -77,7 +79,8 @@ namespace Boreal.Animals
                 Vector3 birth = animal.BirthPosition, end = animal.transform.position;
                 Row(lives, LifeRecords.Cells(animal.AnimalId, animal.FirstParentId, animal.SecondParentId,
                     animal.speciesName, animal.Generation, animal.Origin, animal.BirthTime, ended ? time : (double?)null,
-                    animal.CurrentAge, cause, birth.x, birth.z, end.x, end.z, animal.YoungBorn, animal.Genome).ToArray());
+                    animal.CurrentAge, cause, birth.x, birth.z, end.x, end.z, animal.YoungBorn, animal.ParentDistance,
+                    animal.Genome).ToArray());
             }
             catch (Exception e) when (e is IOException || e is UnauthorizedAccessException)
             {
@@ -140,8 +143,8 @@ namespace Boreal.Animals
                 naturalEventSettings = NaturalEventDirector.Active != null ? JsonUtility.ToJson(NaturalEventDirector.Active) : ""
             };
             File.WriteAllText(Path.Combine(OutputDirectory, "metadata.json"), JsonUtility.ToJson(metadata, true));
-            population = Open("population.csv", "time,live,offscreen,species_alive,births,cloned_births,sexual_births,deaths,starvation,predation,old_age,cold,heat,venom,thirst,fire,other,land_ceiling,sea_ceiling,requested_speed,achieved_speed,season,season_strength,offscreen_enabled,breeding_wait_episodes,breeding_wait_seconds,day,time_of_day,daylight,light,moon_phase,deaths_at_night,resting,average_generation,highest_generation,dryness,fire_danger,fires_burning,burning_hectares,burned_hectares");
-            species = Open("species.csv", "time,species,parent,origin,extinction,live,offscreen,births,sexual_births,deaths,breeding_wait_episodes,breeding_wait_seconds,average_generation,highest_generation");
+            population = Open("population.csv", "time,live,offscreen,species_alive,births,cloned_births,sexual_births,deaths,starvation,predation,old_age,cold,heat,venom,thirst,fire,other,land_ceiling,sea_ceiling,requested_speed,achieved_speed,season,season_strength,offscreen_enabled,breeding_wait_episodes,breeding_wait_seconds,day,time_of_day,daylight,light,moon_phase,deaths_at_night,resting,average_generation,highest_generation,dryness,fire_danger,fires_burning,burning_hectares,burned_hectares,hybrid_births,cross_species_births");
+            species = Open("species.csv", "time,species,parent,origin,extinction,live,offscreen,births,sexual_births,deaths,breeding_wait_episodes,breeding_wait_seconds,average_generation,highest_generation,hybrid_births,cross_species_births");
             traits = Open("traits.csv", "time,species,trait,live_sample_count,mean,standard_deviation,minimum,maximum,at_minimum,at_maximum");
             events = Open("events.csv", "time,event,detail");
             lives = Open("lives.csv", LifeRecords.Header());
@@ -196,7 +199,7 @@ namespace Boreal.Animals
                 Fire(director => director.Conditions.dryness),
                 Fire(director => director.Wildfire.Danger(director.Conditions)),
                 Fire(director => director.Wildfire.BurningFires), Fire(director => director.Wildfire.BurningHectares),
-                Fire(director => director.Wildfire.BurnedHectares));
+                Fire(director => director.Wildfire.BurnedHectares), HybridBirths(false), HybridBirths(true));
 
             foreach (SpeciesTelemetryRecord record in manager.Telemetry.Values)
             {
@@ -206,7 +209,8 @@ namespace Boreal.Animals
                     record.extinctionTime, live, manager.OffscreenPopulation?.CountOffscreen(record.speciesName) ?? 0,
                     record.reproductionEvents, record.sexualOffspring, record.deaths,
                     record.breedingWaitEpisodes, record.breedingWaitSeconds,
-                    AverageGeneration(ofRecord), HighestGeneration(ofRecord));
+                    AverageGeneration(ofRecord), HighestGeneration(ofRecord), record.hybridOffspring,
+                    record.crossSpeciesOffspring);
                 groups.TryGetValue(record.speciesName, out var genomes);
                 // Empty populations have blank trait values, not misleading zero-valued genes. Their history remains.
                 for (int gene = 0; gene < AnimalGenome.GeneCount; gene++)
@@ -254,6 +258,16 @@ namespace Boreal.Animals
         }
 
         // No live animals leaves the generation cells blank, as empty populations' traits are.
+        // Births counted as hybrids (parents more than half the species threshold apart), or with a parent of another
+        // species, summed over every species (item 63).
+        int HybridBirths(bool crossSpecies)
+        {
+            int total = 0;
+            foreach (SpeciesTelemetryRecord record in manager.Telemetry.Values)
+                total += crossSpecies ? record.crossSpeciesOffspring : record.hybridOffspring;
+            return total;
+        }
+
         static object AverageGeneration(RunningStatistics generations) =>
             generations.Count > 0 ? (object)generations.Mean : "";
         static object HighestGeneration(RunningStatistics generations) =>

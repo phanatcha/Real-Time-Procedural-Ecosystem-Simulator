@@ -95,6 +95,10 @@ namespace Boreal.Animals
         public int mutatedOffspring;
         [Tooltip("Births with two parents. The rest are clones.")]
         public int sexualOffspring;
+        // Young whose parents were more than half the species threshold apart, and young of a parent of another
+        // species (item 63).
+        public int hybridOffspring;
+        public int crossSpeciesOffspring;
         public int plantMeals;
         public int meatMeals;
         public float rawPlantEnergyConsumed;
@@ -773,7 +777,10 @@ namespace Boreal.Animals
             record.breedingWaitSeconds += seconds;
         }
 
-        public void RecordReproduction(SeekFood parent, bool offspringMutated, bool sexual = false)
+        // hybrid: the parents were more than half the species threshold apart; crossSpecies: the second parent was of
+        // another species (item 63). Both are counted under the first parent's species.
+        public void RecordReproduction(SeekFood parent, bool offspringMutated, bool sexual = false, bool hybrid = false,
+                                       bool crossSpecies = false)
         {
             if (parent == null)
             {
@@ -792,6 +799,9 @@ namespace Boreal.Animals
             {
                 record.sexualOffspring++;
             }
+
+            if (hybrid) record.hybridOffspring++;
+            if (crossSpecies) record.crossSpeciesOffspring++;
         }
 
         public void RecordKill(SeekFood predator)

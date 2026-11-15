@@ -72,8 +72,13 @@ namespace Boreal.Animals
         [Tooltip("Fraction of its energy each parent gives a child of two parents. A clone gets half its one " +
                  "parent's energy.")]
         [Range(0f, 1f)] public float matingEnergyShare = 0.25f;
-        [Tooltip("Fertility fades from this fraction of the species threshold (in genetic distance) to none at the " +
-                 "threshold, so animals about to split into separate species rarely interbreed.")]
+        [Tooltip("How fertility falls with the genetic distance between two parents (item 63). Snowball: 1 - " +
+                 "(distance / species threshold)^2, falling ever faster. Linear: the rule before it, full up to " +
+                 "Fertility Fade Start and then a straight fade.")]
+        public FertilityCurve fertilityCurve = FertilityCurve.Snowball;
+        [Tooltip("With the Linear curve, fertility fades from this fraction of the species threshold (in genetic " +
+                 "distance) to none at the threshold, so animals about to split into separate species rarely " +
+                 "interbreed.")]
         [Range(0f, 1f)] public float fertilityFadeStart = 0.5f;
         // Whether this animal would court a partner now: mature, fed enough, able to mate, rested since its last
         // birth, and not fleeing, fighting or already courting.
@@ -229,8 +234,8 @@ namespace Boreal.Animals
             return other == null || other == this || !other.IsAvailableAsMate ? 0f : GeneticFertility(other);
         }
 
-        // Fertility from how far apart the two genomes are: full for close relatives, fading to none at the
-        // species threshold.
+        // Fertility from how far apart the two genomes are: nearly full for close relatives, falling to none at the
+        // species threshold (by Fertility Curve, item 63).
         float GeneticFertility(SeekFood other)
         {
             if (genome == null || !genome.IsValid || other.genome == null || !other.genome.IsValid)
@@ -238,11 +243,14 @@ namespace Boreal.Animals
                 return 0f;
             }
 
-            float threshold = SpeciesManager.Instance != null
-                ? SpeciesManager.Instance.speciationThreshold
-                : SpeciesManager.DefaultSpeciationThreshold;
-            return MatingRules.Fertility(AnimalGenome.Distance(genome, other.genome), threshold, fertilityFadeStart);
+            return MatingRules.Fertility(AnimalGenome.Distance(genome, other.genome), SpeciesThreshold, fertilityFadeStart,
+                                         fertilityCurve);
         }
+
+        // The genetic distance at which a group becomes a species of its own.
+        static float SpeciesThreshold => SpeciesManager.Instance != null
+            ? SpeciesManager.Instance.speciationThreshold
+            : SpeciesManager.DefaultSpeciationThreshold;
 
         // Like IsCurrentFoodOutOfReach, for a partner that moves: the chase is taking far longer than crossing the
         // field of view would, or the route stops well short of where the partner was (across water the animal
@@ -451,7 +459,12 @@ namespace Boreal.Animals
 
             float energyEach = handedOver / young;
             float givenToYoung = energyEach;
-            Bear(firstGenome, firstMutated, partner, firstPosition, energyEach);
+            // How far apart the parents are, for the hybrid count and the life records (item 63); -1 for a clone.
+            float parentDistance = partner != null && genome != null && genome.IsValid && partner.genome != null &&
+                                   partner.genome.IsValid
+                ? AnimalGenome.Distance(genome, partner.genome)
+                : -1f;
+            Bear(firstGenome, firstMutated, partner, firstPosition, energyEach, parentDistance);
             for (int index = 1; index < young; index++)
             {
                 AnimalGenome childGenome = CreateChildGenome(partner, out bool mutated);
@@ -462,7 +475,7 @@ namespace Boreal.Animals
                     continue;
                 }
                 givenToYoung += energyEach;
-                Bear(childGenome, mutated, partner, position, energyEach);
+                Bear(childGenome, mutated, partner, position, energyEach, parentDistance);
             }
             EnergyLedger.CheckBirth(handedOver, givenToYoung, name);
             return true;
@@ -473,7 +486,8 @@ namespace Boreal.Animals
             return waterMovement.CanSwimDeepWater(AnimalBodyPlan.Evaluate(childGenome).swimmingAbility);
         }
 
-        void Bear(AnimalGenome childGenome, bool mutated, SeekFood partner, Vector3 spawnPosition, float childEnergy)
+        void Bear(AnimalGenome childGenome, bool mutated, SeekFood partner, Vector3 spawnPosition, float childEnergy,
+                  float parentDistance)
         {
             GameObject child = Instantiate(gameObject, spawnPosition, transform.rotation);
             SeekFood childScript = child.GetComponent<SeekFood>();
@@ -493,6 +507,7 @@ namespace Boreal.Animals
             childScript.secondParent = partner;
             childScript.FirstParentId = AnimalId;
             childScript.SecondParentId = partner != null ? partner.AnimalId : 0;
+            childScript.ParentDistance = parentDistance;
             childScript.YoungBorn = 0;
             YoungBorn++;
             if (partner != null) partner.YoungBorn++;
@@ -507,7 +522,9 @@ namespace Boreal.Animals
 
             if (SpeciesManager.Instance != null)
             {
-                SpeciesManager.Instance.RecordReproduction(this, mutated, sexual: partner != null);
+                SpeciesManager.Instance.RecordReproduction(this, mutated, sexual: partner != null,
+                    hybrid: partner != null && MatingRules.IsHybrid(parentDistance, SpeciesThreshold),
+                    crossSpecies: partner != null && partner.speciesName != speciesName);
             }
         }
 

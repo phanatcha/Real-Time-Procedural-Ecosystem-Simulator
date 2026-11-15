@@ -331,6 +331,7 @@ namespace Boreal.Animals
             int births = 0;
             int mutatedBirths = 0;
             int sexualBirths = 0;
+            int hybridBirths = 0;
             foreach (SpeciesTelemetryRecord record in manager.Telemetry.Values)
             {
                 speciesEver++;
@@ -338,10 +339,13 @@ namespace Boreal.Animals
                 births += record.reproductionEvents;
                 mutatedBirths += record.mutatedOffspring;
                 sexualBirths += record.sexualOffspring;
+                hybridBirths += record.hybridOffspring;
             }
 
             string birthShares = births > 0
-                ? $" ({100f * sexualBirths / births:0}% from two parents, {100f * mutatedBirths / births:0}% carried mutations)"
+                ? $" ({100f * sexualBirths / births:0}% from two parents" +
+                  (hybridBirths > 0 ? $", {hybridBirths} hybrid" : "") +
+                  $", {100f * mutatedBirths / births:0}% carried mutations)"
                 : "";
             text.Append($"<b>Births</b> {births}{birthShares}    <b>Generation</b> " +
                         $"{manager.AverageGeneration:0.0} on average, newest {manager.HighestGeneration}\n");

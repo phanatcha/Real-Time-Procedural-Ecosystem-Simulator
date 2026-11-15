@@ -60,7 +60,7 @@ namespace Boreal.Animals.Tests
             genome[AnimalGene.MaturityTime] = 45f;
             genome.SetPart(BodySite.FrontPair, BodyPartType.Legs, 0.35f);
             var cells = LifeRecords.Cells(7, 3, 0, "A", 2, "born", 12.5, null, 4.0, LifeRecords.StillAlive,
-                                          1.0, 2.0, 3.0, 4.0, 1, genome);
+                                          1.0, 2.0, 3.0, 4.0, 1, -1.0, genome);
             Assert.AreEqual(columns.Length, cells.Count);
             object Cell(string column) => cells[Array.IndexOf(columns, column)];
             Assert.AreEqual(7, Cell("id"));
@@ -71,9 +71,13 @@ namespace Boreal.Animals.Tests
             Assert.AreEqual("Legs:0.35", Cell("Part_FrontPair"));
             Assert.AreEqual("", Cell("Part_Head"));
             Assert.AreEqual(0, Cell("Perk_Venom"));
+            Assert.AreEqual("", Cell("parent_distance"), "A clone's parent distance is blank (item 63).");
+            var hybrid = LifeRecords.Cells(8, 3, 5, "A", 2, "born", 12.5, null, 4.0, LifeRecords.StillAlive,
+                                           1.0, 2.0, 3.0, 4.0, 0, 0.031, genome);
+            Assert.AreEqual(0.031, hybrid[Array.IndexOf(columns, "parent_distance")]);
             // Every gene, perk and body site has a column.
             CollectionAssert.Contains(columns, AnimalGene.NightVision.ToString());
-            Assert.AreEqual(16 + AnimalGenome.PerkCount + AnimalGenome.GeneCount + AnimalGenome.SiteCount, columns.Length);
+            Assert.AreEqual(17 + AnimalGenome.PerkCount + AnimalGenome.GeneCount + AnimalGenome.SiteCount, columns.Length);
         }
 
         [Test]

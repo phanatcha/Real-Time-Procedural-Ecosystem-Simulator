@@ -80,6 +80,8 @@ namespace Boreal.Animals
         public int AnimalId { get; private set; }
         public int FirstParentId { get; private set; }
         public int SecondParentId { get; private set; }
+        // The genetic distance between its two parents at its birth (item 63); -1 for a clone, a founder or an arrival.
+        public float ParentDistance { get; private set; } = -1f;
         // Simulated seconds since the world started. Negative for a founder placed with an age.
         public float BirthTime { get; private set; }
         // Where it joined the simulation: its birthplace, or where a founder was placed.

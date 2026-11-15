@@ -65,24 +65,25 @@ namespace Boreal.Animals
         {
             var header = new System.Text.StringBuilder(
                 "id,first_parent,second_parent,species,generation,origin,born,ended,age,cause," +
-                "birth_x,birth_z,end_x,end_z,young,harmful_mutations");
+                "birth_x,birth_z,end_x,end_z,young,parent_distance,harmful_mutations");
             for (int perk = 0; perk < AnimalGenome.PerkCount; perk++) header.Append(",Perk_").Append((AnimalPerk)perk);
             for (int gene = 0; gene < AnimalGenome.GeneCount; gene++) header.Append(',').Append((AnimalGene)gene);
             for (int site = 0; site < AnimalGenome.SiteCount; site++) header.Append(",Part_").Append((BodySite)site);
             return header.ToString();
         }
 
-        // ended is blank while the animal lives; a parent ID of 0 (none) is written blank. Positions are world x and z.
+        // ended is blank while the animal lives; a parent ID of 0 (none) is written blank, and so is the parents'
+        // genetic distance (item 63) for a clone or a founder (a negative distance). Positions are world x and z.
         public static List<object> Cells(int id, int firstParent, int secondParent, string species, int generation,
                                          string origin, double born, double? ended, double age, string cause,
                                          double birthX, double birthZ, double endX, double endZ, int young,
-                                         AnimalGenome genome)
+                                         double parentDistance, AnimalGenome genome)
         {
             var cells = new List<object>
             {
                 id, firstParent > 0 ? (object)firstParent : "", secondParent > 0 ? (object)secondParent : "", species,
                 generation, origin, born, ended.HasValue ? (object)ended.Value : "", age, cause,
-                birthX, birthZ, endX, endZ, young
+                birthX, birthZ, endX, endZ, young, parentDistance >= 0 ? (object)parentDistance : ""
             };
             bool valid = genome != null && genome.IsValid;
             cells.Add(valid ? (object)genome.HarmfulMutations : "");

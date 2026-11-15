@@ -1,4 +1,8 @@
-# Latest verification — 14 November 2026, with SeekFood split into partial files
+# Latest verification — 14 November 2026, with the snowball fertility curve and hybrid births (item 63)
+
+**364 passed, 0 failed, 0 skipped** in Unity 6000.4.1f1 ([NUnit XML](Logs/TestResults/20261114T055712699586Z/results.xml)). New: `MatingRulesTests.SnowballFertilityFallsEverFasterToNoneAtTheThreshold` and `HybridsComeFromParentsMoreThanHalfTheThresholdApart`, the Play Mode `DistantPairsHaveYoungThatCountAsHybrids`, and a `parent_distance` check in `RunRecordingTests`.
+
+# 14 November 2026, with SeekFood split into partial files
 
 **361 passed, 0 failed, 0 skipped** in Unity 6000.4.1f1 ([NUnit XML](Logs/TestResults/20261114T054400655085Z/results.xml)) after `SeekFood` was split into ten partial-class files with no code changed. `MeatLeaningAnimalsHuntTheirOwnKind`, which failed in the run before, passed. No new compiler warnings.
 

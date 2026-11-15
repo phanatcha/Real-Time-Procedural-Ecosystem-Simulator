@@ -83,6 +83,7 @@ namespace Boreal.Soak.Editor
             SessionState.SetFloat(Key + "PerkGain", float.Parse(Arg("soakPerkGain", "-1"), CultureInfo.InvariantCulture));
             SessionState.SetFloat(Key + "PerkLoss", float.Parse(Arg("soakPerkLoss", "-1"), CultureInfo.InvariantCulture));
             SessionState.SetString(Key + "FounderPerks", Arg("soakFounderPerks", ""));
+            SessionState.SetString(Key + "FertilityCurve", Arg("soakFertilityCurve", ""));
             SessionState.SetBool(Key + "Ageing", Arg("soakAgeing", "1") == "1");
             SessionState.SetBool(Key + "SizeScaling", Arg("soakSizeScaling", "1") == "1");
             SessionState.SetBool(Key + "NaturalEvents", Arg("soakNaturalEvents", "1") == "1");
@@ -270,6 +271,10 @@ namespace Boreal.Soak.Editor
                         founder.enableAgeing = false;
                         founder.RefreshMetabolicRate();
                     }
+                    // Item 63 control runs: the straight fade from before the snowball, copied by every descendant.
+                    if (System.Enum.TryParse(SessionState.GetString(Key + "FertilityCurve", ""), true,
+                                             out FertilityCurve curve))
+                        founder.fertilityCurve = curve;
                     // Item 67 control runs: the store ignores size and mass adds only its own share of upkeep.
                     if (!SessionState.GetBool(Key + "SizeScaling", true))
                     {
@@ -288,7 +293,8 @@ namespace Boreal.Soak.Editor
                               (animals[0].enableAgeing ? $"ageing from {animals[0].ageingOnset} s over {animals[0].ageingSpan} s" : "ageing off") +
                               (animals[0].scaleWithBodySize
                                   ? $"; store with mass^{animals[0].storeMassExponent}, upkeep with mass^{animals[0].upkeepMassExponent}"
-                                  : "; size scaling off"));
+                                  : "; size scaling off") +
+                              $"; fertility {animals[0].fertilityCurve}");
                 // Items 78 and 79: natural events on or off, wildfires on or off, and how often lightning strikes.
                 NaturalEventDirector director = Object.FindAnyObjectByType<NaturalEventDirector>();
                 if (director != null)

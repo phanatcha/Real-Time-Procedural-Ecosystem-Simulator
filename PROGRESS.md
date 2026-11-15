@@ -409,3 +409,22 @@ Phase 6 of the day and night plan (items 70 to 77), as agreed on 3 November.
 
 - **Checked:** full Unity suite **361 passed, 0 failed** (`Logs/TestResults/20261114T054400655085Z/results.xml`), with no new compiler warnings.
 - **Next steps from the review, not done:** move the tuning values every animal shares (most of the 178 public fields, copied at every birth) into one shared rules object, leaving only each animal's own state on it; pull more of the formulas (upkeep, vigour, growth cost) out into small classes with fast Edit Mode tests, as `MatingRules` and `AnimalPerks` are; then the steps that change the assembly layout and need phanatcha's agreement: move the UI (HUD, inspector, family lines, species tree, heatmap, god tools) into its own assembly once the sea-biome rules leave the `SeaBiomeMap` panel, split `SpeciesManager`'s five jobs, and create the eleven self-installing systems from one installer.
+
+## Backlog item 63, fertility falls faster as groups drift apart — 14 November 2026
+
+- **The rule:** how fertile a pair is now follows the snowball: 1 − (distance ÷ species threshold)², nothing at the threshold (`MatingRules.SnowballFertility`). Problems in hybrids pile up roughly with the square of how far two groups have drifted, since each new difference can clash with every earlier one (Orr 1995). Close relatives stay nearly fully fertile (0.94 at a quarter of the threshold), pairs half the threshold apart 0.75 (1 before), three quarters apart 0.44 (0.5 before). **Fertility Curve** on the animal picks the rule, Snowball by default or Linear for the straight fade from half the threshold used before; the soak runner takes `--fertility-curve linear`.
+- **Hybrids counted:** a child whose parents were more than half the species threshold apart is a hybrid. Hybrid births, and births whose second parent was of another species, are counted per species and written at the end of `population.csv` and `species.csv`. Every child's `lives.csv` row gains `parent_distance`, its parents' genetic distance (recording schema 12). The panel's Births line adds "N hybrid" once there are any.
+- **The comparison** (`Logs/SoakRuns/item63-20261114`): MOSSY-FJORD, 20 years, three runs with each curve, with sexual drive locked at 0.84 from year 2 (as in item 60's mate-first runs) so that enough young have two parents.
+
+  | | Snowball | Straight fade (before) |
+  |---|---|---|
+  | Births from two parents | 1,573 (16% of births) | 1,849 (19%) |
+  | Of those, hybrids (parents over half the threshold apart) | 114 (7.2%) | 214 (11.6%) |
+  | Parents' distance, median and 90th percentile, in thresholds | 0.15, 0.45 | 0.20, 0.51 |
+  | Births with a parent of another species | 0 | 0 |
+  | Species at any time | 1, 1, 1 | 1, 1, 2 |
+  | Animals on average | 75 (69 to 78) | 74 (63 to 86) |
+  | Harmful mutations per animal at the end | 3.9 (1.9 to 6.0) | 2.0 (1.9 to 2.2) |
+
+- **What it shows:** the snowball does what it should. Pairs that have drifted apart breed less, so hybrid births fell by about half, two-parent births by about 15%, and mates are closer relatives. No species split in these runs under either rule (one straight-fade run split once), so there were no cross-species births to count; that wants longer runs or a world with groups apart. The population was no smaller. The higher load at the end under the snowball fits fewer young from two parents purging harmful mutations (item 60), but one run accounts for most of it.
+- Tests: `SnowballFertilityFallsEverFasterToNoneAtTheThreshold`, `HybridsComeFromParentsMoreThanHalfTheThresholdApart` (Edit Mode), `DistantPairsHaveYoungThatCountAsHybrids` (Play Mode: a pair at 60% of the threshold has young that all count as hybrids and record their parents' distance), and the life record test checks the new column. The calibration (item 14) clones only, so the curve doesn't touch it; it passes with a median first split of 65.5 generations. Full Unity suite: **364 passed, 0 failed** (`Logs/TestResults/20261114T055712699586Z/results.xml`).
