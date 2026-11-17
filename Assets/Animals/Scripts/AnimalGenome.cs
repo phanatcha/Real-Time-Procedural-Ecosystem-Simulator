@@ -590,6 +590,80 @@ namespace Boreal.Animals
             return total / TotalDistanceWeight;
         }
 
+        // The one gene, body site or perk that sets two groups furthest apart (item 64): the largest single term of the
+        // distance between their averages, e.g. "DietAffinity", "body part at Head" or "perk ThickFur". share is that
+        // term's part of the whole distance between the averages, 0 to 1.
+        public static string MostDifferentTrait(IReadOnlyList<AnimalGenome> first, IReadOnlyList<AnimalGenome> second,
+                                                out float share)
+        {
+            share = 0f;
+            if (first == null || second == null || first.Count == 0 || second.Count == 0) return "";
+
+            string best = "";
+            float bestTerm = 0f, total = 0f;
+            void Consider(string name, float term)
+            {
+                total += term;
+                if (term > bestTerm)
+                {
+                    bestTerm = term;
+                    best = name;
+                }
+            }
+
+            for (int gene = 0; gene < GeneCount; gene++)
+            {
+                float a = 0f, b = 0f;
+                foreach (AnimalGenome genome in first) a += genome.genes[gene];
+                foreach (AnimalGenome genome in second) b += genome.genes[gene];
+                Consider(((AnimalGene)gene).ToString(),
+                         Mathf.Abs(a / first.Count - b / second.Count) * DistanceScales[gene]);
+            }
+
+            // Body sites: the average difference between a member of one group and a member of the other, over up to
+            // 30 of each.
+            int firstSample = Mathf.Min(first.Count, 30), secondSample = Mathf.Min(second.Count, 30);
+            for (int site = 0; site < SiteCount; site++)
+            {
+                float difference = 0f;
+                for (int i = 0; i < firstSample; i++)
+                    for (int j = 0; j < secondSample; j++)
+                        difference += SiteDifference(first[i], second[j], site);
+                Consider("body part at " + (BodySite)site,
+                         BodySiteDistanceWeight * difference / (firstSample * secondSample));
+            }
+
+            for (int perk = 0; perk < PerkCount; perk++)
+            {
+                if (!CountsTowardsDistance((AnimalPerk)perk)) continue;
+                float a = 0f, b = 0f;
+                foreach (AnimalGenome genome in first) if (genome.HasPerk((AnimalPerk)perk)) a++;
+                foreach (AnimalGenome genome in second) if (genome.HasPerk((AnimalPerk)perk)) b++;
+                Consider("perk " + (AnimalPerk)perk, PerkDistanceWeight * Mathf.Abs(a / first.Count - b / second.Count));
+            }
+
+            share = total > 0f ? bestTerm / total : 0f;
+            return best;
+        }
+
+        // The smallest distance between a genome of one group and a genome of the other, stopping early once a pair
+        // closer than stopBelow is found.
+        public static float ClosestDistance(IReadOnlyList<AnimalGenome> first, IReadOnlyList<AnimalGenome> second,
+                                            float stopBelow = 0f)
+        {
+            float closest = float.PositiveInfinity;
+            foreach (AnimalGenome a in first)
+            {
+                foreach (AnimalGenome b in second)
+                {
+                    float distance = Distance(a, b);
+                    if (distance < closest) closest = distance;
+                    if (closest < stopBelow) return closest;
+                }
+            }
+            return closest;
+        }
+
         // Every perk but the marker, which is only a yardstick.
         public static bool CountsTowardsDistance(AnimalPerk perk) => perk != AnimalPerk.Marker;
 

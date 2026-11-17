@@ -48,8 +48,9 @@ namespace Boreal.Animals
             // before other) and the fire weather and burned area at its end (items 78 and 79); metadata the natural
             // event settings. 11: traits.csv and lives.csv gained the glow perk (Perk_Glow, item 76). 12: hybrid and
             // cross-species births at the end of population.csv and species.csv, and parent_distance in lives.csv after
-            // young (item 63).
-            public int schemaVersion = 12;
+            // young (item 63). 13: species.csv gained where each species split off, the trait that set it furthest
+            // apart and the species it merged back into (item 64); events.csv gained speciation and species merge events.
+            public int schemaVersion = 13;
             public string startedUtc, sourceRevision, experiment, unityVersion, worldSeed;
             public float sampleInterval;
             public bool offscreenEnabled;
@@ -144,7 +145,7 @@ namespace Boreal.Animals
             };
             File.WriteAllText(Path.Combine(OutputDirectory, "metadata.json"), JsonUtility.ToJson(metadata, true));
             population = Open("population.csv", "time,live,offscreen,species_alive,births,cloned_births,sexual_births,deaths,starvation,predation,old_age,cold,heat,venom,thirst,fire,other,land_ceiling,sea_ceiling,requested_speed,achieved_speed,season,season_strength,offscreen_enabled,breeding_wait_episodes,breeding_wait_seconds,day,time_of_day,daylight,light,moon_phase,deaths_at_night,resting,average_generation,highest_generation,dryness,fire_danger,fires_burning,burning_hectares,burned_hectares,hybrid_births,cross_species_births");
-            species = Open("species.csv", "time,species,parent,origin,extinction,live,offscreen,births,sexual_births,deaths,breeding_wait_episodes,breeding_wait_seconds,average_generation,highest_generation,hybrid_births,cross_species_births");
+            species = Open("species.csv", "time,species,parent,origin,extinction,live,offscreen,births,sexual_births,deaths,breeding_wait_episodes,breeding_wait_seconds,average_generation,highest_generation,hybrid_births,cross_species_births,origin_x,origin_z,split_trait,merged_into");
             traits = Open("traits.csv", "time,species,trait,live_sample_count,mean,standard_deviation,minimum,maximum,at_minimum,at_maximum");
             events = Open("events.csv", "time,event,detail");
             lives = Open("lives.csv", LifeRecords.Header());
@@ -210,7 +211,10 @@ namespace Boreal.Animals
                     record.reproductionEvents, record.sexualOffspring, record.deaths,
                     record.breedingWaitEpisodes, record.breedingWaitSeconds,
                     AverageGeneration(ofRecord), HighestGeneration(ofRecord), record.hybridOffspring,
-                    record.crossSpeciesOffspring);
+                    record.crossSpeciesOffspring,
+                    string.IsNullOrEmpty(record.splitTrait) ? "" : (object)record.originPosition.x,
+                    string.IsNullOrEmpty(record.splitTrait) ? "" : (object)record.originPosition.z,
+                    record.splitTrait ?? "", record.mergedInto ?? "");
                 groups.TryGetValue(record.speciesName, out var genomes);
                 // Empty populations have blank trait values, not misleading zero-valued genes. Their history remains.
                 for (int gene = 0; gene < AnimalGenome.GeneCount; gene++)

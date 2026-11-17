@@ -30,6 +30,10 @@ parser.add_argument('--ledger', default='0', help='1 adds up every change to the
 parser.add_argument('--perk-gain', help='Perk gain chance in per cent per birth on every animal (item 62; default 0.2)')
 parser.add_argument('--perk-loss', help='Perk loss chance in per cent per birth on every animal (item 62; default 2)')
 parser.add_argument('--founder-perks', help='Perks the founders start with, e.g. "Glow" (item 76; comma-separated)')
+parser.add_argument('--split-persistence', help='Censuses in a row a group must be apart before it is named a species '
+                                                '(item 64; default 6, 1 splits at once as before)')
+parser.add_argument('--merge-share', help='Species merge back when their closest members stay within this share of the '
+                                          'threshold (item 64; default 0.7, 0 never merges as before)')
 parser.add_argument('--fertility-curve', choices=('snowball', 'linear'),
                     help='How fertility falls with the parents\' genetic distance (item 63; snowball is the default)')
 parser.add_argument('--ageing', default='1', help='0 switches ageing off on every animal (item 68), for control runs')
@@ -106,6 +110,10 @@ if args.founder_perks:
     command += ['-soakFounderPerks', args.founder_perks]
 if args.fertility_curve:
     command += ['-soakFertilityCurve', args.fertility_curve]
+if args.split_persistence is not None:
+    command += ['-soakSplitPersistence', args.split_persistence]
+if args.merge_share is not None:
+    command += ['-soakMergeShare', args.merge_share]
 command += ['-soakThirst', args.thirst, '-soakDayNight', args.daynight, '-soakOwnKind', args.own_kind]
 command += ['-soakNaturalEvents', args.natural_events, '-soakFires', args.fires, '-soakFuelProbe', args.fuel_probe]
 if args.fire_strikes is not None:

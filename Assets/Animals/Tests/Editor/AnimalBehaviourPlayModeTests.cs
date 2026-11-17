@@ -475,6 +475,70 @@ namespace Boreal.Animals.Tests
             }
         }
 
+        // Splits that stick (item 64): a group apart from the rest is named a species only after it has been found
+        // apart at several censuses in a row, with where it was and what sets it apart recorded; and two species whose
+        // members come well inside the threshold again become one.
+        [UnityTest]
+        public IEnumerator AGroupBecomesASpeciesOnlyAfterStayingApartAndMergesBackWhenClose()
+        {
+            EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
+            yield return new EnterPlayMode(ReloadsDomain);
+
+            BakeNavMesh(CreateGround(Vector3.zero, 80f));
+            SpeciesManager manager = StartSimulation();
+            manager.speciesCensusInterval = 1f;
+            manager.splitPersistenceCensuses = 4;
+            // No births: the six animals are the whole population.
+            manager.populationCeiling = 6;
+            AnimalGenome near = Genome(sexualDrive: 0f);
+            AnimalGenome far = Genome(sexualDrive: 0f);
+            far[AnimalGene.DietAffinity] = 0.95f;
+            Assert.Greater(AnimalGenome.Distance(near, far), manager.speciationThreshold);
+            var apart = new List<SeekFood>();
+            for (int i = 0; i < 3; i++)
+            {
+                SeekFood stays = CreateAnimal(new Vector3(-20f + 4f * i, 0f, 0f), near, energyFraction: 0.9f, age: 10f);
+                SeekFood animal = CreateAnimal(new Vector3(20f + 4f * i, 0f, 0f), far, energyFraction: 0.9f, age: 10f);
+                apart.Add(animal);
+                foreach (SeekFood each in new[] { stays, animal })
+                {
+                    each.wanderRadius = 0f;
+                    // The meat-eaters must not hunt the others (item 66), or the groups shrink.
+                    each.huntOwnKindFromDiet = 2f;
+                }
+            }
+
+            // Two censuses in: the group is apart but not yet a species.
+            float until = Time.time + 2.5f;
+            while (Time.time < until) yield return null;
+            Assert.AreEqual(0, manager.SpeciesSplits, "A group apart for two censuses should not be a species yet.");
+            Assert.AreEqual(Species, apart[0].speciesName);
+
+            float deadline = Time.time + 20f;
+            while (manager.SpeciesSplits == 0 && Time.time < deadline) yield return null;
+            Assert.AreEqual(1, manager.SpeciesSplits, "The group did not become a species.");
+            string daughter = apart[0].speciesName;
+            Assert.AreNotEqual(Species, daughter);
+            SpeciesTelemetryRecord record = manager.Telemetry[daughter];
+            Assert.AreEqual(Species, record.parentSpeciesName);
+            Assert.AreEqual("DietAffinity", record.splitTrait);
+            Assert.That(record.originPosition.x, Is.InRange(15f, 35f), "The split is recorded where the group was.");
+            bool logged = false;
+            foreach (SpeciesManager.SimulationEvent happened in manager.Events)
+                logged |= happened.kind == "speciation" && happened.detail.Contains("DietAffinity");
+            Assert.IsTrue(logged, "The split should be in the events.");
+
+            // The group's diet comes back to the others': within the threshold, the species merge again.
+            foreach (SeekFood animal in apart) animal.Genome[AnimalGene.DietAffinity] = near[AnimalGene.DietAffinity];
+            deadline = Time.time + 20f;
+            while (manager.SpeciesMerges == 0 && Time.time < deadline) yield return null;
+            Assert.AreEqual(1, manager.SpeciesMerges, "The species did not merge back.");
+            Assert.AreEqual(Species, apart[0].speciesName);
+            Assert.AreEqual(Species, record.mergedInto);
+            Assert.AreEqual(1, manager.SpeciesAliveCount);
+            Assert.AreEqual(1, manager.SpeciesSplits, "The merged species should not split again.");
+        }
+
         [UnityTest]
         public IEnumerator BitingAVenomousAnimalHurtsTheBiter()
         {
@@ -1081,7 +1145,8 @@ namespace Boreal.Animals.Tests
                 Assert.AreEqual(1.5f, camouflaged.Visibility, 0.01f, "Glowing cancels camouflage in the dark.");
                 Assert.AreEqual(1f, seeker.Visibility, 1e-4f);
 
-                float deadline = Time.time + 25f;
+                // Generous: in a full run under load the search and courtship once took longer than 25 s.
+                float deadline = Time.time + 60f;
                 while (glower.YoungBorn + seeker.YoungBorn == 0 && Time.time < deadline) yield return null;
                 Assert.Greater(glower.YoungBorn + seeker.YoungBorn, 0,
                                "The animal looking for a mate did not find the glowing partner 25 m away.");

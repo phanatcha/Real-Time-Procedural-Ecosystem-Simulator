@@ -1,4 +1,8 @@
-# Latest verification — 14 November 2026, with the snowball fertility curve and hybrid births (item 63)
+# Latest verification — 15 November 2026, with species splits that stick (item 64)
+
+**370 passed, 1 failed, 0 skipped** of 371 in Unity 6000.4.1f1, twice ([first](Logs/TestResults/20261115T064201993402Z/results.xml), [second](Logs/TestResults/20261115T073139789213Z/results.xml)). The first failure was `MeatLeaningAnimalsHuntTheirOwnKind` (fails now and then since item 60; passed four times alone). The second was `AGlowingPartnerIsNoticedFromTwiceAsFarAtNight` ("did not find the glowing partner"), which passed in every earlier full run and six times alone: its 25 s wait was too short under load and is now 60 s. Not re-run in full since. New: six Edit Mode tests in `SpeciesSplitsTests` and the Play Mode `AGroupBecomesASpeciesOnlyAfterStayingApartAndMergesBackWhenClose`.
+
+# 14 November 2026, with the snowball fertility curve and hybrid births (item 63)
 
 **364 passed, 0 failed, 0 skipped** in Unity 6000.4.1f1 ([NUnit XML](Logs/TestResults/20261114T055712699586Z/results.xml)). New: `MatingRulesTests.SnowballFertilityFallsEverFasterToNoneAtTheThreshold` and `HybridsComeFromParentsMoreThanHalfTheThresholdApart`, the Play Mode `DistantPairsHaveYoungThatCountAsHybrids`, and a `parent_distance` check in `RunRecordingTests`.
 

@@ -84,6 +84,8 @@ namespace Boreal.Soak.Editor
             SessionState.SetFloat(Key + "PerkLoss", float.Parse(Arg("soakPerkLoss", "-1"), CultureInfo.InvariantCulture));
             SessionState.SetString(Key + "FounderPerks", Arg("soakFounderPerks", ""));
             SessionState.SetString(Key + "FertilityCurve", Arg("soakFertilityCurve", ""));
+            SessionState.SetInt(Key + "SplitPersistence", int.Parse(Arg("soakSplitPersistence", "-1"), CultureInfo.InvariantCulture));
+            SessionState.SetFloat(Key + "MergeShare", float.Parse(Arg("soakMergeShare", "-1"), CultureInfo.InvariantCulture));
             SessionState.SetBool(Key + "Ageing", Arg("soakAgeing", "1") == "1");
             SessionState.SetBool(Key + "SizeScaling", Arg("soakSizeScaling", "1") == "1");
             SessionState.SetBool(Key + "NaturalEvents", Arg("soakNaturalEvents", "1") == "1");
@@ -244,6 +246,13 @@ namespace Boreal.Soak.Editor
                 SessionState.SetBool(Key + "Fast", true);
                 manager.enableSafetyPause = false;
                 manager.simulationSpeed = SessionState.GetFloat(Key + "Speed", 50f);
+                // Item 64 control runs: how long a group must stay apart to be a species, and when species merge back.
+                int splitPersistence = SessionState.GetInt(Key + "SplitPersistence", -1);
+                float mergeShare = SessionState.GetFloat(Key + "MergeShare", -1f);
+                if (splitPersistence >= 1) manager.splitPersistenceCensuses = splitPersistence;
+                if (mergeShare >= 0f) manager.mergeBelowThresholdShare = mergeShare;
+                Debug.Log($"Soak: species split after {manager.splitPersistenceCensuses} censuses apart, merge within " +
+                          $"{manager.mergeBelowThresholdShare:0.##} of the threshold");
                 // Item 61: count every change to the animals' energy from here on, and report it with the status lines.
                 if (SessionState.GetBool(Key + "Ledger", false))
                 {

@@ -43,6 +43,11 @@ namespace Boreal.Animals
         public float originTime;
         [Tooltip("Simulated seconds since the simulation started, or -1 while the species survives.")]
         public float extinctionTime = -1f;
+        // Where its first members were when it was named, the gene, body site or perk that set them furthest apart
+        // from the species they left, and the species it merged back into, if it did (item 64).
+        public Vector3 originPosition;
+        public string splitTrait = "";
+        public string mergedInto = "";
         [Tooltip("Lowest (x) and highest (y) values among the living members at the last census.")]
         public Vector2 dietRange;
         public Vector2 bodyBulkRange;
@@ -196,6 +201,20 @@ namespace Boreal.Animals
         [Min(1f)] public float speciesCensusInterval = 10f;
         [Tooltip("A separated group becomes its own species once it has at least this many members.")]
         [Min(1)] public int minimumNewSpeciesSize = 3;
+        [Tooltip("A group must be found apart at this many censuses in a row before it is named a species (item 64): " +
+                 "six is a minute of simulated time at the default interval. One in-between animal that links two " +
+                 "groups for a moment, or its death, no longer makes or unmakes a species. 1 splits at once, as before.")]
+        [Min(1)] public int splitPersistenceCensuses = 6;
+        [Tooltip("Two species merge back into one when their closest members stay within this share of the speciation " +
+                 "threshold for as many censuses in a row. Well inside the threshold, so a species doesn't flicker at " +
+                 "the edge. 0 never merges, as before.")]
+        [Range(0f, 1f)] public float mergeBelowThresholdShare = 0.7f;
+
+        readonly SpeciesSplitTracker splitTracker = new SpeciesSplitTracker();
+        readonly Dictionary<(string, string), int> closeSpeciesStreaks = new Dictionary<(string, string), int>();
+        // Species named and species merged back since the world began (item 64).
+        public int SpeciesSplits { get; private set; }
+        public int SpeciesMerges { get; private set; }
 
         [Header("Population Ceiling")]
         [Tooltip("Animals stop giving birth while the population is this large, so an open world stays " +
@@ -526,6 +545,10 @@ namespace Boreal.Animals
             pendingBirths = 0;
             telemetryTimer = 0f;
             censusTimer = 0f;
+            splitTracker.Clear();
+            closeSpeciesStreaks.Clear();
+            SpeciesSplits = 0;
+            SpeciesMerges = 0;
             WorldStartTime = Time.time;
             WorldRevision++;
             BreedingWaitEpisodes = 0;
@@ -871,13 +894,16 @@ namespace Boreal.Animals
             {
                 SplitSeparatedGroups(species.Key, species.Value);
             }
+            splitTracker.EndCensus();
+            MergeReconvergedSpecies();
 
             RefreshAverageTraits();
         }
 
         // A group splits off when none of its members is within the speciation threshold of anyone outside
-        // it. The largest group keeps the species name; each other large-enough group becomes a daughter
-        // species. Smaller groups stay put until they grow.
+        // it, and it has been found apart at Split Persistence Censuses in a row (item 64). The largest group keeps
+        // the species name; each other large-enough group becomes a daughter species. Smaller groups stay put until
+        // they grow.
         void SplitSeparatedGroups(string speciesName, List<SeekFood> members)
         {
             int minimumSize = Mathf.Max(1, minimumNewSpeciesSize);
@@ -896,6 +922,32 @@ namespace Boreal.Animals
             for (int groupIndex = 1; groupIndex < groups.Count && groups[groupIndex].Count >= minimumSize; groupIndex++)
             {
                 List<int> group = groups[groupIndex];
+                List<SpeciesSplitTracker.Member> tracked = new List<SpeciesSplitTracker.Member>(group.Count);
+                foreach (int memberIndex in group)
+                {
+                    SeekFood member = members[memberIndex];
+                    tracked.Add(new SpeciesSplitTracker.Member(member.AnimalId, member.FirstParentId, member.SecondParentId));
+                }
+                if (splitTracker.Observe(tracked) < Mathf.Max(1, splitPersistenceCensuses)) continue;
+                splitTracker.Forget(tracked);
+
+                // Where the new species is, and what sets it furthest apart from the rest of its old species.
+                List<AnimalGenome> daughterGenomes = new List<AnimalGenome>(group.Count);
+                HashSet<int> inGroup = new HashSet<int>(group);
+                Vector3 centre = Vector3.zero;
+                foreach (int memberIndex in group)
+                {
+                    daughterGenomes.Add(genomes[memberIndex]);
+                    centre += members[memberIndex].transform.position;
+                }
+                centre /= group.Count;
+                List<AnimalGenome> restGenomes = new List<AnimalGenome>(members.Count - group.Count);
+                for (int index = 0; index < members.Count; index++)
+                {
+                    if (!inGroup.Contains(index) && members[index].speciesName == speciesName) restGenomes.Add(genomes[index]);
+                }
+                string trait = AnimalGenome.MostDifferentTrait(daughterGenomes, restGenomes, out float traitShare);
+
                 string daughterName = GetNextSpeciesName();
                 Color parentColor = speciesColors.TryGetValue(speciesName, out Color color) ? color : members[0].speciesColor;
                 Color daughterColor = GenerateDaughterColor(parentColor);
@@ -903,7 +955,13 @@ namespace Boreal.Animals
                 speciesColors[daughterName] = daughterColor;
                 speciesPopulation[daughterName] = group.Count;
                 speciesPopulation[speciesName] -= group.Count;
-                GetOrCreateTelemetry(daughterName).parentSpeciesName = speciesName;
+                SpeciesTelemetryRecord daughter = GetOrCreateTelemetry(daughterName);
+                daughter.parentSpeciesName = speciesName;
+                daughter.originPosition = centre;
+                daughter.splitTrait = trait;
+                SpeciesSplits++;
+                RecordEvent("speciation", $"{daughterName} from {speciesName}: {group.Count} animals at x {centre.x:0} " +
+                                          $"z {centre.z:0}, furthest apart in {trait} ({traitShare:P0} of the distance)");
 
                 foreach (int memberIndex in group)
                 {
@@ -912,6 +970,94 @@ namespace Boreal.Animals
 
                 Debug.Log($"Speciation: {daughterName} ({group.Count} animals) split from {speciesName} " +
                           $"at {Time.time:F0} simulated seconds.");
+            }
+        }
+
+        // Two living species whose closest members have stayed well inside the speciation threshold, for as many
+        // censuses as a split needs, are one species again (item 64): the smaller joins the larger. Without this a
+        // species, once named, stayed apart for good.
+        void MergeReconvergedSpecies()
+        {
+            if (mergeBelowThresholdShare <= 0f)
+            {
+                closeSpeciesStreaks.Clear();
+                return;
+            }
+
+            Dictionary<string, List<SeekFood>> bySpecies = new Dictionary<string, List<SeekFood>>();
+            foreach (SeekFood agent in activeAgents)
+            {
+                if (agent == null || !agent.IsAlive || agent.Genome == null || !agent.Genome.IsValid) continue;
+                if (!bySpecies.TryGetValue(agent.speciesName, out List<SeekFood> members))
+                    bySpecies[agent.speciesName] = members = new List<SeekFood>();
+                members.Add(agent);
+            }
+
+            HashSet<(string, string)> closeNow = new HashSet<(string, string)>();
+            if (bySpecies.Count > 1)
+            {
+                List<string> names = new List<string>(bySpecies.Keys);
+                names.Sort(System.StringComparer.Ordinal);
+                Dictionary<string, List<AnimalGenome>> genomesOf = new Dictionary<string, List<AnimalGenome>>();
+                foreach (string name in names)
+                {
+                    List<AnimalGenome> list = new List<AnimalGenome>();
+                    foreach (SeekFood member in bySpecies[name]) list.Add(member.Genome);
+                    genomesOf[name] = list;
+                }
+
+                float mergeBelow = mergeBelowThresholdShare * speciationThreshold;
+                for (int i = 0; i < names.Count; i++)
+                {
+                    for (int j = i + 1; j < names.Count; j++)
+                    {
+                        if (AnimalGenome.ClosestDistance(genomesOf[names[i]], genomesOf[names[j]], mergeBelow) < mergeBelow)
+                            closeNow.Add((names[i], names[j]));
+                    }
+                }
+            }
+
+            List<(string, string)> stale = new List<(string, string)>();
+            foreach ((string, string) pair in closeSpeciesStreaks.Keys)
+            {
+                if (!closeNow.Contains(pair)) stale.Add(pair);
+            }
+            foreach ((string, string) pair in stale) closeSpeciesStreaks.Remove(pair);
+
+            foreach ((string, string) pair in closeNow)
+            {
+                closeSpeciesStreaks.TryGetValue(pair, out int streak);
+                closeSpeciesStreaks[pair] = ++streak;
+                if (streak < Mathf.Max(1, splitPersistenceCensuses)) continue;
+                // One of them may have merged into another species earlier in this census.
+                if (!bySpecies.TryGetValue(pair.Item1, out List<SeekFood> first) || first.Count == 0 ||
+                    !bySpecies.TryGetValue(pair.Item2, out List<SeekFood> second) || second.Count == 0) continue;
+
+                // The larger species keeps its name; of two the same size, the older one.
+                bool firstKeeps = first.Count != second.Count
+                    ? first.Count > second.Count
+                    : GetOrCreateTelemetry(pair.Item1).originTime <= GetOrCreateTelemetry(pair.Item2).originTime;
+                string kept = firstKeeps ? pair.Item1 : pair.Item2, absorbed = firstKeeps ? pair.Item2 : pair.Item1;
+                List<SeekFood> joining = firstKeeps ? second : first;
+                Color keptColor = speciesColors.TryGetValue(kept, out Color color) ? color : bySpecies[kept][0].speciesColor;
+                foreach (SeekFood member in joining) member.AssignSpecies(kept, keptColor);
+                speciesPopulation[kept] = (speciesPopulation.TryGetValue(kept, out int keptCount) ? keptCount : 0) + joining.Count;
+                speciesPopulation.Remove(absorbed);
+                speciesColors.Remove(absorbed);
+                SpeciesTelemetryRecord record = GetOrCreateTelemetry(absorbed);
+                record.mergedInto = kept;
+                if (record.extinctionTime < 0f) record.extinctionTime = Time.time;
+                bySpecies[kept].AddRange(joining);
+                bySpecies[absorbed] = new List<SeekFood>();
+                SpeciesMerges++;
+                RecordEvent("species merge", $"{absorbed} ({joining.Count} animals) back into {kept}: their closest " +
+                                             $"members stayed within {mergeBelowThresholdShare:P0} of the threshold");
+            }
+
+            foreach ((string, string) pair in closeNow)
+            {
+                if (closeSpeciesStreaks.TryGetValue(pair, out int streak) && streak >= Mathf.Max(1, splitPersistenceCensuses))
+                    closeSpeciesStreaks.Remove(pair);
             }
         }
 
