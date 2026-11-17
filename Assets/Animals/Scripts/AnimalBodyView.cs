@@ -53,6 +53,7 @@ namespace Boreal.Animals
             eyeshineMaterial = null;
             glowMaterial = null;
             glowMeshes.Clear();
+            fittedBodies.Clear();
         }
 
         // fullLegReach: how far below the body a full-size leg reaches, in world units.
@@ -63,16 +64,207 @@ namespace Boreal.Animals
             measuredGround = null;
             liftCheckFrames = 0;
             enabled = true;
+            this.speciesColor = speciesColor;
+            grubby = GrubbyLook.Current;
+            if (grubby != null) UseGrubbyBody();
             PreparePartsObject();
             Rebuild();
             SetColor(speciesColor);
         }
 
+        // ---- Grubby (item 33): the modelled body and parts, when Resources holds GrubbyLook ----
+
+        GrubbyLook grubby;
+        Color speciesColor = Color.white;
+        // How the model sits in the body's own mesh space: scaled to the length of the body it replaces, standing on
+        // the same base.
+        float grubbyScale = 1f;
+        Vector3 grubbyOffset;
+        readonly List<GrubbyLook.Palette> partPalettes = new List<GrubbyLook.Palette>();
+
+        struct FittedBody
+        {
+            public Mesh mesh;
+            public float scale;
+            public Vector3 offset;
+        }
+        // One fitted copy of Grubby's body for each mesh it replaces, and the same lookup from the copy itself, since
+        // the young are copies of their parents and already carry it.
+        static readonly Dictionary<Mesh, FittedBody> fittedBodies = new Dictionary<Mesh, FittedBody>();
+
+        static readonly Color EyeWhiteColor = new Color(0.95f, 0.95f, 0.95f);
+        static readonly Color PupilColor = new Color(0.02f, 0.02f, 0.025f);
+        static readonly Color PartMouthColor = new Color(199f / 255f, 0f, 1f / 255f);
+        static readonly Color PartTeethColor = new Color(249f / 255f, 251f / 255f, 250f / 255f);
+        // Horns, fins and plates take a dark shade of the species colour.
+        const float HardShade = 0.4f;
+
+        // Swaps the capsule's mesh for Grubby's body, as long as the body it replaces and standing on the same base, and
+        // gives the renderer the mouth, teeth and tongue materials after the body's own.
+        void UseGrubbyBody()
+        {
+            MeshFilter filter = GetComponent<MeshFilter>();
+            MeshRenderer body = GetComponent<MeshRenderer>();
+            if (filter == null || filter.sharedMesh == null || body == null)
+            {
+                grubby = null;
+                return;
+            }
+
+            if (!fittedBodies.TryGetValue(filter.sharedMesh, out FittedBody fitted) || fitted.mesh == null)
+            {
+                Bounds replaced = filter.sharedMesh.bounds, model = grubby.body.bounds;
+                float scale = replaced.size.z / Mathf.Max(0.0001f, model.size.z);
+                Vector3 offset = new Vector3(replaced.center.x - scale * model.center.x,
+                                             replaced.min.y - scale * model.min.y,
+                                             replaced.center.z - scale * model.center.z);
+                Vector3[] vertices = grubby.body.vertices;
+                for (int i = 0; i < vertices.Length; i++) vertices[i] = vertices[i] * scale + offset;
+                Mesh mesh = Instantiate(grubby.body);
+                mesh.name = "Grubby Body (fitted)";
+                mesh.vertices = vertices;
+                mesh.RecalculateBounds();
+                fitted = new FittedBody { mesh = mesh, scale = scale, offset = offset };
+                fittedBodies[filter.sharedMesh] = fitted;
+                fittedBodies[mesh] = fitted;
+            }
+
+            filter.sharedMesh = fitted.mesh;
+            grubbyScale = fitted.scale;
+            grubbyOffset = fitted.offset;
+
+            Material skin = body.sharedMaterial;
+            int count = Mathf.Max(1, fitted.mesh.subMeshCount);
+            if (body.sharedMaterials.Length != count)
+            {
+                Material[] materials = new Material[count];
+                for (int i = 0; i < count; i++)
+                {
+                    materials[i] = i == grubby.skinSubmesh || grubby.bodyMaterials == null ||
+                                   i >= grubby.bodyMaterials.Length || grubby.bodyMaterials[i] == null
+                        ? skin
+                        : grubby.bodyMaterials[i];
+                }
+                body.sharedMaterials = materials;
+            }
+        }
+
+        // A point of the model, in the unscaled metres the parts are laid out in.
+        Vector3 GrubbyPoint(Vector3 model, Vector3 bodyScale) =>
+            Vector3.Scale(model * grubbyScale + grubbyOffset, bodyScale);
+
+        // Every part the genome has, blended between its knub and its full-grown shape by its size and merged into one
+        // mesh with a submesh per colour. Legs are fitted to the ground instead: they grow until the foot reaches it,
+        // and stretch for the rest if the body is held higher than a full-grown leg is long.
+        void BuildGrubbyParts(BodyFrame frame, Vector3 bodyScale)
+        {
+            List<Vector3> vertices = new List<Vector3>();
+            Dictionary<GrubbyLook.Palette, List<int>> triangles = new Dictionary<GrubbyLook.Palette, List<int>>();
+            float longestLegs = frame.LongestLegs(genome);
+            for (int index = 0; index < AnimalGenome.SiteCount; index++)
+            {
+                BodySite site = (BodySite)index;
+                float size = genome.GetPartSize(site);
+                BodyPartType type = genome.GetPartType(site);
+                if (size <= 0f || type == BodyPartType.None) continue;
+
+                foreach (GrubbyLook.Part part in grubby.parts)
+                {
+                    if (part.site != site || part.type != type || part.knub == null || part.grown == null) continue;
+
+                    float blend = size, stretch = 1f;
+                    float socketY = GrubbyPoint(part.socket, bodyScale).y;
+                    if (type == BodyPartType.Legs)
+                    {
+                        float footY = frame.Bottom - (frame.Bottom - frame.Ground) * size / Mathf.Max(0.0001f, longestLegs);
+                        float reach = socketY - footY;
+                        float knubReach = socketY - GrubbyPoint(new Vector3(0f, part.knubBottom, 0f), bodyScale).y;
+                        float grownReach = socketY - GrubbyPoint(new Vector3(0f, part.grownBottom, 0f), bodyScale).y;
+                        blend = Mathf.Clamp01((reach - knubReach) / Mathf.Max(0.0001f, grownReach - knubReach));
+                        if (blend >= 1f) stretch = reach / Mathf.Max(0.0001f, grownReach);
+                    }
+
+                    Vector3[] knub = part.knub.vertices, grown = part.grown.vertices;
+                    int first = vertices.Count;
+                    for (int i = 0; i < knub.Length; i++)
+                    {
+                        Vector3 point = GrubbyPoint(Vector3.LerpUnclamped(knub[i], grown[i], blend), bodyScale);
+                        if (stretch != 1f && point.y < socketY) point.y = socketY - (socketY - point.y) * stretch;
+                        vertices.Add(point);
+                    }
+
+                    for (int sub = 0; sub < part.knub.subMeshCount; sub++)
+                    {
+                        GrubbyLook.Palette palette = part.palettes != null && sub < part.palettes.Length
+                            ? part.palettes[sub]
+                            : GrubbyLook.Palette.Body;
+                        if (!triangles.TryGetValue(palette, out List<int> list)) triangles[palette] = list = new List<int>();
+                        foreach (int vertex in part.knub.GetTriangles(sub)) list.Add(first + vertex);
+                    }
+                }
+            }
+
+            partPalettes.Clear();
+            if (partsFilter == null) return;
+            if (vertices.Count == 0)
+            {
+                partsFilter.sharedMesh = null;
+                return;
+            }
+
+            if (partsMesh == null) partsMesh = new Mesh { name = "Animal Body Parts" };
+            else partsMesh.Clear();
+            partsMesh.SetVertices(vertices);
+            partsMesh.subMeshCount = triangles.Count;
+            int submesh = 0;
+            foreach (KeyValuePair<GrubbyLook.Palette, List<int>> entry in triangles)
+            {
+                partsMesh.SetTriangles(entry.Value, submesh++);
+                partPalettes.Add(entry.Key);
+            }
+            partsMesh.RecalculateNormals();
+            partsMesh.RecalculateBounds();
+            partsFilter.sharedMesh = partsMesh;
+        }
+
+        Color PaletteColor(GrubbyLook.Palette palette, Color species)
+        {
+            switch (palette)
+            {
+                case GrubbyLook.Palette.Hard:
+                    Color hard = species * HardShade;
+                    hard.a = 1f;
+                    return hard;
+                case GrubbyLook.Palette.EyeWhite: return EyeWhiteColor;
+                case GrubbyLook.Palette.Pupil: return PupilColor;
+                case GrubbyLook.Palette.Mouth: return PartMouthColor;
+                case GrubbyLook.Palette.Teeth: return PartTeethColor;
+                default: return species;
+            }
+        }
+
         public void SetColor(Color speciesColor)
         {
+            this.speciesColor = speciesColor;
             MeshRenderer body = GetComponent<MeshRenderer>();
             if (partsRenderer == null || body == null || body.sharedMaterial == null)
             {
+                return;
+            }
+
+            if (grubby != null)
+            {
+                // The species colour goes on the skin only; the mouth, teeth and tongue keep their own.
+                MaterialPropertyBlock block = new MaterialPropertyBlock();
+                block.SetColor(BaseColorId, speciesColor);
+                block.SetColor(ColorId, speciesColor);
+                body.SetPropertyBlock(null);
+                body.SetPropertyBlock(block, Mathf.Clamp(grubby.skinSubmesh, 0, body.sharedMaterials.Length - 1));
+
+                Material[] materials = new Material[partPalettes.Count];
+                for (int i = 0; i < materials.Length; i++)
+                    materials[i] = PartMaterial(body.sharedMaterial, PaletteColor(partPalettes[i], speciesColor));
+                partsRenderer.sharedMaterials = materials;
                 return;
             }
 
@@ -156,6 +348,15 @@ namespace Boreal.Animals
                 Bounds bounds = bodyFilter.sharedMesh.bounds;
                 BodyFrame frame = new BodyFrame(Vector3.Scale(bounds.min, scale), Vector3.Scale(bounds.max, scale),
                                                 measuredGround ?? EstimatedGround(bounds.min.y * scale.y));
+                if (grubby != null)
+                {
+                    BuildGrubbyParts(frame, scale);
+                    BuildEyeshine(frame);
+                    BuildGlow();
+                    SetColor(speciesColor);
+                    return;
+                }
+
                 for (int index = 0; index < AnimalGenome.SiteCount; index++)
                 {
                     BodySite site = (BodySite)index;

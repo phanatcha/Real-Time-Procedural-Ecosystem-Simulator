@@ -727,11 +727,19 @@ namespace Boreal.Animals
         void ApplySpeciesColor()
         {
             MeshRenderer meshRenderer = GetComponent<MeshRenderer>();
-            MaterialPropertyBlock propertyBlock = new MaterialPropertyBlock();
-            meshRenderer.GetPropertyBlock(propertyBlock);
-            propertyBlock.SetColor(BaseColorId, speciesColor);
-            propertyBlock.SetColor(ColorId, speciesColor);
-            meshRenderer.SetPropertyBlock(propertyBlock);
+            // Grubby's body has a material each for the skin, mouth, teeth and tongue: the body view (below) colours
+            // only the skin.
+            if (meshRenderer.sharedMaterials.Length > 1)
+            {
+            }
+            else
+            {
+                MaterialPropertyBlock propertyBlock = new MaterialPropertyBlock();
+                meshRenderer.GetPropertyBlock(propertyBlock);
+                propertyBlock.SetColor(BaseColorId, speciesColor);
+                propertyBlock.SetColor(ColorId, speciesColor);
+                meshRenderer.SetPropertyBlock(propertyBlock);
+            }
 
             if (bodyView != null)
             {

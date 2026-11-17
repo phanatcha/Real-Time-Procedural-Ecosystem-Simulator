@@ -1,4 +1,8 @@
-# Latest verification — 15 November 2026, with species splits that stick (item 64)
+# Latest verification — 17 November 2026, with Grubby and the modelled body parts (item 33)
+
+**371 passed, 0 failed, 0 skipped** in Unity 6000.4.1f1 ([NUnit XML](Logs/TestResults/20261117T141903187154Z/results.xml)), with every Play Mode animal drawn as Grubby (the look asset loads from Resources), and item 64 in the working tree. No new tests: the look changes no rule.
+
+# 15 November 2026, with species splits that stick (item 64)
 
 **370 passed, 1 failed, 0 skipped** of 371 in Unity 6000.4.1f1, twice ([first](Logs/TestResults/20261115T064201993402Z/results.xml), [second](Logs/TestResults/20261115T073139789213Z/results.xml)). The first failure was `MeatLeaningAnimalsHuntTheirOwnKind` (fails now and then since item 60; passed four times alone). The second was `AGlowingPartnerIsNoticedFromTwiceAsFarAtNight` ("did not find the glowing partner"), which passed in every earlier full run and six times alone: its 25 s wait was too short under load and is now 60 s. Not re-run in full since. New: six Edit Mode tests in `SpeciesSplitsTests` and the Play Mode `AGroupBecomesASpeciesOnlyAfterStayingApartAndMergesBackWhenClose`.
 
