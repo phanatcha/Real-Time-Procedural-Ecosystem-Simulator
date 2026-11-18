@@ -387,7 +387,8 @@ namespace Boreal.Animals
             {
                 return;
             }
-            bodyView?.PlayAction("Hurt");
+            // Flinch at blows, not at the steady loss of starving.
+            if (attacker != null) bodyView?.PlayAction("Hurt");
 
             if (IsOtherLivingAnimal(attacker))
             {

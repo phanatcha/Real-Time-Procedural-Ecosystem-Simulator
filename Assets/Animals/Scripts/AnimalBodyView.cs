@@ -283,13 +283,39 @@ namespace Boreal.Animals
             if (partsFilter != null) partsFilter.sharedMesh = null;
         }
 
+        // Idle or crawl follows whether the animal is really moving, not what it is doing: an animal can stand still while
+        // seeking food (drinking, resting, waiting for a path) and move while idling (slowing to a stop). It starts
+        // crawling above 15% of its top speed and stops below 5%, and keeps either for at least half a real second, so
+        // the many short stops and starts of a fast-running simulation don't restart the crawl over and over.
+        const float StartMovingShare = 0.15f;
+        const float StopMovingShare = 0.05f;
+        const float MinimumGaitSeconds = 0.5f;
+        // The clips run in real time; the crawl speeds up with the simulation up to three times, so feet don't slide
+        // too far, and stays readable beyond that.
+        const float MaximumCrawlSpeedUp = 3f;
+        // SeekFood's State values that the controller tells apart: it crawls in any state but these two.
+        const int IdlingState = 0;
+        const int WanderingState = 1;
+        const int ActionLayer = 1;
+
+        bool moving;
+        float gaitChangedAt = float.NegativeInfinity;
+
         // Called by SeekFood every frame: what the animal is doing, how fast it moves against its own top speed, and
         // whether it is in water.
         public void Animate(int state, float speedShare, bool inWater)
         {
             if (rigAnimator == null || !rigAnimator.isActiveAndEnabled) return;
-            rigAnimator.SetInteger(StateId, state);
-            rigAnimator.SetFloat(SpeedId, Mathf.Clamp(speedShare, 0.3f, 2f));
+            bool wantsToMove = speedShare > (moving ? StopMovingShare : StartMovingShare);
+            if (wantsToMove != moving && Time.unscaledTime - gaitChangedAt >= MinimumGaitSeconds)
+            {
+                moving = wantsToMove;
+                gaitChangedAt = Time.unscaledTime;
+            }
+
+            rigAnimator.SetInteger(StateId, moving ? (state == IdlingState ? WanderingState : state) : IdlingState);
+            float pace = Mathf.Clamp(speedShare, 0.5f, 1.5f) * Mathf.Clamp(Time.timeScale, 1f, MaximumCrawlSpeedUp);
+            rigAnimator.SetFloat(SpeedId, pace);
             rigAnimator.SetBool(InWaterId, inWater);
         }
 
@@ -310,9 +336,16 @@ namespace Boreal.Animals
         }
 
         // A one-off clip over whatever is playing: "Bite", "Eat" or "Hurt".
+        // It isn't started again while it is still playing (eating calls it with every bite), and not at all while the
+        // animal is off screen, where the trigger would wait and play late.
         public void PlayAction(string trigger)
         {
-            if (rigAnimator != null && rigAnimator.isActiveAndEnabled) rigAnimator.SetTrigger(trigger);
+            if (rigAnimator == null || !rigAnimator.isActiveAndEnabled) return;
+            if (rigSkin != null && !rigSkin.isVisible) return;
+            AnimatorStateInfo playing = rigAnimator.GetCurrentAnimatorStateInfo(ActionLayer);
+            if (playing.IsName(trigger) && playing.normalizedTime < 0.9f) return;
+            if (rigAnimator.IsInTransition(ActionLayer) && rigAnimator.GetNextAnimatorStateInfo(ActionLayer).IsName(trigger)) return;
+            rigAnimator.SetTrigger(trigger);
         }
 
         // As the animal dies its body stays a moment where it fell, playing the death clip, then goes. The animal itself

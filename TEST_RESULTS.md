@@ -1,4 +1,8 @@
-# Latest verification — 18 November 2026, with Grubby's mouth closing behind a neck (item 33)
+# Latest verification — 18 November 2026, with Grubby's crawl and actions fixed (item 33)
+
+**373 passed, 0 failed, 0 skipped** in Unity 6000.4.1f1 ([NUnit XML](Logs/TestResults/20261118T071413184126Z/results.xml)). New: `AnimalBehaviourPlayModeTests.GrubbysCrawlDoesNotStutterAtHighSpeed` (six Grubbies at 10× for ten real seconds; no crawl may stop within 0.4 s). Run against the code before the fix it failed with 27 of 49 crawls stopping within 0.4 s.
+
+# 18 November 2026, with Grubby's mouth closing behind a neck (item 33)
 
 **372 passed, 0 failed, 0 skipped** in Unity 6000.4.1f1 ([NUnit XML](Logs/TestResults/20261118T055724282537Z/results.xml)). `GrubbysRigCarriesThePartsAndLeavesABodyWhenItDies` now also checks that a full-grown neck shuts Grubby's own mouth (the jaw within 1° of shut) and that an animal without a neck keeps it open.
 

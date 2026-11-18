@@ -1254,6 +1254,63 @@ namespace Boreal.Animals.Tests
             Assert.IsTrue(corpse == null, "The body was never cleared away.");
         }
 
+        // At ten times speed animals stop and start many times a real second; the crawl follows whether they really
+        // move and is never started and stopped again within a fraction of a second. Batch runs draw nothing, so the
+        // Animators are told to animate off screen.
+        [UnityTest]
+        public IEnumerator GrubbysCrawlDoesNotStutterAtHighSpeed()
+        {
+            EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
+            yield return new EnterPlayMode(ReloadsDomain);
+            if (GrubbyLook.Current == null || GrubbyLook.Current.rig == null) Assert.Ignore("Grubby's look isn't built.");
+            yield return WatchCrawling();
+        }
+
+        static IEnumerator WatchCrawling()
+        {
+            BakeNavMesh(CreateGround(Vector3.zero, 80f));
+            StartSimulation().simulationSpeed = 10f;
+            List<SeekFood> animals = new List<SeekFood>();
+            for (int i = 0; i < 6; i++)
+            {
+                AnimalGenome genome = Genome(sexualDrive: 0f);
+                if (i % 2 == 0) genome.SetPart(BodySite.MiddlePair, BodyPartType.Legs, 1f);
+                animals.Add(CreateAnimal(new Vector3(-20f + i * 8f, 0f, (i % 3 - 1) * 10f), genome, energyFraction: 0.6f, age: 50f));
+            }
+            for (int i = 0; i < 5; i++) CreatePlant(new Vector3(-30f + i * 15f, 0f, 25f));
+            yield return null;
+
+            int crawlHash = Animator.StringToHash("Crawl");
+            Dictionary<SeekFood, float> crawlingSince = new Dictionary<SeekFood, float>();
+            int crawls = 0, shortCrawls = 0;
+            float end = Time.unscaledTime + 10f;
+            while (Time.unscaledTime < end)
+            {
+                yield return null;
+                foreach (SeekFood animal in animals)
+                {
+                    if (animal == null) continue;
+                    Animator animator = animal.GetComponentInChildren<Animator>();
+                    animator.cullingMode = AnimatorCullingMode.AlwaysAnimate;
+                    bool crawling = animator.GetCurrentAnimatorStateInfo(0).shortNameHash == crawlHash;
+                    bool wasCrawling = crawlingSince.TryGetValue(animal, out float since);
+                    if (crawling && !wasCrawling)
+                    {
+                        crawls++;
+                        crawlingSince[animal] = Time.unscaledTime;
+                    }
+                    else if (!crawling && wasCrawling)
+                    {
+                        if (Time.unscaledTime - since < 0.4f) shortCrawls++;
+                        crawlingSince.Remove(animal);
+                    }
+                }
+            }
+
+            Assert.Greater(crawls, 0, "No animal crawled.");
+            Assert.AreEqual(0, shortCrawls, $"{shortCrawls} of {crawls} crawls stopped within 0.4 s.");
+        }
+
         static SeekFood Child(SeekFood parent)
         {
             foreach (SeekFood animal in Object.FindObjectsByType<SeekFood>(FindObjectsSortMode.None))
