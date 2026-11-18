@@ -1202,8 +1202,9 @@ namespace Boreal.Animals.Tests
 
         static Vector3? LocateTestWater(Vector3 position, float radius) => TestWater;
 
-        // Animals are drawn by Grubby's rig: its clips play, its parts ride on their socket bones, and a dead animal leaves
-        // its body a moment to play the death clip.
+        // Animals are drawn by Grubby's rig: its clips play, its parts ride on their socket bones, Grubby's own mouth is
+        // shut once a neck (with a mouth of its own) has grown, and a dead animal leaves its body a moment to play the
+        // death clip.
         [UnityTest]
         public IEnumerator GrubbysRigCarriesThePartsAndLeavesABodyWhenItDies()
         {
@@ -1217,7 +1218,17 @@ namespace Boreal.Animals.Tests
             genome.SetPart(BodySite.MiddlePair, BodyPartType.Legs, 1f);
             genome.SetPart(BodySite.Back, BodyPartType.Plates, 1f);
             SeekFood animal = CreateAnimal(Vector3.zero, genome, energyFraction: 0.9f, age: 50f);
+            AnimalGenome necked = Genome();
+            necked.SetPart(BodySite.Head, BodyPartType.Neck, 1f);
+            SeekFood neck = CreateAnimal(new Vector3(15f, 0f, 0f), necked, energyFraction: 0.9f, age: 50f);
             for (int i = 0; i < 40; i++) yield return null;
+
+            Assert.IsNull(animal.GetComponentInChildren<GrubbyMouth>(), "An animal without a neck had its mouth closed.");
+            Transform jaw = null, restJaw = null;
+            foreach (Transform bone in neck.GetComponentsInChildren<Transform>()) if (bone.name == "jaw") jaw = bone;
+            foreach (Transform bone in GrubbyLook.Current.rig.GetComponentsInChildren<Transform>(true)) if (bone.name == "jaw") restJaw = bone;
+            Quaternion shut = restJaw.localRotation * Quaternion.AngleAxis(45f, Vector3.right);
+            Assert.Less(Quaternion.Angle(jaw.localRotation, shut), 1f, "The mouth of an animal with a full-grown neck isn't shut.");
 
             Transform rig = animal.transform.Find("Grubby Rig");
             Assert.IsNotNull(rig, "The animal has no rig.");

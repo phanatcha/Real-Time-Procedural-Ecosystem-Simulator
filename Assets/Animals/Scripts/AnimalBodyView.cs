@@ -293,6 +293,22 @@ namespace Boreal.Animals
             rigAnimator.SetBool(InWaterId, inWater);
         }
 
+        // A grown neck has its own mouth and does the eating, so Grubby's own mouth closes as the neck grows: shut from
+        // a full-grown neck, half shut at half size. GrubbyMouth holds the jaw there after each frame's animation.
+        void CloseMouthForNeck()
+        {
+            float closed = genome.GetPartType(BodySite.Head) == BodyPartType.Neck ? Mathf.Clamp01(genome.GetPartSize(BodySite.Head)) : 0f;
+            GrubbyMouth mouth = rig.GetComponent<GrubbyMouth>();
+            if (closed <= 0f)
+            {
+                if (mouth != null) mouth.closed = 0f;
+                return;
+            }
+            if (mouth == null) mouth = rig.gameObject.AddComponent<GrubbyMouth>();
+            if (!mouth.Prepare(rig, grubby.rig.transform)) return;
+            mouth.closed = closed;
+        }
+
         // A one-off clip over whatever is playing: "Bite", "Eat" or "Hurt".
         public void PlayAction(string trigger)
         {
@@ -548,6 +564,7 @@ namespace Boreal.Animals
                         for (int s = 0; s < AnimalGenome.SiteCount; s++)
                             hasLegs |= genome.GetPartType((BodySite)s) == BodyPartType.Legs && genome.GetPartSize((BodySite)s) > 0f;
                         rigAnimator.SetBool(HasLegsId, hasLegs);
+                        CloseMouthForNeck();
                     }
                     BuildEyeshine(frame);
                     BuildGlow();
@@ -961,6 +978,47 @@ namespace Boreal.Animals
     }
 
     // The body a dead animal leaves for a moment while its death clip plays (AnimalBodyView.LeaveCorpse).
+    // Holds Grubby's jaw shut (by `closed`, 0 open to 1 shut) after the Animator has posed it, and tucks the tongue away,
+    // for animals whose neck has its own mouth (AnimalBodyView.CloseMouthForNeck). Turning the jaw 45° up about its own
+    // x axis closes the mouth with no gap, checked in Unity renders; further than that the chin creases.
+    public sealed class GrubbyMouth : MonoBehaviour
+    {
+        const float ShutAngle = 45f;
+
+        public float closed;
+        Transform jaw, tongue;
+        Quaternion jawRest;
+        Vector3 tongueRest;
+
+        // Finds the jaw and tongue, with their rest pose taken from the rig asset (a copied rig may be mid-clip).
+        public bool Prepare(Transform rig, Transform restRig)
+        {
+            if (jaw != null) return true;
+            jaw = Find(rig, "jaw");
+            tongue = Find(rig, "tongue");
+            Transform restJaw = Find(restRig, "jaw"), restTongue = Find(restRig, "tongue");
+            if (jaw == null || restJaw == null) return false;
+            jawRest = restJaw.localRotation;
+            tongueRest = restTongue != null ? restTongue.localScale : Vector3.one;
+            return true;
+        }
+
+        void LateUpdate()
+        {
+            if (jaw == null || closed <= 0f) return;
+            Quaternion shut = jawRest * Quaternion.AngleAxis(ShutAngle, Vector3.right);
+            jaw.localRotation = Quaternion.Slerp(jaw.localRotation, shut, closed);
+            if (tongue != null) tongue.localScale = tongueRest * Mathf.Max(0.001f, 1f - closed);
+        }
+
+        static Transform Find(Transform root, string name)
+        {
+            foreach (Transform child in root.GetComponentsInChildren<Transform>(true))
+                if (child.name == name) return child;
+            return null;
+        }
+    }
+
     public sealed class GrubbyCorpse : MonoBehaviour
     {
         // Real seconds the body takes to fall to the ground off its legs.

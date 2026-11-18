@@ -1,4 +1,8 @@
-# Latest verification — 17 November 2026, with Grubby's six clips (item 33)
+# Latest verification — 18 November 2026, with Grubby's mouth closing behind a neck (item 33)
+
+**372 passed, 0 failed, 0 skipped** in Unity 6000.4.1f1 ([NUnit XML](Logs/TestResults/20261118T055724282537Z/results.xml)). `GrubbysRigCarriesThePartsAndLeavesABodyWhenItDies` now also checks that a full-grown neck shuts Grubby's own mouth (the jaw within 1° of shut) and that an animal without a neck keeps it open.
+
+# 17 November 2026, with Grubby's six clips (item 33)
 
 **372 passed, 0 failed, 0 skipped** in Unity 6000.4.1f1 ([NUnit XML](Logs/TestResults/20261117T161239663168Z/results.xml)), with every Play Mode animal drawn by Grubby's animated rig. New: `AnimalBehaviourPlayModeTests.GrubbysRigCarriesThePartsAndLeavesABodyWhenItDies`. The run before it had 371 of 372: `BodyPartsAreBuiltFromTheGenome` looked for the merged parts mesh, which an animated animal no longer has (its parts are on the socket bones); its helper now looks on the rig.
 
