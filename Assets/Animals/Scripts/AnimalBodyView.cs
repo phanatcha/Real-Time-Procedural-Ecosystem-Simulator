@@ -67,6 +67,7 @@ namespace Boreal.Animals
             this.speciesColor = speciesColor;
             grubby = GrubbyLook.Current;
             if (grubby != null) UseGrubbyBody();
+            if (grubby != null) UseGrubbyRig();
             PreparePartsObject();
             Rebuild();
             SetColor(speciesColor);
@@ -153,6 +154,193 @@ namespace Boreal.Animals
         Vector3 GrubbyPoint(Vector3 model, Vector3 bodyScale) =>
             Vector3.Scale(model * grubbyScale + grubbyOffset, bodyScale);
 
+        // ---- The rigged Grubby: the animated body, with each part on its socket bone ----
+
+        const string RigObjectName = "Grubby Rig";
+        const string RigPartObjectName = "Grubby Part";
+        // Real seconds a dead animal's body stays to play its death clip.
+        const float CorpseSeconds = 2.5f;
+        static readonly int StateId = Animator.StringToHash("State");
+        static readonly int SpeedId = Animator.StringToHash("Speed");
+        static readonly int HasLegsId = Animator.StringToHash("HasLegs");
+        static readonly int InWaterId = Animator.StringToHash("InWater");
+        static readonly int DieId = Animator.StringToHash("Die");
+
+        Transform rig;
+        Animator rigAnimator;
+        SkinnedMeshRenderer rigSkin;
+        readonly Dictionary<string, Transform> sockets = new Dictionary<string, Transform>();
+        readonly Dictionary<MeshRenderer, GrubbyLook.Palette[]> rigPartPalettes = new Dictionary<MeshRenderer, GrubbyLook.Palette[]>();
+        readonly List<Mesh> rigPartMeshes = new List<Mesh>();
+        // How far the body is held above the ground on its legs, so a dead body can drop to the ground as it rolls over.
+        float heldAboveGround;
+
+        // Whether the animal is drawn by the animated rig.
+        public bool IsAnimated => rig != null && rigAnimator != null;
+
+        // The rig sits where the still body would, so the two match; the capsule's own renderer is hidden. The young
+        // are copies of their parents and arrive with the parent's rig, which is reused.
+        void UseGrubbyRig()
+        {
+            if (grubby.rig == null || grubby.socketNames == null) return;
+            rig = transform.Find(RigObjectName);
+            if (rig == null)
+            {
+                rig = Instantiate(grubby.rig, transform).transform;
+                rig.name = RigObjectName;
+                foreach (Transform child in rig.GetComponentsInChildren<Transform>(true)) child.gameObject.layer = gameObject.layer;
+            }
+
+            rig.localPosition = grubbyOffset;
+            rig.localRotation = grubby.turned ? Quaternion.Euler(0f, 180f, 0f) : Quaternion.identity;
+            rig.localScale = Vector3.one * grubbyScale;
+            rigAnimator = rig.GetComponentInChildren<Animator>();
+            rigSkin = rig.GetComponentInChildren<SkinnedMeshRenderer>();
+            if (rigAnimator != null)
+            {
+                // The clips play in real time, so they stay readable when the simulation runs fast.
+                rigAnimator.updateMode = AnimatorUpdateMode.UnscaledTime;
+                rigAnimator.cullingMode = AnimatorCullingMode.CullCompletely;
+                rigAnimator.applyRootMotion = false;
+            }
+
+            sockets.Clear();
+            foreach (Transform bone in rig.GetComponentsInChildren<Transform>(true))
+                if (bone.name.StartsWith("socket_")) sockets[bone.name] = bone;
+            if (TryGetComponent(out MeshRenderer body)) body.enabled = false;
+        }
+
+        // Each part as its own mesh on its socket bone, in the bone's rest space, so it moves with the head, spine or
+        // tail as the clips play. The shapes are the same as the still body's: laid out in the parts' space, then
+        // carried to the bone.
+        void BuildRigParts(BodyFrame frame, Vector3 bodyScale)
+        {
+            foreach (Transform socket in sockets.Values)
+            {
+                Transform old = socket.Find(RigPartObjectName);
+                if (old != null) old.gameObject.SetActive(false);
+            }
+            rigPartPalettes.Clear();
+
+            Transform partsSpace = partsFilter != null ? partsFilter.transform : transform;
+            float longestLegs = frame.LongestLegs(genome);
+            foreach (GrubbyLook.Part part in grubby.parts)
+            {
+                float size = genome.GetPartSize(part.site);
+                if (size <= 0f || genome.GetPartType(part.site) != part.type || part.knub == null || part.grown == null) continue;
+                string socketName = GrubbyLook.SocketName(part.site, part.side);
+                if (!sockets.TryGetValue(socketName, out Transform socket) ||
+                    !grubby.TryGetSocketRest(socketName, out Matrix4x4 rest)) continue;
+
+                List<Vector3> points = PartVertices(part, frame, bodyScale, size, longestLegs);
+                Matrix4x4 toBone = rest.inverse * rig.worldToLocalMatrix * partsSpace.localToWorldMatrix;
+                for (int i = 0; i < points.Count; i++) points[i] = toBone.MultiplyPoint3x4(points[i]);
+
+                Transform holder = socket.Find(RigPartObjectName);
+                if (holder == null)
+                {
+                    holder = new GameObject(RigPartObjectName).transform;
+                    holder.SetParent(socket, false);
+                    holder.gameObject.layer = gameObject.layer;
+                    holder.gameObject.AddComponent<MeshFilter>();
+                    holder.gameObject.AddComponent<MeshRenderer>();
+                }
+                holder.localPosition = Vector3.zero;
+                holder.localRotation = Quaternion.identity;
+                holder.localScale = Vector3.one;
+                holder.gameObject.SetActive(true);
+
+                MeshFilter filter = holder.GetComponent<MeshFilter>();
+                Mesh mesh = filter.sharedMesh;
+                // A copied child still holds its parent's mesh: make one of its own.
+                if (mesh == null || !rigPartMeshes.Contains(mesh))
+                {
+                    mesh = new Mesh { name = "Grubby Part " + socketName };
+                    rigPartMeshes.Add(mesh);
+                }
+                else mesh.Clear();
+                mesh.SetVertices(points);
+                List<GrubbyLook.Palette> palettes = new List<GrubbyLook.Palette>();
+                Dictionary<GrubbyLook.Palette, List<int>> triangles = new Dictionary<GrubbyLook.Palette, List<int>>();
+                for (int sub = 0; sub < part.knub.subMeshCount; sub++)
+                {
+                    GrubbyLook.Palette palette = part.palettes != null && sub < part.palettes.Length ? part.palettes[sub] : GrubbyLook.Palette.Body;
+                    if (!triangles.TryGetValue(palette, out List<int> list))
+                    {
+                        triangles[palette] = list = new List<int>();
+                        palettes.Add(palette);
+                    }
+                    list.AddRange(part.knub.GetTriangles(sub));
+                }
+                mesh.subMeshCount = palettes.Count;
+                for (int sub = 0; sub < palettes.Count; sub++) mesh.SetTriangles(triangles[palettes[sub]], sub);
+                mesh.RecalculateNormals();
+                mesh.RecalculateBounds();
+                filter.sharedMesh = mesh;
+                rigPartPalettes[holder.GetComponent<MeshRenderer>()] = palettes.ToArray();
+            }
+
+            if (partsFilter != null) partsFilter.sharedMesh = null;
+        }
+
+        // Called by SeekFood every frame: what the animal is doing, how fast it moves against its own top speed, and
+        // whether it is in water.
+        public void Animate(int state, float speedShare, bool inWater)
+        {
+            if (rigAnimator == null || !rigAnimator.isActiveAndEnabled) return;
+            rigAnimator.SetInteger(StateId, state);
+            rigAnimator.SetFloat(SpeedId, Mathf.Clamp(speedShare, 0.3f, 2f));
+            rigAnimator.SetBool(InWaterId, inWater);
+        }
+
+        // A one-off clip over whatever is playing: "Bite", "Eat" or "Hurt".
+        public void PlayAction(string trigger)
+        {
+            if (rigAnimator != null && rigAnimator.isActiveAndEnabled) rigAnimator.SetTrigger(trigger);
+        }
+
+        // As the animal dies its body stays a moment where it fell, playing the death clip, then goes. The animal itself
+        // is destroyed at once, as before.
+        public void LeaveCorpse()
+        {
+            if (rig == null || rigAnimator == null) return;
+            rig.SetParent(null, true);
+            rig.name = "Grubby Corpse";
+            rigAnimator.SetTrigger(DieId);
+            GrubbyCorpse corpse = rig.gameObject.AddComponent<GrubbyCorpse>();
+            corpse.until = Time.unscaledTime + CorpseSeconds;
+            corpse.drop = heldAboveGround;
+            rig = null;
+            rigAnimator = null;
+        }
+
+        // A part's points in the parts' space: its knub blended to its full-grown shape by size, and legs fitted to the
+        // ground (they grow until the foot reaches it, and stretch if the body is held higher than a full leg reaches).
+        List<Vector3> PartVertices(GrubbyLook.Part part, BodyFrame frame, Vector3 bodyScale, float size, float longestLegs)
+        {
+            float blend = size, stretch = 1f;
+            float socketY = GrubbyPoint(part.socket, bodyScale).y;
+            if (part.type == BodyPartType.Legs)
+            {
+                float footY = frame.Bottom - (frame.Bottom - frame.Ground) * size / Mathf.Max(0.0001f, longestLegs);
+                float reach = socketY - footY;
+                float knubReach = socketY - GrubbyPoint(new Vector3(0f, part.knubBottom, 0f), bodyScale).y;
+                float grownReach = socketY - GrubbyPoint(new Vector3(0f, part.grownBottom, 0f), bodyScale).y;
+                blend = Mathf.Clamp01((reach - knubReach) / Mathf.Max(0.0001f, grownReach - knubReach));
+                if (blend >= 1f) stretch = reach / Mathf.Max(0.0001f, grownReach);
+            }
+
+            Vector3[] knub = part.knub.vertices, grown = part.grown.vertices;
+            List<Vector3> points = new List<Vector3>(knub.Length);
+            for (int i = 0; i < knub.Length; i++)
+            {
+                Vector3 point = GrubbyPoint(Vector3.LerpUnclamped(knub[i], grown[i], blend), bodyScale);
+                if (stretch != 1f && point.y < socketY) point.y = socketY - (socketY - point.y) * stretch;
+                points.Add(point);
+            }
+            return points;
+        }
+
         // Every part the genome has, blended between its knub and its full-grown shape by its size and merged into one
         // mesh with a submesh per colour. Legs are fitted to the ground instead: they grow until the foot reaches it,
         // and stretch for the rest if the body is held higher than a full-grown leg is long.
@@ -172,26 +360,8 @@ namespace Boreal.Animals
                 {
                     if (part.site != site || part.type != type || part.knub == null || part.grown == null) continue;
 
-                    float blend = size, stretch = 1f;
-                    float socketY = GrubbyPoint(part.socket, bodyScale).y;
-                    if (type == BodyPartType.Legs)
-                    {
-                        float footY = frame.Bottom - (frame.Bottom - frame.Ground) * size / Mathf.Max(0.0001f, longestLegs);
-                        float reach = socketY - footY;
-                        float knubReach = socketY - GrubbyPoint(new Vector3(0f, part.knubBottom, 0f), bodyScale).y;
-                        float grownReach = socketY - GrubbyPoint(new Vector3(0f, part.grownBottom, 0f), bodyScale).y;
-                        blend = Mathf.Clamp01((reach - knubReach) / Mathf.Max(0.0001f, grownReach - knubReach));
-                        if (blend >= 1f) stretch = reach / Mathf.Max(0.0001f, grownReach);
-                    }
-
-                    Vector3[] knub = part.knub.vertices, grown = part.grown.vertices;
                     int first = vertices.Count;
-                    for (int i = 0; i < knub.Length; i++)
-                    {
-                        Vector3 point = GrubbyPoint(Vector3.LerpUnclamped(knub[i], grown[i], blend), bodyScale);
-                        if (stretch != 1f && point.y < socketY) point.y = socketY - (socketY - point.y) * stretch;
-                        vertices.Add(point);
-                    }
+                    vertices.AddRange(PartVertices(part, frame, bodyScale, size, longestLegs));
 
                     for (int sub = 0; sub < part.knub.subMeshCount; sub++)
                     {
@@ -265,6 +435,20 @@ namespace Boreal.Animals
                 for (int i = 0; i < materials.Length; i++)
                     materials[i] = PartMaterial(body.sharedMaterial, PaletteColor(partPalettes[i], speciesColor));
                 partsRenderer.sharedMaterials = materials;
+
+                if (rigSkin != null)
+                {
+                    rigSkin.SetPropertyBlock(null);
+                    rigSkin.SetPropertyBlock(block, Mathf.Clamp(grubby.skinSubmesh, 0, rigSkin.sharedMaterials.Length - 1));
+                }
+                foreach (KeyValuePair<MeshRenderer, GrubbyLook.Palette[]> entry in rigPartPalettes)
+                {
+                    if (entry.Key == null) continue;
+                    Material[] partMaterials = new Material[entry.Value.Length];
+                    for (int i = 0; i < partMaterials.Length; i++)
+                        partMaterials[i] = PartMaterial(body.sharedMaterial, PaletteColor(entry.Value[i], speciesColor));
+                    entry.Key.sharedMaterials = partMaterials;
+                }
                 return;
             }
 
@@ -313,6 +497,11 @@ namespace Boreal.Animals
             {
                 Destroy(eyeshineMesh);
             }
+
+            foreach (Mesh mesh in rigPartMeshes)
+            {
+                if (mesh != null) Destroy(mesh);
+            }
         }
 
         void PreparePartsObject()
@@ -350,7 +539,16 @@ namespace Boreal.Animals
                                                 measuredGround ?? EstimatedGround(bounds.min.y * scale.y));
                 if (grubby != null)
                 {
-                    BuildGrubbyParts(frame, scale);
+                    heldAboveGround = Mathf.Max(0f, frame.Bottom - frame.Ground);
+                    if (IsAnimated) BuildRigParts(frame, scale);
+                    else BuildGrubbyParts(frame, scale);
+                    if (rigAnimator != null)
+                    {
+                        bool hasLegs = false;
+                        for (int s = 0; s < AnimalGenome.SiteCount; s++)
+                            hasLegs |= genome.GetPartType((BodySite)s) == BodyPartType.Legs && genome.GetPartSize((BodySite)s) > 0f;
+                        rigAnimator.SetBool(HasLegsId, hasLegs);
+                    }
                     BuildEyeshine(frame);
                     BuildGlow();
                     SetColor(speciesColor);
@@ -759,6 +957,30 @@ namespace Boreal.Animals
 
                 return longest;
             }
+        }
+    }
+
+    // The body a dead animal leaves for a moment while its death clip plays (AnimalBodyView.LeaveCorpse).
+    public sealed class GrubbyCorpse : MonoBehaviour
+    {
+        // Real seconds the body takes to fall to the ground off its legs.
+        const float FallSeconds = 0.5f;
+
+        public float until;
+        public float drop;
+        float fallen;
+
+        void Update()
+        {
+            if (Time.unscaledTime >= until)
+            {
+                Destroy(gameObject);
+                return;
+            }
+            if (fallen >= drop) return;
+            float step = Mathf.Min(drop - fallen, drop * Time.unscaledDeltaTime / FallSeconds);
+            transform.position += Vector3.down * step;
+            fallen += step;
         }
     }
 }

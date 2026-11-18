@@ -164,6 +164,33 @@ namespace Boreal.Animals.Editor
                     }
                 }
                 look.parts = parts.OrderBy(p => p.site).ThenBy(p => p.type).ThenBy(p => p.side).ToArray();
+                // The rig, and its socket bones' rest poses (the stored pose of an instance the Animator hasn't moved).
+                look.turned = turn;
+                look.rig = AssetDatabase.LoadAssetAtPath<GameObject>(GrubbyModelImport.Folder + "/Grubby.prefab");
+                if (look.rig != null)
+                {
+                    GameObject rigInstance = Object.Instantiate(look.rig);
+                    try
+                    {
+                        rigInstance.transform.SetPositionAndRotation(Vector3.zero, Quaternion.identity);
+                        rigInstance.transform.localScale = Vector3.one;
+                        List<string> names = new List<string>();
+                        List<Matrix4x4> rests = new List<Matrix4x4>();
+                        foreach (Transform bone in rigInstance.GetComponentsInChildren<Transform>(true))
+                        {
+                            if (!bone.name.StartsWith("socket_")) continue;
+                            names.Add(bone.name);
+                            rests.Add(rigInstance.transform.worldToLocalMatrix * bone.localToWorldMatrix);
+                        }
+                        look.socketNames = names.ToArray();
+                        look.socketRest = rests.ToArray();
+                    }
+                    finally
+                    {
+                        Object.DestroyImmediate(rigInstance);
+                    }
+                }
+
                 AssetDatabase.CreateAsset(look, LookPath);
                 foreach (Mesh mesh in meshes) AssetDatabase.AddObjectToAsset(mesh, look);
                 EditorUtility.SetDirty(look);
@@ -175,7 +202,8 @@ namespace Boreal.Animals.Editor
                 Debug.Log($"Built Grubby's look at {LookPath}: body {body.vertexCount} vertices, skin in submesh {look.skinSubmesh} of {body.subMeshCount}, {b.size.x:0.00} x {b.size.y:0.00} x " +
                           $"{b.size.z:0.00} m, base at y {b.min.y:0.00}{(turn ? ", turned to face +Z" : "")}; {parts.Count} parts " +
                           $"({string.Join(", ", parts.GroupBy(p => p.type).Select(g => $"{g.Key} x{g.Count()}"))}); " +
-                          $"head socket at {head.x:0.00}, {head.y:0.00}, {head.z:0.00}.");
+                          $"head socket at {head.x:0.00}, {head.y:0.00}, {head.z:0.00}; " +
+                          (look.rig != null ? $"rig {look.rig.name} with {look.socketNames.Length} sockets." : "no rig (Grubby.prefab missing), so it stays still."));
                 return true;
             }
             finally

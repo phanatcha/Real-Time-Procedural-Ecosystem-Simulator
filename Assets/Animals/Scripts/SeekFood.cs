@@ -257,6 +257,11 @@ namespace Boreal.Animals
                 ledgerEnergy = currentEnergy;
             }
             float unscaledDeltaTime = Time.unscaledDeltaTime;
+            if (bodyView != null && bodyView.IsAnimated)
+            {
+                float speedShare = agent != null && agent.speed > 0.01f ? agent.velocity.magnitude / agent.speed : 0f;
+                bodyView.Animate((int)currentState, speedShare, inWater);
+            }
             currentAge += deltaTime;
             if (growth < 1f) UpdateGrowth();
 

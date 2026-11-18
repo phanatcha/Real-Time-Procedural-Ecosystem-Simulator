@@ -52,6 +52,37 @@ namespace Boreal.Animals
         public int skinSubmesh;
         public Part[] parts;
 
+        // The rigged, animated Grubby (Grubby.prefab, with its Animator and clips), and whether the body above was
+        // turned round from it to face +Z. Without a rig the body is drawn still.
+        public GameObject rig;
+        public bool turned;
+        // Each socket bone's rest pose in the rig's own space, by name, so parts can be laid out on the moving bones.
+        public string[] socketNames;
+        public Matrix4x4[] socketRest;
+
+        public bool TryGetSocketRest(string socketName, out Matrix4x4 rest)
+        {
+            int index = socketNames != null ? System.Array.IndexOf(socketNames, socketName) : -1;
+            rest = index >= 0 && socketRest != null && index < socketRest.Length ? socketRest[index] : Matrix4x4.identity;
+            return index >= 0;
+        }
+
+        // The rig's socket bone a part grows from: socket_head, socket_back, socket_tail, or socket_front, _middle and
+        // _rear with .L (side -1) or .R (side 1).
+        public static string SocketName(BodySite site, int side)
+        {
+            string pair = side < 0 ? ".L" : ".R";
+            switch (site)
+            {
+                case BodySite.Head: return "socket_head";
+                case BodySite.Back: return "socket_back";
+                case BodySite.Tail: return "socket_tail";
+                case BodySite.FrontPair: return "socket_front" + pair;
+                case BodySite.MiddlePair: return "socket_middle" + pair;
+                default: return "socket_rear" + pair;
+            }
+        }
+
         // Off for a test or a scene that wants the plain capsules.
         public static bool Enabled = true;
 

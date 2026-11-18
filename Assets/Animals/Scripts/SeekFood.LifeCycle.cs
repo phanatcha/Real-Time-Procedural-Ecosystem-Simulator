@@ -140,6 +140,7 @@ namespace Boreal.Animals
             {
                 Debug.Log($"{gameObject.name} died from {cause}.");
             }
+            if (bodyView != null) bodyView.LeaveCorpse();
             Destroy(gameObject);
         }
 

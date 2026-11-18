@@ -165,6 +165,7 @@ namespace Boreal.Animals
                 SetEnergy(Mathf.Max(0f, currentEnergy - attackEnergyCost), EnergyFlow.Attacks);
                 currentStamina = Mathf.Max(0f, currentStamina - attackStaminaCost);
                 attackCooldownTimer += cooldown;
+                bodyView?.PlayAction("Bite");
                 prey.TakeDamage(strength, this);
                 attacksResolved++;
             }
@@ -386,6 +387,7 @@ namespace Boreal.Animals
             {
                 return;
             }
+            bodyView?.PlayAction("Hurt");
 
             if (IsOtherLivingAnimal(attacker))
             {

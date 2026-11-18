@@ -1202,6 +1202,47 @@ namespace Boreal.Animals.Tests
 
         static Vector3? LocateTestWater(Vector3 position, float radius) => TestWater;
 
+        // Animals are drawn by Grubby's rig: its clips play, its parts ride on their socket bones, and a dead animal leaves
+        // its body a moment to play the death clip.
+        [UnityTest]
+        public IEnumerator GrubbysRigCarriesThePartsAndLeavesABodyWhenItDies()
+        {
+            EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
+            yield return new EnterPlayMode(ReloadsDomain);
+            if (GrubbyLook.Current == null || GrubbyLook.Current.rig == null) Assert.Ignore("Grubby's look isn't built.");
+
+            BakeNavMesh(CreateGround(Vector3.zero, 60f));
+            StartSimulation();
+            AnimalGenome genome = Genome();
+            genome.SetPart(BodySite.MiddlePair, BodyPartType.Legs, 1f);
+            genome.SetPart(BodySite.Back, BodyPartType.Plates, 1f);
+            SeekFood animal = CreateAnimal(Vector3.zero, genome, energyFraction: 0.9f, age: 50f);
+            for (int i = 0; i < 40; i++) yield return null;
+
+            Transform rig = animal.transform.Find("Grubby Rig");
+            Assert.IsNotNull(rig, "The animal has no rig.");
+            Assert.IsNotNull(rig.GetComponentInChildren<Animator>(), "The rig has no Animator.");
+            Assert.IsFalse(animal.GetComponent<MeshRenderer>().enabled, "The still body is drawn as well as the rig.");
+            int parts = 0;
+            foreach (MeshFilter part in rig.GetComponentsInChildren<MeshFilter>())
+            {
+                if (part.name != "Grubby Part") continue;
+                parts++;
+                StringAssert.StartsWith("socket_", part.transform.parent.name);
+                Assert.Greater(part.sharedMesh.vertexCount, 0);
+            }
+            Assert.AreEqual(3, parts, "Expected a part on each middle leg socket and one on the back.");
+
+            animal.TakeDamage(10000f);
+            yield return null;
+            GameObject corpse = GameObject.Find("Grubby Corpse");
+            Assert.IsNotNull(corpse, "The dead animal left no body.");
+            Assert.IsTrue(animal == null, "The animal itself wasn't removed.");
+            float deadline = Time.unscaledTime + 5f;
+            while (corpse != null && Time.unscaledTime < deadline) yield return null;
+            Assert.IsTrue(corpse == null, "The body was never cleared away.");
+        }
+
         static SeekFood Child(SeekFood parent)
         {
             foreach (SeekFood animal in Object.FindObjectsByType<SeekFood>(FindObjectsSortMode.None))
@@ -1346,8 +1387,19 @@ namespace Boreal.Animals.Tests
             return record;
         }
 
+        // The merged parts mesh, or on an animal drawn by Grubby's rig, the first part on a socket bone.
         static Mesh PartsMesh(SeekFood animal)
         {
+            Transform rig = animal.transform.Find("Grubby Rig");
+            if (rig != null)
+            {
+                foreach (MeshFilter part in rig.GetComponentsInChildren<MeshFilter>())
+                {
+                    if (part.name == "Grubby Part" && part.sharedMesh != null && part.sharedMesh.vertexCount > 0) return part.sharedMesh;
+                }
+                return null;
+            }
+
             Transform parts = animal.transform.Find("Body Parts");
             MeshFilter filter = parts != null ? parts.GetComponent<MeshFilter>() : null;
             return filter != null ? filter.sharedMesh : null;

@@ -179,6 +179,7 @@ namespace Boreal.Animals
             float digestibleEnergy = rawNutrition * GetDigestionEfficiency(foodType);
             float acceptedEnergy = Mathf.Min(maxEnergy - currentEnergy, digestibleEnergy);
             SetEnergy(currentEnergy + acceptedEnergy, foodType == FoodType.Plant ? EnergyFlow.Plants : EnergyFlow.Meat);
+            bodyView?.PlayAction("Eat");
             EnergyLedger.CheckMeal(rawNutrition, acceptedEnergy, name);
 
             if (SpeciesManager.Instance != null)
